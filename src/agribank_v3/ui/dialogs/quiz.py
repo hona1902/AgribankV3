@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 from importlib.resources import files
 from pathlib import Path
 import random
@@ -8,7 +9,7 @@ import shutil
 import sqlite3
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -89,6 +90,100 @@ class ExpandingTextEdit(QTextEdit):
     def resizeEvent(self, event: object) -> None:
         super().resizeEvent(event)
         QTimer.singleShot(0, self._fit_to_document)
+
+
+class AnswerLookupResultItem(QFrame):
+    selected = Signal(int)
+    double_clicked = Signal(int)
+
+    def __init__(
+        self,
+        row: int,
+        question: Question,
+        correct_text: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.row = row
+        self.question_id = question.id
+        self.setObjectName("AnswerResultItem")
+        self.setProperty("selected", False)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+
+        question_row = QHBoxLayout()
+        question_row.setSpacing(16)
+        question_chip = QLabel("●  Câu hỏi")
+        question_chip.setObjectName("AnswerLookupChip")
+        question_chip.setFixedWidth(132)
+        question_text = QLabel(question.text)
+        question_text.setObjectName("AnswerLookupQuestion")
+        question_text.setWordWrap(True)
+        question_text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        question_row.addWidget(question_chip, alignment=Qt.AlignmentFlag.AlignTop)
+        question_row.addWidget(question_text, stretch=1)
+        layout.addLayout(question_row)
+
+        divider = QFrame()
+        divider.setObjectName("AnswerLookupDivider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(divider)
+
+        answer_row = QHBoxLayout()
+        answer_row.setSpacing(16)
+        answer_chip = QLabel("✓  Đáp án đúng")
+        answer_chip.setObjectName("AnswerLookupChip")
+        answer_chip.setFixedWidth(132)
+        answer_text = QLabel(
+            f"Đáp án đúng {question.correct_answer}: {correct_text}"
+        )
+        answer_text.setObjectName("AnswerLookupAnswer")
+        answer_text.setWordWrap(True)
+        answer_text.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        answer_row.addWidget(answer_chip, alignment=Qt.AlignmentFlag.AlignTop)
+        answer_row.addWidget(answer_text, stretch=1)
+        layout.addLayout(answer_row)
+
+        for child in (
+            question_chip,
+            question_text,
+            divider,
+            answer_chip,
+            answer_text,
+        ):
+            child.setCursor(Qt.CursorShape.PointingHandCursor)
+            child.installEventFilter(self)
+
+    def set_selected(self, selected: bool) -> None:
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def eventFilter(self, watched: object, event: object) -> bool:
+        if isinstance(event, QEvent):
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self.selected.emit(self.row)
+                return False
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                self.selected.emit(self.row)
+                self.double_clicked.emit(self.row)
+                return True
+        return super().eventFilter(watched, event)
+
+    def mousePressEvent(self, event: object) -> None:
+        self.selected.emit(self.row)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: object) -> None:
+        self.double_clicked.emit(self.row)
+        super().mouseDoubleClickEvent(event)
 
 
 class QuestionReviewDialog(QDialog):
@@ -225,6 +320,7 @@ class QuizWidget(QWidget):
         self.pages.addTab(self._build_setup_page(), "Cài đặt đề cương")
         self.pages.addTab(self._build_quiz_page(), "Trả Lời Câu Hỏi")
         self.pages.addTab(self._build_result_page(), "Kết Quả Trả Lời")
+        self.pages.addTab(self._build_answer_lookup_page(), "Tra Cứu Đáp Án")
         self.pages.addTab(self._build_data_management_page(), "Quản Lý Dữ Liệu")
         self.pages.setTabEnabled(1, False)
         self.pages.setTabEnabled(2, False)
@@ -760,6 +856,139 @@ class QuizWidget(QWidget):
         actions.addWidget(new_button)
         actions.addWidget(close_button)
         layout.addLayout(actions)
+        return page
+
+    def _build_answer_lookup_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("AnswerLookupPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(24, 22, 24, 24)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        header_icon = QLabel("⌕")
+        header_icon.setObjectName("AnswerLookupHeaderIcon")
+        header_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_icon.setFixedSize(48, 48)
+        header_text = QVBoxLayout()
+        header_text.setSpacing(2)
+        title = QLabel("Tra cứu đáp án")
+        title.setObjectName("AnswerLookupTitle")
+        description = QLabel(
+            "Nhập vài từ trong câu hỏi, đáp án hoặc trích dẫn để tìm nhanh "
+            "trong ngân hàng câu hỏi."
+        )
+        description.setObjectName("AnswerLookupDescription")
+        header_text.addWidget(title)
+        header_text.addWidget(description)
+        header.addWidget(header_icon)
+        header.addLayout(header_text, stretch=1)
+        layout.addLayout(header)
+
+        search_card = QFrame()
+        search_card.setObjectName("AnswerSearchCard")
+        self._apply_card_shadow(search_card)
+        search_layout = QHBoxLayout(search_card)
+        search_layout.setContentsMargins(28, 24, 28, 24)
+        search_layout.setSpacing(18)
+
+        search_input_wrap = QFrame()
+        search_input_wrap.setObjectName("AnswerSearchInputWrap")
+        search_input_layout = QHBoxLayout(search_input_wrap)
+        search_input_layout.setContentsMargins(16, 0, 16, 0)
+        search_input_layout.setSpacing(12)
+        search_icon = QLabel("⌕")
+        search_icon.setObjectName("AnswerSearchInlineIcon")
+        search_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        search_icon.setFixedWidth(28)
+        self.answer_lookup_edit = QLineEdit()
+        self.answer_lookup_edit.setObjectName("AnswerLookupEdit")
+        self.answer_lookup_edit.setPlaceholderText(
+            "Ví dụ: Quy định 641, IPCAS, tra soát, tín dụng..."
+        )
+        self.answer_lookup_timer = QTimer(self)
+        self.answer_lookup_timer.setSingleShot(True)
+        self.answer_lookup_timer.setInterval(300)
+        self.answer_lookup_timer.timeout.connect(self.search_answers)
+        self.answer_lookup_edit.textChanged.connect(self.schedule_answer_lookup)
+        self.answer_lookup_edit.returnPressed.connect(self.search_answers)
+        self.answer_lookup_clear_button = QPushButton("Xóa tìm kiếm")
+        self.answer_lookup_clear_button.setObjectName("AnswerLookupClearButton")
+        self.answer_lookup_clear_button.clicked.connect(self.clear_answer_lookup)
+        search_input_layout.addWidget(search_icon)
+        search_input_layout.addWidget(self.answer_lookup_edit, stretch=1)
+        search_layout.addWidget(search_input_wrap, stretch=1)
+        search_layout.addWidget(self.answer_lookup_clear_button)
+        layout.addWidget(search_card)
+
+        self.answer_lookup_status = QLabel(
+            "Nhập từ khóa để hệ thống tự tra cứu. Nhấp đúp vào dòng để xem chi tiết."
+        )
+        self.answer_lookup_status.setObjectName("AnswerLookupStatus")
+        self.answer_lookup_status.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(self.answer_lookup_status)
+
+        result_card = QFrame()
+        result_card.setObjectName("AnswerResultCard")
+        self._apply_card_shadow(result_card)
+        result_layout = QVBoxLayout(result_card)
+        result_layout.setContentsMargins(22, 18, 22, 18)
+        result_layout.setSpacing(16)
+
+        result_header = QHBoxLayout()
+        result_header.setSpacing(10)
+        result_icon = QLabel("≡")
+        result_icon.setObjectName("AnswerResultHeaderIcon")
+        result_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        result_icon.setFixedSize(28, 28)
+        result_title = QLabel("Danh sách kết quả")
+        result_title.setObjectName("AnswerResultTitle")
+        self.answer_lookup_badge = QLabel("0 kết quả")
+        self.answer_lookup_badge.setObjectName("AnswerResultBadge")
+        self.answer_lookup_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        result_header.addWidget(result_icon)
+        result_header.addWidget(result_title)
+        result_header.addStretch()
+        result_header.addWidget(self.answer_lookup_badge)
+        result_layout.addLayout(result_header)
+
+        self.answer_lookup_scroll = QScrollArea()
+        self.answer_lookup_scroll.setObjectName("AnswerResultScroll")
+        self.answer_lookup_scroll.setWidgetResizable(True)
+        self.answer_lookup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.answer_lookup_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.answer_lookup_results_widget = QWidget()
+        self.answer_lookup_results_widget.setObjectName("AnswerResultsViewport")
+        self.answer_lookup_results_layout = QVBoxLayout(
+            self.answer_lookup_results_widget
+        )
+        self.answer_lookup_results_layout.setContentsMargins(0, 0, 0, 0)
+        self.answer_lookup_results_layout.setSpacing(12)
+        self.answer_lookup_empty_label = QLabel(
+            "Chưa có kết quả. Nhập từ khóa để bắt đầu tra cứu."
+        )
+        self.answer_lookup_empty_label.setObjectName("AnswerLookupEmpty")
+        self.answer_lookup_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.answer_lookup_results_layout.addWidget(self.answer_lookup_empty_label)
+        self.answer_lookup_results_layout.addStretch()
+        self.answer_lookup_scroll.setWidget(self.answer_lookup_results_widget)
+        result_layout.addWidget(self.answer_lookup_scroll, stretch=1)
+        layout.addWidget(result_card, stretch=1)
+
+        self.answer_lookup_questions: list[Question] = []
+        self.answer_lookup_result_items: list[AnswerLookupResultItem] = []
+        self.answer_lookup_selected_row = -1
+
+        # Giữ control cũ ở dạng ẩn để không làm lỗi mã ngoài nếu có tham chiếu.
+        self.answer_lookup_table = QTableWidget(0, 1)
+        self.answer_lookup_table.setObjectName("AnswerLookupTable")
+        self.answer_lookup_table.setHorizontalHeaderLabels(
+            ["Câu hỏi và đáp án đúng"]
+        )
+        self.answer_lookup_table.hide()
         return page
 
     def _build_data_management_page(self) -> QWidget:
@@ -2230,6 +2459,134 @@ class QuizWidget(QWidget):
         dialog = QuestionReviewDialog(
             question,
             self.session.answers.get(question.id, ""),
+            row + 1,
+            self,
+        )
+        dialog.exec()
+
+    def schedule_answer_lookup(self) -> None:
+        if hasattr(self, "answer_lookup_timer"):
+            self.answer_lookup_timer.start()
+
+    def search_answers(self) -> None:
+        if hasattr(self, "answer_lookup_timer"):
+            self.answer_lookup_timer.stop()
+        keyword = self.answer_lookup_edit.text().strip()
+        if len(keyword) < 2:
+            self._clear_answer_lookup_results()
+            self.answer_lookup_status.setText(
+                "Nhập ít nhất 2 ký tự để tra cứu đáp án."
+            )
+            self.answer_lookup_badge.setText("0 kết quả")
+            return
+        questions = self.database.search_questions(keyword, limit=200)
+        self._render_answer_lookup_results(questions)
+        safe_keyword = escape(keyword)
+        count_text = f"{len(questions):,}".replace(",", ".")
+        suffix = " Kết quả đang giới hạn 200 dòng." if len(questions) >= 200 else ""
+        self.answer_lookup_status.setText(
+            "Tìm thấy "
+            f"<b style='color:#8B1743;'>{count_text}</b>"
+            f" câu hỏi phù hợp với "
+            f"<b style='color:#8B1743;'>“{safe_keyword}”</b>."
+            + suffix
+        )
+        self.answer_lookup_badge.setText(f"{count_text} kết quả")
+
+    def _clear_answer_lookup_results(self) -> None:
+        self.answer_lookup_questions = []
+        self.answer_lookup_result_items = []
+        self.answer_lookup_selected_row = -1
+        self.answer_lookup_table.setRowCount(0)
+        while self.answer_lookup_results_layout.count():
+            item = self.answer_lookup_results_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.answer_lookup_empty_label = QLabel(
+            "Chưa có kết quả. Nhập từ khóa để bắt đầu tra cứu."
+        )
+        self.answer_lookup_empty_label.setObjectName("AnswerLookupEmpty")
+        self.answer_lookup_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.answer_lookup_results_layout.addWidget(self.answer_lookup_empty_label)
+        self.answer_lookup_results_layout.addStretch()
+
+    def _render_answer_lookup_results(self, questions: list[Question]) -> None:
+        self._clear_answer_lookup_results()
+        self.answer_lookup_questions = questions
+        self.answer_lookup_table.setRowCount(len(questions))
+        while self.answer_lookup_results_layout.count():
+            item = self.answer_lookup_results_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not questions:
+            no_result = QLabel("Không tìm thấy câu hỏi phù hợp.")
+            no_result.setObjectName("AnswerLookupEmpty")
+            no_result.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.answer_lookup_results_layout.addWidget(no_result)
+            self.answer_lookup_results_layout.addStretch()
+            return
+        for row, question in enumerate(questions):
+            correct_text = question.options.get(question.correct_answer, "")
+            table_item = QTableWidgetItem(
+                f"{question.text}\n\n"
+                f"Đáp án đúng {question.correct_answer}: {correct_text}"
+            )
+            table_item.setData(Qt.ItemDataRole.UserRole, question.id)
+            self.answer_lookup_table.setItem(row, 0, table_item)
+
+            result_item = AnswerLookupResultItem(
+                row,
+                question,
+                correct_text,
+                self.answer_lookup_results_widget,
+            )
+            result_item.selected.connect(self.select_answer_lookup_result)
+            result_item.double_clicked.connect(self.open_answer_lookup_question)
+            self.answer_lookup_result_items.append(result_item)
+            self.answer_lookup_results_layout.addWidget(result_item)
+        self.answer_lookup_results_layout.addStretch()
+        self.select_answer_lookup_result(0)
+
+    def select_answer_lookup_result(self, row: int) -> None:
+        if not (0 <= row < len(self.answer_lookup_result_items)):
+            return
+        self.answer_lookup_selected_row = row
+        for index, item in enumerate(self.answer_lookup_result_items):
+            item.set_selected(index == row)
+
+    def clear_answer_lookup(self) -> None:
+        if hasattr(self, "answer_lookup_timer"):
+            self.answer_lookup_timer.stop()
+        self.answer_lookup_edit.blockSignals(True)
+        self.answer_lookup_edit.clear()
+        self.answer_lookup_edit.blockSignals(False)
+        self._clear_answer_lookup_results()
+        self.answer_lookup_status.setText(
+            "Nhập từ khóa để hệ thống tự tra cứu. Nhấp đúp vào dòng để xem chi tiết."
+        )
+        self.answer_lookup_badge.setText("0 kết quả")
+        self.answer_lookup_edit.setFocus()
+
+    def open_answer_lookup_question(self, row: int | None = None, *_: object) -> None:
+        if row is None or not isinstance(row, int):
+            row = self.answer_lookup_selected_row
+        if not (0 <= row < len(self.answer_lookup_questions)):
+            return
+        self.select_answer_lookup_result(row)
+        question_id = self.answer_lookup_questions[row].id
+        question = self.database.question_by_id(int(question_id))
+        if question is None:
+            QMessageBox.warning(
+                self,
+                "Tra cứu đáp án",
+                "Câu hỏi này không còn tồn tại trong dữ liệu hiện tại.",
+            )
+            return
+        dialog = QuestionReviewDialog(
+            question,
+            "",
             row + 1,
             self,
         )

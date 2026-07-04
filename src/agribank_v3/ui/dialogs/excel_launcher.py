@@ -39,7 +39,7 @@ class ExcelLauncherDialog(QDialog):
         self.launched_installation: ExcelInstallation | None = None
         self.deadline = 0.0
 
-        self.setWindowTitle("Mở Microsoft Excel")
+        self.setWindowTitle("Chọn Microsoft Excel")
         self.setModal(True)
         self.setMinimumWidth(590)
 
@@ -52,8 +52,9 @@ class ExcelLauncherDialog(QDialog):
         layout.addWidget(title)
 
         description = QLabel(
-            "AgribankV3 chưa tìm thấy phiên Excel đang chạy. Chọn một phiên bản "
-            "đã cài; ứng dụng sẽ mở Excel và tạo workbook mới."
+            "Chọn phiên bản Excel muốn dùng. Nếu phiên bản đó đang mở, ứng dụng "
+            "sẽ kết nối vào phiên hiện có; nếu chưa mở, ứng dụng sẽ mở Excel và "
+            "tạo workbook mới."
         )
         description.setObjectName("MutedText")
         description.setWordWrap(True)
@@ -76,9 +77,9 @@ class ExcelLauncherDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         buttons.rejected.connect(self.reject)
-        self.open_button = QPushButton("Mở Excel và tạo workbook")
+        self.open_button = QPushButton("Kết nối / mở Excel")
         self.open_button.setObjectName("PrimaryButton")
-        self.open_button.clicked.connect(self.open_excel)
+        self.open_button.clicked.connect(self.connect_or_open_excel)
         buttons.addButton(self.open_button, QDialogButtonBox.ButtonRole.AcceptRole)
         layout.addWidget(buttons)
 
@@ -101,13 +102,42 @@ class ExcelLauncherDialog(QDialog):
         installation = self.selected_installation()
         self.path_label.setText(str(installation.path) if installation else "")
 
-    def open_excel(self) -> None:
+    def connect_or_open_excel(self) -> None:
         installation = self.selected_installation()
         if installation is None:
             return
+        self.open_button.setEnabled(False)
+        self.version_combo.setEnabled(False)
+        self.status_label.setText("Đang kiểm tra phiên Excel đã mở…")
+        self.status_label.setStyleSheet("color: #8b5c08; font-weight: 600;")
+        major_version = installation.major_version or None
+        if self.launch_handle and self.launched_installation == installation:
+            self.try_connect_once()
+            return
         try:
+            self.context = self.excel_service.connect(
+                retry_attempts=1,
+                create_workbook_if_missing=True,
+                required_major_version=major_version,
+            )
+        except ExcelConnectionError:
+            self.context = None
+        if self.context is not None:
+            self.status_label.setStyleSheet("color: #257047; font-weight: 600;")
+            self.status_label.setText(
+                f"Đã kết nối {self.context.excel_name}: {self.context.workbook}"
+            )
+            self.accept()
+            return
+
+        try:
+            xlstart_report = None
+            if installation.major_version and installation.major_version <= 14:
+                xlstart_report = self.excel_service.install_tool_addins_to_xlstart()
             self.launch_handle = launch_excel(installation)
         except OSError as exc:
+            self.open_button.setEnabled(True)
+            self.version_combo.setEnabled(True)
             QMessageBox.warning(
                 self,
                 "Không thể mở Excel",
@@ -116,14 +146,61 @@ class ExcelLauncherDialog(QDialog):
             return
 
         self.launched_installation = installation
-        self.open_button.setEnabled(False)
-        self.version_combo.setEnabled(False)
-        self.status_label.setText(
-            "Đang chờ Excel khởi động và tạo workbook mới…"
-        )
+        if xlstart_report and xlstart_report.failed:
+            failed = "; ".join(
+                f"{name}: {reason}" for name, reason in xlstart_report.failed
+            )
+            self.status_label.setText(
+                f"Không cài được add-in vào XLSTART: {failed}"
+            )
+        elif xlstart_report and xlstart_report.discovered:
+            self.status_label.setText("Đang mở Excel…")
+        else:
+            self.status_label.setText("Đang mở Excel…")
         self.status_label.setStyleSheet("color: #8b5c08; font-weight: 600;")
-        self.deadline = time.monotonic() + 20
+        if installation.major_version <= 14:
+            self.open_button.setText("Kết nối lại Excel 2010")
+            self.open_button.setEnabled(True)
+            self.version_combo.setEnabled(False)
+            self.status_label.setText(
+                "Excel 2010 đã mở. Bấm “Kết nối lại Excel 2010” khi Excel sẵn sàng."
+            )
+            return
+        timeout_seconds = 45 if installation.major_version <= 14 else 25
+        self.deadline = time.monotonic() + timeout_seconds
         self.timer.start()
+
+    def try_connect_once(self) -> None:
+        try:
+            self.context = self.excel_service.connect(
+                retry_attempts=1,
+                create_workbook_if_missing=True,
+                required_major_version=(
+                    self.launched_installation.major_version
+                    if self.launched_installation
+                    else None
+                ),
+                preferred_workbook_path=(
+                    self.launch_handle.bootstrap_workbook
+                    if self.launch_handle
+                    else None
+                ),
+            )
+        except ExcelConnectionError as exc:
+            self.open_button.setEnabled(True)
+            self.version_combo.setEnabled(False)
+            self.status_label.setStyleSheet("color: #9b2c2c; font-weight: 600;")
+            self.status_label.setText(
+                f"Excel đã mở nhưng chưa sẵn sàng: {exc}\n"
+                "Hãy đóng hộp thoại trong Excel rồi bấm “Kết nối lại Excel 2010”. "
+                "Nếu Excel 2010 đang báo Product Activation Failed hoặc First Run, "
+                "cần xử lý thông báo đó trước."
+            )
+            return
+
+        self.status_label.setStyleSheet("color: #257047; font-weight: 600;")
+        self.status_label.setText("Kết nối thành công.")
+        self.accept()
 
     def try_connect(self) -> None:
         try:
@@ -133,6 +210,11 @@ class ExcelLauncherDialog(QDialog):
                 required_major_version=(
                     self.launched_installation.major_version
                     if self.launched_installation
+                    else None
+                ),
+                preferred_workbook_path=(
+                    self.launch_handle.bootstrap_workbook
+                    if self.launch_handle
                     else None
                 ),
             )
@@ -145,13 +227,13 @@ class ExcelLauncherDialog(QDialog):
             self.status_label.setStyleSheet("color: #9b2c2c; font-weight: 600;")
             self.status_label.setText(
                 f"Excel đã mở nhưng chưa sẵn sàng: {exc}\n"
-                "Hãy đóng các hộp thoại trong Excel rồi thử kết nối lại."
+                "Hãy đóng các hộp thoại trong Excel rồi thử kết nối lại. "
+                "Với Excel 2010, cần xử lý Product Activation/First Run nếu "
+                "Excel đang hiện thông báo kích hoạt hoặc cấu hình ban đầu."
             )
             return
 
         self.timer.stop()
         self.status_label.setStyleSheet("color: #257047; font-weight: 600;")
-        self.status_label.setText(
-            f"Đã kết nối {self.context.excel_name}: {self.context.workbook}"
-        )
+        self.status_label.setText("Kết nối thành công.")
         self.accept()

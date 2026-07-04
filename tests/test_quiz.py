@@ -131,7 +131,7 @@ class QuizDatabaseTests(unittest.TestCase):
     def test_business_topic_question_crud_and_saved_quotas(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = QuizDatabase(
-                sqlite_path=Path(directory) / "quiz.sqlite3",
+                sqlite_path=Path(directory) / "quiz.db",
                 access_path=Path(directory) / "missing.mdb",
             )
             database.save_business_topic("TD", "Tín dụng")
@@ -168,7 +168,7 @@ class QuizDatabaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             database = QuizDatabase(
-                sqlite_path=root / "quiz.sqlite3",
+                sqlite_path=root / "quiz.db",
                 access_path=root / "missing.mdb",
             )
             workbook = Workbook()
@@ -203,7 +203,7 @@ class QuizDatabaseTests(unittest.TestCase):
     def test_bulk_delete_questions_by_business(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = QuizDatabase(
-                sqlite_path=Path(directory) / "quiz.sqlite3",
+                sqlite_path=Path(directory) / "quiz.db",
                 access_path=Path(directory) / "missing.mdb",
             )
             for code in ("A", "B"):
@@ -229,7 +229,7 @@ class QuizDatabaseTests(unittest.TestCase):
     def test_questions_by_quotas_combines_topic_codes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = QuizDatabase(
-                sqlite_path=Path(directory) / "quiz.sqlite3",
+                sqlite_path=Path(directory) / "quiz.db",
                 access_path=Path(directory) / "missing.mdb",
             )
             with closing(database.connect()) as connection, connection:
@@ -263,7 +263,7 @@ class QuizDatabaseTests(unittest.TestCase):
     def test_questions_by_subject_quotas_keeps_subjects_separate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = QuizDatabase(
-                sqlite_path=Path(directory) / "quiz.sqlite3",
+                sqlite_path=Path(directory) / "quiz.db",
                 access_path=Path(directory) / "missing.mdb",
             )
             database.save_business_topic("KTC", "Kiến thức chung")
@@ -287,7 +287,7 @@ class QuizDatabaseTests(unittest.TestCase):
     def test_attempt_and_answers_are_persisted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database = QuizDatabase(
-                sqlite_path=Path(directory) / "quiz.sqlite3",
+                sqlite_path=Path(directory) / "quiz.db",
                 access_path=Path(directory) / "missing.mdb",
             )
             with closing(database.connect()) as connection, connection:

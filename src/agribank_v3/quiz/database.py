@@ -16,6 +16,7 @@ from pywintypes import com_error
 
 from agribank_v3.quiz.models import Question, QuizResult
 from agribank_v3.quiz.session import QuizSession
+from agribank_v3.runtime_paths import access_database_path, application_root
 
 
 class QuizDatabaseError(RuntimeError):
@@ -34,23 +35,37 @@ class SyncResult:
 class QuizDatabase:
     SCHEMA_VERSION = 4
     ACCESS_PROVIDERS = ("Microsoft.ACE.OLEDB.12.0", "Microsoft.ACE.OLEDB.16.0")
+    DEFAULT_DATABASE_NAME = "quiz.db"
+    LEGACY_DATABASE_NAME = "agribank_v3.sqlite3"
+    MIGRATED_TABLES = (
+        "business_topics",
+        "question_topics",
+        "questions",
+        "quiz_settings",
+        "employees",
+        "quiz_attempts",
+        "quiz_answers",
+        "sync_metadata",
+    )
 
     def __init__(
         self,
         sqlite_path: Path | None = None,
         access_path: Path | None = None,
     ) -> None:
-        app_root = Path(__file__).resolve().parents[3]
-        project_root = Path(__file__).resolve().parents[4]
-        self.sqlite_path = sqlite_path or app_root / "data" / "agribank_v3.sqlite3"
+        app_root = application_root()
+        self.legacy_sqlite_path = app_root / "data" / self.LEGACY_DATABASE_NAME
+        self.sqlite_path = sqlite_path or app_root / "data" / self.DEFAULT_DATABASE_NAME
         access_override = os.environ.get("AGRIBANKV3_ACCESS_DB")
         self.access_path = (
             Path(access_override)
             if access_override
-            else access_path or project_root / "Data" / "AgribankMenuData.mdb"
+            else access_path or access_database_path()
         )
         self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize_schema()
+        if sqlite_path is None:
+            self._migrate_from_legacy_database()
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.sqlite_path)
@@ -272,7 +287,7 @@ class QuizDatabase:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             shutil.copy2(
                 self.sqlite_path,
-                backup_directory / f"agribank_v3-{stamp}.sqlite3",
+                backup_directory / f"quiz-{stamp}.db",
             )
 
         with self._database() as database:
@@ -1169,6 +1184,76 @@ class QuizDatabase:
                     "WHERE legacy_access_id IS NOT NULL"
                 ).fetchone()[0]
             )
+
+    def _migrate_from_legacy_database(self) -> None:
+        if not self.legacy_sqlite_path.is_file():
+            return
+        if self.legacy_sqlite_path.resolve() == self.sqlite_path.resolve():
+            return
+        database = self.connect()
+        try:
+            database.execute("PRAGMA foreign_keys = OFF")
+            if self._table_has_rows(database, "main", "questions"):
+                return
+            database.execute(
+                "ATTACH DATABASE ? AS legacy",
+                (str(self.legacy_sqlite_path),),
+            )
+            try:
+                for table_name in self.MIGRATED_TABLES:
+                    if not self._table_exists(database, "legacy", table_name):
+                        continue
+                    database.execute(
+                        f"""
+                        INSERT OR IGNORE INTO {table_name}
+                        SELECT * FROM legacy.{table_name}
+                        """
+                    )
+                database.commit()
+            except sqlite3.Error:
+                database.rollback()
+                raise
+            finally:
+                database.execute("DETACH DATABASE legacy")
+        except sqlite3.Error as exc:
+            raise QuizDatabaseError(
+                f"Không thể chuyển dữ liệu trắc nghiệm từ database cũ: {exc}"
+            ) from exc
+        finally:
+            database.close()
+
+    @staticmethod
+    def _table_exists(
+        database: sqlite3.Connection,
+        schema_name: str,
+        table_name: str,
+    ) -> bool:
+        return (
+            database.execute(
+                f"""
+                SELECT 1
+                FROM {schema_name}.sqlite_master
+                WHERE type = 'table' AND name = ?
+                """,
+                (table_name,),
+            ).fetchone()
+            is not None
+        )
+
+    @classmethod
+    def _table_has_rows(
+        cls,
+        database: sqlite3.Connection,
+        schema_name: str,
+        table_name: str,
+    ) -> bool:
+        if not cls._table_exists(database, schema_name, table_name):
+            return False
+        return int(
+            database.execute(
+                f"SELECT COUNT(*) FROM {schema_name}.{table_name}"
+            ).fetchone()[0]
+        ) > 0
 
     def _metadata(self, key: str) -> str:
         with self._database() as database:

@@ -43,15 +43,21 @@ class CaseConversionDialog(QDialog):
         context_frame.setObjectName("MetricCard")
         context_layout = QVBoxLayout(context_frame)
         context_layout.setContentsMargins(14, 10, 14, 10)
-        context_layout.addWidget(
-            QLabel(
+        if excel_service.is_system_worksheet(context):
+            context_text = (
+                f"Phiên bản: <b>{context.excel_name}</b> "
+                "(workbook hệ thống, thông tin sheet đã ẩn)"
+            )
+        else:
+            context_text = (
                 f"Phiên bản: <b>{context.excel_name}</b> "
                 f"(COM {context.excel_version})<br>"
                 f"Workbook: <b>{context.workbook}</b><br>"
                 f"Sheet: <b>{context.worksheet}</b><br>"
-                f"Vùng chọn: <b>{context.selection}</b> ({context.cell_count:,} ô)"
+                f"Vùng chọn: <b>{context.selection}</b> "
+                f"({context.cell_count:,} ô)"
             )
-        )
+        context_layout.addWidget(QLabel(context_text))
         layout.addWidget(context_frame)
 
         instruction = QLabel(

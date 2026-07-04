@@ -16,6 +16,13 @@ Vertical slice đầu tiên đã hoạt động:
 - Mặc định giữ Excel trong cửa sổ riêng để Ribbon, nhập liệu và hộp thoại hoạt
   động mượt và đúng chuẩn.
 - Sidebar có nút **Mở Excel/Hiện Excel** để chuyển nhanh sang workbook.
+- Nhóm **Cài đặt** đã hoạt động trực tiếp trong ứng dụng: kết nối Excel, lưu
+  thông tin chi nhánh, kiểm tra database, sao lưu và phục hồi.
+- Thông tin chi nhánh được lưu có cấu trúc và lịch sử phiên bản trong SQLite;
+- Tự nạp các add-in `.xla/.xlam` trong `tools/addins` khi kết nối Excel; add-in
+  được đăng ký ở cấp ứng dụng Excel để mọi workbook trong cùng phiên đều dùng được;
+  không còn phụ thuộc vào sheet `SYS`. Các sheet hệ thống của add-in cũ không
+  được hiển thị trong giao diện ứng dụng.
 
 ## Chạy nhanh
 
@@ -77,10 +84,18 @@ chọn. Nhập `A,C` tại cột `Đáp án không đảo` nếu A và C phải 
 Thứ tự A/B/C/D trong database luôn là thứ tự đề cương gốc; tùy chọn hoán đổi
 chỉ tác động lên phiên làm bài. Nút **Tải Excel mẫu** tạo sẵn đúng cấu trúc này.
 
-Dữ liệu vận hành nằm tại `data/agribank_v3.sqlite3`. Lần đầu sử dụng hoặc khi
-file `Data/AgribankMenuData.mdb` thay đổi, ứng dụng so sánh SHA-256 và nhập lại
-4.070 câu hỏi trong một transaction. Trước khi cập nhật, SQLite hiện tại được
-sao lưu vào `data/backups`.
+Dữ liệu được tách thành hai SQLite database đuôi `.db`:
+
+- `data/DuLieuV3.db`: dữ liệu vận hành app như thông tin chi nhánh và lịch sử
+  cấu hình.
+- `data/quiz.db`: dữ liệu trắc nghiệm như câu hỏi, nghiệp vụ, chuyên đề, nhân
+  viên và lịch sử lượt làm.
+
+Nếu còn file `data/agribank_v3.sqlite3` từ phiên bản cũ, ứng dụng tự chuyển dữ
+liệu tương ứng sang hai database mới trong lần chạy đầu. Lần đầu sử dụng hoặc
+khi file `Data/AgribankMenuData.mdb` thay đổi, ứng dụng so sánh SHA-256 và nhập
+lại 4.070 câu hỏi trong một transaction. Trước khi cập nhật, database trắc
+nghiệm hiện tại được sao lưu vào `data/backups`.
 
 MDB chỉ được mở ở chế độ đọc. Có thể trỏ tới một bản MDB khác bằng biến môi
 trường `AGRIBANKV3_ACCESS_DB`.

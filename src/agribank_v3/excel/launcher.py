@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 from typing import Iterable
+from uuid import uuid4
 import winreg
 import zipfile
 
@@ -124,7 +125,7 @@ def discover_excel_installations() -> list[ExcelInstallation]:
 def _bootstrap_workbook() -> Path:
     directory = Path(tempfile.gettempdir()) / "AgribankV3"
     directory.mkdir(parents=True, exist_ok=True)
-    workbook = directory / "AgribankV3-New.xlsx"
+    workbook = directory / f"AgribankV3-New-{uuid4().hex[:8]}.xlsx"
     with zipfile.ZipFile(workbook, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
             "[Content_Types].xml",

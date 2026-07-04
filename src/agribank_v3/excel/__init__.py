@@ -8,6 +8,7 @@ from agribank_v3.excel.launcher import (
     launch_excel,
 )
 from agribank_v3.excel.service import (
+    AddinLoadReport,
     CaseMode,
     ConversionResult,
     ExcelConnectionError,
@@ -16,6 +17,7 @@ from agribank_v3.excel.service import (
 )
 
 __all__ = [
+    "AddinLoadReport",
     "CaseMode",
     "ConversionResult",
     "ExcelCapabilities",

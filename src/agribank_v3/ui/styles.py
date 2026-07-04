@@ -11,6 +11,9 @@ APP_STYLESHEET = """
 QWidget {
     color: #17202a;
 }
+QWidget#SettingsPage, QWidget#SettingsTabBody {
+    background: #f7f9fb;
+}
 QTabWidget::pane {
     background: #f7f9fb;
     border: 1px solid #e1e6eb;
@@ -111,6 +114,163 @@ QTableWidget, QTreeWidget {
     border: 1px solid #dfe5ea;
     border-radius: 6px;
     gridline-color: #e6eaee;
+}
+QTableWidget#AnswerLookupTable::item {
+    padding: 8px;
+}
+QTableWidget#AnswerLookupTable::item:selected {
+    color: #111827;
+    background: #e8f1ff;
+}
+QWidget#AnswerLookupPage {
+    background: #f6f7f9;
+}
+QLabel#AnswerLookupHeaderIcon {
+    color: white;
+    background: #9b1f4d;
+    border-radius: 12px;
+    font-size: 31px;
+    font-weight: 800;
+}
+QLabel#AnswerLookupTitle {
+    color: #3d1626;
+    font-size: 28px;
+    font-weight: 800;
+}
+QLabel#AnswerLookupDescription {
+    color: #6b7280;
+    font-size: 14px;
+}
+QFrame#AnswerSearchCard, QFrame#AnswerResultCard {
+    background: #ffffff;
+    border: 1px solid #e1e5ea;
+    border-radius: 12px;
+}
+QFrame#AnswerSearchInputWrap {
+    background: #ffffff;
+    border: 1px solid #b52a5b;
+    border-radius: 8px;
+    min-height: 56px;
+}
+QLabel#AnswerSearchInlineIcon {
+    color: #9b1f4d;
+    font-size: 28px;
+    font-weight: 800;
+}
+QLineEdit#AnswerLookupEdit {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    min-height: 44px;
+    font-size: 15px;
+}
+QLineEdit#AnswerLookupEdit:focus {
+    border: none;
+}
+QPushButton#AnswerLookupClearButton {
+    color: #9b1f4d;
+    background: #fff7fa;
+    border: 1px solid #efc6d5;
+    border-radius: 8px;
+    padding: 14px 22px;
+    font-weight: 700;
+    min-height: 26px;
+}
+QPushButton#AnswerLookupClearButton:hover {
+    background: #fdebf2;
+    border-color: #d87598;
+}
+QLabel#AnswerLookupStatus {
+    color: #5f6873;
+    font-size: 14px;
+}
+QLabel#AnswerResultHeaderIcon {
+    color: #9b1f4d;
+    font-size: 28px;
+    font-weight: 900;
+}
+QLabel#AnswerResultTitle {
+    color: #1f2937;
+    font-size: 17px;
+    font-weight: 800;
+}
+QLabel#AnswerResultBadge {
+    color: #9b1f4d;
+    background: #fdebf2;
+    border: 1px solid #efc6d5;
+    border-radius: 13px;
+    padding: 5px 14px;
+    font-weight: 800;
+}
+QScrollArea#AnswerResultScroll {
+    background: transparent;
+    border: none;
+}
+QWidget#AnswerResultsViewport {
+    background: transparent;
+}
+QFrame#AnswerResultItem {
+    background: #ffffff;
+    border: 1px solid #e1e5ea;
+    border-radius: 10px;
+}
+QFrame#AnswerResultItem:hover {
+    background: #fff9fb;
+    border-color: #efb4c9;
+}
+QFrame#AnswerResultItem[selected="true"] {
+    background: #fff1f5;
+    border: 1px solid #b52a5b;
+}
+QLabel#AnswerLookupChip {
+    color: #b52a5b;
+    background: #fff1f5;
+    border: 1px solid #f0b8cb;
+    border-radius: 8px;
+    padding: 6px 9px;
+    font-weight: 800;
+}
+QLabel#AnswerLookupQuestion {
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.4;
+}
+QLabel#AnswerLookupAnswer {
+    color: #1f2937;
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1.4;
+}
+QFrame#AnswerLookupDivider {
+    color: #edf0f3;
+    background: #edf0f3;
+    max-height: 1px;
+}
+QLabel#AnswerLookupEmpty {
+    color: #6b7280;
+    background: #fbfcfd;
+    border: 1px dashed #d7dee5;
+    border-radius: 10px;
+    padding: 28px;
+    font-size: 14px;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 3px 0 3px 0;
+}
+QScrollBar::handle:vertical {
+    background: #cbd3dc;
+    border-radius: 5px;
+    min-height: 28px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #aeb8c4;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
 }
 QTreeWidget#QuotaTree::item {
     min-height: 38px;
@@ -228,6 +388,15 @@ QFrame#FeatureCard, QFrame#MetricCard, QFrame#WelcomeCard {
     border-radius: 12px;
 }
 QFrame#FeatureCard:hover {
+    border: 1px solid #b75a79;
+}
+QFrame#FeatureMenuItem {
+    background: white;
+    border: 1px solid #e1e6e9;
+    border-radius: 9px;
+}
+QFrame#FeatureMenuItem:hover {
+    background: #fff8fb;
     border: 1px solid #b75a79;
 }
 QLabel#CardTitle {
