@@ -10,7 +10,7 @@ def style_agency_header(
     end_column: int,
 ) -> None:
     """Apply common agency header typography for settlement reports."""
-    for row in range(1, 5):
+    for row in range(1, 6):
         cell = sheet.cell(row, start_column)
         cell.font = Font(name="Times New Roman", size=10, bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center")

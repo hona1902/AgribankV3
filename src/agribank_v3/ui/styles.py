@@ -504,6 +504,19 @@ QPushButton#SidebarExcelButton {
 QPushButton#SidebarExcelButton:hover {
     background: #c63867;
 }
+QPushButton#SidebarAuthorButton {
+    color: #f8edf1;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+}
+QPushButton#SidebarAuthorButton:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.10);
+}
 QStatusBar {
     background: white;
     color: #68737d;

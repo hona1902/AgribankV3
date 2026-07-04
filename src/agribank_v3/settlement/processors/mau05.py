@@ -606,9 +606,18 @@ class Mau05Processor:
         for row in sheet.iter_rows():
             for cell in row:
                 cell.font = Font(name="Times New Roman", size=12)
+                cell.alignment = Alignment(vertical="center")
+        thin = Side(style="thin", color="000000")
+        for row in sheet.iter_rows(min_row=2, max_row=total_row, min_col=1, max_col=7):
+            for cell in row:
+                cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        sheet["A1"].font = Font(name="Times New Roman", size=12, bold=True, color="000080")
         for cell in sheet[2]:
             cell.fill = PatternFill("solid", fgColor="FFFF00")
+            cell.font = Font(name="Times New Roman", size=12, bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for cell in sheet[total_row]:
+            cell.font = Font(name="Times New Roman", size=12, bold=True)
         for column in range(2, 8):
             for row in range(3, total_row + 1):
                 sheet.cell(row, column).number_format = "#,##0"

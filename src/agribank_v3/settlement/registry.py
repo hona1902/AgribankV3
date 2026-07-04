@@ -45,7 +45,7 @@ ACTIVE_SETTLEMENT_SPECS: tuple[SettlementSpec, ...] = (
           "{MaCN}_rt16.csv", "mau15_16", "QUYETTOAN_MAU16"),
     _spec("credit.18", "18", "Mẫu 18/QT", SettlementCategory.CREDIT,
           "{MaCN}_rt18.csv", "mau18", "QUYETTOAN_MAU18"),
-    _spec("credit.20a", "20A", "Mẫu 20A/QT", SettlementCategory.CREDIT,
+    _spec("credit.20a", "20a", "Mẫu 20a/QT", SettlementCategory.CREDIT,
           "{MaCN}_rt20.xls", "mau20a", "QUYETTOAN_MAU20a"),
     _spec(
         "credit.30a",

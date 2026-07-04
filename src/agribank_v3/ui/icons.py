@@ -9,7 +9,7 @@ APP_ICON_NAME = "Logo-HNA.png"
 
 
 def icon_path(name: str) -> str:
-    return str(files("agribank_v3").joinpath("resources", "icons", name))
+    return str(files("agribank_v3").joinpath("resources", "icons", *name.split("/")))
 
 
 def app_icon() -> QIcon:

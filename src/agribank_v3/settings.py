@@ -5,10 +5,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+import json
 import os
+import shutil
 import sqlite3
+import tempfile
 from typing import Iterator
 from uuid import uuid4
+import zipfile
 
 from agribank_v3.runtime_paths import application_root
 
@@ -50,12 +54,27 @@ class DatabaseStatus:
     last_updated_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedDatabaseStatus:
+    settings: DatabaseStatus
+    quiz_path: Path
+    quiz_size_bytes: int
+    quiz_integrity: str
+
+    @property
+    def total_size_bytes(self) -> int:
+        return self.settings.size_bytes + self.quiz_size_bytes
+
+
 class AppSettingsDatabase:
     """Owns durable application settings stored outside Excel workbooks."""
 
     COMPONENT = "app_settings"
     SCHEMA_VERSION = 3
     DEFAULT_DATABASE_NAME = "DuLieuV3.db"
+    QUIZ_DATABASE_NAME = "quiz.db"
+    BACKUP_FORMAT = "agribank-v3-database-bundle"
+    BACKUP_FORMAT_VERSION = 1
     LEGACY_DATABASE_NAME = "agribank_v3.sqlite3"
     PROFILE_FIELDS = (
         "branch_code",
@@ -82,6 +101,9 @@ class AppSettingsDatabase:
             else app_root / "data" / self.DEFAULT_DATABASE_NAME
         )
         self.backup_directory = self.database_path.parent / "backups"
+        self.quiz_database_path = (
+            self.database_path.parent / self.QUIZ_DATABASE_NAME
+        )
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.backup_directory.mkdir(parents=True, exist_ok=True)
         self.initialize_schema()
@@ -297,6 +319,45 @@ class AppSettingsDatabase:
             ) from exc
         return normalized
 
+    def load_preference(self, key: str, default: str = "") -> str:
+        normalized_key = self._clean(key)
+        if not normalized_key:
+            return default
+        try:
+            with self._database() as database:
+                row = database.execute(
+                    "SELECT value FROM app_preferences WHERE key = ?",
+                    (normalized_key,),
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise SettingsDatabaseError(
+                f"Không thể đọc tùy chọn ứng dụng: {exc}"
+            ) from exc
+        return str(row["value"]) if row is not None else default
+
+    def save_preference(self, key: str, value: str) -> str:
+        normalized_key = self._clean(key)
+        if not normalized_key:
+            raise SettingsDatabaseError("Tên tùy chọn ứng dụng không hợp lệ.")
+        normalized_value = self._clean(value)
+        try:
+            with self._database() as database:
+                database.execute(
+                    """
+                    INSERT INTO app_preferences(key, value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = excluded.updated_at
+                    """,
+                    (normalized_key, normalized_value, self._now()),
+                )
+        except sqlite3.Error as exc:
+            raise SettingsDatabaseError(
+                f"Không thể lưu tùy chọn ứng dụng: {exc}"
+            ) from exc
+        return normalized_value
+
     def load_addin_states(
         self, file_names: tuple[str, ...] | list[str]
     ) -> dict[str, bool]:
@@ -359,31 +420,105 @@ class AppSettingsDatabase:
             last_updated_at=str(row["updated_at"]) if row else "",
         )
 
+    def managed_status(self) -> ManagedDatabaseStatus:
+        settings_status = self.status()
+        if not self.quiz_database_path.is_file():
+            return ManagedDatabaseStatus(
+                settings=settings_status,
+                quiz_path=self.quiz_database_path,
+                quiz_size_bytes=0,
+                quiz_integrity="Chưa tạo",
+            )
+        try:
+            with closing(sqlite3.connect(self.quiz_database_path)) as database:
+                integrity = str(
+                    database.execute("PRAGMA integrity_check").fetchone()[0]
+                )
+        except sqlite3.Error as exc:
+            raise SettingsDatabaseError(
+                f"Không thể kiểm tra cơ sở dữ liệu trắc nghiệm: {exc}"
+            ) from exc
+        return ManagedDatabaseStatus(
+            settings=settings_status,
+            quiz_path=self.quiz_database_path,
+            quiz_size_bytes=self.quiz_database_path.stat().st_size,
+            quiz_integrity=integrity,
+        )
+
     def create_backup(self, destination: Path | None = None) -> Path:
         if destination is None:
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             unique = uuid4().hex[:8]
             destination = (
                 self.backup_directory
-                / f"DuLieuV3-{stamp}-{unique}.db"
+                / f"AgribankV3-{stamp}-{unique}.zip"
             )
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary_destination = destination.with_name(
+            f".{destination.name}.{uuid4().hex}.tmp"
+        )
         try:
-            with closing(self.connect()) as source:
-                with closing(sqlite3.connect(destination)) as target:
-                    source.backup(target)
-                    check = str(
-                        target.execute("PRAGMA integrity_check").fetchone()[0]
+            with tempfile.TemporaryDirectory(
+                prefix="agribank-v3-backup-"
+            ) as temporary_directory:
+                temporary_root = Path(temporary_directory)
+                settings_snapshot = temporary_root / self.DEFAULT_DATABASE_NAME
+                self._snapshot_database(
+                    self.database_path,
+                    settings_snapshot,
+                    required_table="branch_profiles",
+                )
+                database_entries = [
+                    {
+                        "role": "settings",
+                        "filename": self.DEFAULT_DATABASE_NAME,
+                    }
+                ]
+                if not self.quiz_database_path.is_file():
+                    raise SettingsDatabaseError(
+                        "Chưa tìm thấy quiz.db. Hãy mở mục Trắc nghiệm một lần "
+                        "để khởi tạo database trước khi sao lưu."
                     )
-                    if check.casefold() != "ok":
-                        raise SettingsDatabaseError(
-                            f"Bản sao lưu không hợp lệ (integrity_check: {check})."
-                        )
-        except (sqlite3.Error, OSError) as exc:
+                quiz_snapshot = temporary_root / self.QUIZ_DATABASE_NAME
+                self._snapshot_database(
+                    self.quiz_database_path,
+                    quiz_snapshot,
+                    required_table="questions",
+                )
+                database_entries.append(
+                    {
+                        "role": "quiz",
+                        "filename": self.QUIZ_DATABASE_NAME,
+                    }
+                )
+                manifest = {
+                    "format": self.BACKUP_FORMAT,
+                    "version": self.BACKUP_FORMAT_VERSION,
+                    "created_at": self._now(),
+                    "databases": database_entries,
+                }
+                with zipfile.ZipFile(
+                    temporary_destination,
+                    "w",
+                    compression=zipfile.ZIP_DEFLATED,
+                ) as archive:
+                    archive.writestr(
+                        "manifest.json",
+                        json.dumps(manifest, ensure_ascii=False, indent=2),
+                    )
+                    for entry in database_entries:
+                        filename = str(entry["filename"])
+                        archive.write(temporary_root / filename, filename)
+                os.replace(temporary_destination, destination)
+        except SettingsDatabaseError:
+            raise
+        except (sqlite3.Error, OSError, ValueError, zipfile.BadZipFile) as exc:
             raise SettingsDatabaseError(
                 f"Không thể sao lưu cơ sở dữ liệu: {exc}"
             ) from exc
+        finally:
+            temporary_destination.unlink(missing_ok=True)
         return destination
 
     def restore_backup(self, source_path: Path) -> Path:
@@ -394,6 +529,11 @@ class AppSettingsDatabase:
             raise SettingsDatabaseError(
                 "Tệp phục hồi không được trùng với database đang sử dụng."
             )
+        if zipfile.is_zipfile(source_path):
+            return self._restore_bundle(source_path)
+        return self._restore_legacy_settings_backup(source_path)
+
+    def _restore_legacy_settings_backup(self, source_path: Path) -> Path:
         safety_backup = self.create_backup()
         restore_temp = (
             self.database_path.parent / f".restore-{uuid4().hex}.db"
@@ -451,6 +591,169 @@ class AppSettingsDatabase:
         finally:
             restore_temp.unlink(missing_ok=True)
         return safety_backup
+
+    def _restore_bundle(self, source_path: Path) -> Path:
+        with tempfile.TemporaryDirectory(
+            prefix="agribank-v3-restore-"
+        ) as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            try:
+                with zipfile.ZipFile(source_path, "r") as archive:
+                    manifest = json.loads(archive.read("manifest.json"))
+                    if (
+                        manifest.get("format") != self.BACKUP_FORMAT
+                        or manifest.get("version") != self.BACKUP_FORMAT_VERSION
+                    ):
+                        raise SettingsDatabaseError(
+                            "Gói sao lưu không đúng định dạng AgribankV3."
+                        )
+                    entries = {
+                        str(entry["role"]): str(entry["filename"])
+                        for entry in manifest.get("databases", ())
+                    }
+                    if entries.get("settings") != self.DEFAULT_DATABASE_NAME:
+                        raise SettingsDatabaseError(
+                            "Gói sao lưu không chứa database cài đặt."
+                        )
+                    if entries.get("quiz") != self.QUIZ_DATABASE_NAME:
+                        raise SettingsDatabaseError(
+                            "Gói sao lưu không chứa database trắc nghiệm."
+                        )
+                    allowed_files = {
+                        self.DEFAULT_DATABASE_NAME,
+                        self.QUIZ_DATABASE_NAME,
+                    }
+                    if any(name not in allowed_files for name in entries.values()):
+                        raise SettingsDatabaseError(
+                            "Gói sao lưu chứa tên database không hợp lệ."
+                        )
+                    staged: dict[str, Path] = {}
+                    for role, filename in entries.items():
+                        target = temporary_root / f"restore-{filename}"
+                        target.write_bytes(archive.read(filename))
+                        required_table = (
+                            "branch_profiles" if role == "settings" else "questions"
+                        )
+                        self._validate_snapshot(target, required_table)
+                        staged[role] = target
+            except SettingsDatabaseError:
+                raise
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+                OSError,
+                zipfile.BadZipFile,
+            ) as exc:
+                raise SettingsDatabaseError(
+                    f"Không thể đọc gói sao lưu: {exc}"
+                ) from exc
+
+            safety_backup = self.create_backup()
+            rollback_settings = temporary_root / "rollback-settings.db"
+            self._snapshot_database(
+                self.database_path,
+                rollback_settings,
+                required_table="branch_profiles",
+            )
+            rollback_quiz: Path | None = None
+            quiz_existed = self.quiz_database_path.is_file()
+            if quiz_existed:
+                rollback_quiz = temporary_root / "rollback-quiz.db"
+                self._snapshot_database(
+                    self.quiz_database_path,
+                    rollback_quiz,
+                    required_table="questions",
+                )
+
+            try:
+                self._replace_database(staged["settings"], self.database_path)
+                if "quiz" in staged:
+                    self._replace_database(
+                        staged["quiz"],
+                        self.quiz_database_path,
+                    )
+                self.initialize_schema()
+            except (sqlite3.Error, OSError, SettingsDatabaseError) as exc:
+                try:
+                    self._replace_database(
+                        rollback_settings,
+                        self.database_path,
+                        consume_source=False,
+                    )
+                    if rollback_quiz is not None:
+                        self._replace_database(
+                            rollback_quiz,
+                            self.quiz_database_path,
+                            consume_source=False,
+                        )
+                    elif not quiz_existed:
+                        self.quiz_database_path.unlink(missing_ok=True)
+                    self.initialize_schema()
+                except (sqlite3.Error, OSError, SettingsDatabaseError):
+                    pass
+                raise SettingsDatabaseError(
+                    f"Không thể phục hồi gói cơ sở dữ liệu: {exc}"
+                ) from exc
+            return safety_backup
+
+    @staticmethod
+    def _validate_snapshot(path: Path, required_table: str) -> None:
+        uri = path.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as database:
+            integrity = str(
+                database.execute("PRAGMA integrity_check").fetchone()[0]
+            )
+            if integrity.casefold() != "ok":
+                raise SettingsDatabaseError(
+                    f"Snapshot {path.name} bị lỗi (integrity_check: {integrity})."
+                )
+            tables = {
+                str(row[0])
+                for row in database.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            if required_table not in tables:
+                raise SettingsDatabaseError(
+                    f"Snapshot {path.name} thiếu bảng {required_table}."
+                )
+
+    def _snapshot_database(
+        self,
+        source_path: Path,
+        destination: Path,
+        required_table: str,
+    ) -> None:
+        with closing(sqlite3.connect(source_path, timeout=15)) as source:
+            source.execute("PRAGMA busy_timeout = 15000")
+            with closing(sqlite3.connect(destination)) as target:
+                source.backup(target)
+        self._validate_snapshot(destination, required_table)
+
+    @staticmethod
+    def _replace_database(
+        source: Path,
+        destination: Path,
+        *,
+        consume_source: bool = True,
+    ) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_file():
+            with closing(sqlite3.connect(destination, timeout=15)) as current:
+                current.execute("PRAGMA busy_timeout = 15000")
+                current.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                current.execute("PRAGMA journal_mode = DELETE")
+        for suffix in ("-wal", "-shm"):
+            Path(f"{destination}{suffix}").unlink(missing_ok=True)
+        replacement = source
+        if not consume_source:
+            replacement = destination.with_name(
+                f".rollback-{uuid4().hex}.db"
+            )
+            shutil.copy2(source, replacement)
+        os.replace(replacement, destination)
 
     def _migrate_from_legacy_database(self) -> None:
         if not self.legacy_database_path.is_file():

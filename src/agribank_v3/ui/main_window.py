@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QMouseEvent, QPixmap
@@ -27,6 +28,7 @@ from pywintypes import error as win32_error
 
 from agribank_v3.features.catalog import (
     Feature,
+    QUYET_TOAN_KE_TOAN_FEATURES,
     QUYET_TOAN_TIN_DUNG_FEATURES,
     SECTIONS,
 )
@@ -37,17 +39,27 @@ from agribank_v3.settlement import (
     SettlementError,
     SettlementRequest,
 )
-from agribank_v3.settlement.processors import Mau05Processor, Mau06Processor
+from agribank_v3.settlement.processors import (
+    Mau05Processor,
+    Mau06Processor,
+    Mau1516Processor,
+    Mau18Processor,
+    Mau20aProcessor,
+    Mau30Processor,
+)
 from agribank_v3.excel import (
     ExcelCompatibility,
     ExcelConnectionError,
     ExcelContext,
     ExcelService,
 )
+from agribank_v3.ui.dialogs.author_info import AuthorInfoDialog
 from agribank_v3.ui.dialogs.case_conversion import CaseConversionDialog
 from agribank_v3.ui.dialogs.excel_launcher import ExcelLauncherDialog
+from agribank_v3.ui.dialogs.settlement_mau1516 import Mau1516SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau05 import Mau05SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau06 import Mau06SettlementDialog
+from agribank_v3.ui.dialogs.settlement_mau30 import Mau30SettlementDialog
 from agribank_v3.ui.dialogs.quiz import QuizWidget
 from agribank_v3.ui.icons import app_icon, icon_path
 from agribank_v3.ui.settings import SettingsWidget
@@ -186,9 +198,15 @@ class MainWindow(QMainWindow):
         self.settlement_engine = SettlementEngine()
         self.settlement_engine.register("mau05", Mau05Processor())
         self.settlement_engine.register("mau06", Mau06Processor())
+        self.settlement_engine.register("mau15_16", Mau1516Processor())
+        self.settlement_engine.register("mau18", Mau18Processor())
+        self.settlement_engine.register("mau20a", Mau20aProcessor())
+        self.settlement_engine.register("mau30", Mau30Processor())
         self.excel_context: ExcelContext | None = None
         self.sidebar_expanded = True
         self.quyet_toan_tin_dung_page: QWidget | None = None
+        self.quyet_toan_ke_toan_page: QWidget | None = None
+        self.author_info_dialog: AuthorInfoDialog | None = None
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -285,6 +303,15 @@ class MainWindow(QMainWindow):
         self.sidebar_excel_button.clicked.connect(self.show_or_connect_excel)
         layout.addWidget(self.sidebar_excel_button)
 
+        self.author_info_button = QPushButton("Thông tin tác giả")
+        self.author_info_button.setObjectName("SidebarAuthorButton")
+        self.author_info_button.setIcon(QIcon(icon_path("inforcn.png")))
+        self.author_info_button.setIconSize(QSize(18, 18))
+        self.author_info_button.setToolTip("Thông tin ứng dụng và tác giả")
+        self.author_info_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.author_info_button.clicked.connect(self.show_author_info)
+        layout.addWidget(self.author_info_button)
+
         self.version_label = QLabel("Phiên bản thử nghiệm 0.1.0")
         self.version_label.setObjectName("BrandSubtitle")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -353,6 +380,27 @@ class MainWindow(QMainWindow):
                 self.pages.addWidget(self._build_feature_page(section, features))
         layout.addWidget(self.pages, stretch=1)
         return content
+
+    def show_author_info(self) -> None:
+        """Open one author-information dialog and keep it above this window."""
+        if (
+            self.author_info_dialog is not None
+            and self.author_info_dialog.isVisible()
+        ):
+            self.author_info_dialog.raise_()
+            self.author_info_dialog.activateWindow()
+            return
+
+        dialog = AuthorInfoDialog(self)
+        self.author_info_dialog = dialog
+        dialog.finished.connect(self._clear_author_info_dialog)
+        dialog.move(self.frameGeometry().center() - dialog.rect().center())
+        dialog.open()
+
+    def _clear_author_info_dialog(self) -> None:
+        if self.author_info_dialog is not None:
+            self.author_info_dialog.deleteLater()
+            self.author_info_dialog = None
 
     def _build_dashboard(self) -> QWidget:
         page = self._scroll_page()
@@ -478,6 +526,59 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.quyet_toan_tin_dung_page)
         self.pages.setCurrentWidget(self.quyet_toan_tin_dung_page)
         self.nav_buttons[NAVIGATION.index("Quyết toán")].setChecked(True)
+
+    def _build_quyet_toan_ke_toan_page(self) -> QWidget:
+        page = self._scroll_page()
+        body = page.widget()
+        layout = body.layout()
+
+        header = QHBoxLayout()
+        title = QLabel("Quyết toán kế toán")
+        title.setObjectName("PageTitle")
+        back_button = QPushButton("Quay lại quyết toán")
+        back_button.setObjectName("SecondaryButton")
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(
+            lambda: self.select_page(NAVIGATION.index("Quyết toán"))
+        )
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(back_button)
+        layout.addLayout(header)
+
+        for feature in self._quyet_toan_ke_toan_features():
+            item = FeatureMenuItem(feature)
+            item.requested.connect(self._open_quyet_toan_ke_toan_feature)
+            layout.addWidget(item)
+        layout.addStretch()
+        return page
+
+    def _quyet_toan_ke_toan_features(self) -> list[Feature]:
+        branch_code = self._current_branch_code()
+        return [
+            Feature(
+                feature.title.replace("{MaCN}", branch_code),
+                feature.description,
+                feature.icon,
+            )
+            for feature in QUYET_TOAN_KE_TOAN_FEATURES
+        ]
+
+    def _show_quyet_toan_ke_toan_page(self) -> None:
+        if self.quyet_toan_ke_toan_page is not None:
+            self.pages.removeWidget(self.quyet_toan_ke_toan_page)
+            self.quyet_toan_ke_toan_page.deleteLater()
+        self.quyet_toan_ke_toan_page = self._build_quyet_toan_ke_toan_page()
+        self.pages.addWidget(self.quyet_toan_ke_toan_page)
+        self.pages.setCurrentWidget(self.quyet_toan_ke_toan_page)
+        self.nav_buttons[NAVIGATION.index("Quyết toán")].setChecked(True)
+
+    def _open_quyet_toan_ke_toan_feature(self, title: str) -> None:
+        QMessageBox.information(
+            self,
+            title,
+            "Chức năng này đang nằm trong lộ trình chuyển đổi từ VBA sang Python.",
+        )
 
     @staticmethod
     def _scroll_page() -> QScrollArea:
@@ -787,6 +888,7 @@ class MainWindow(QMainWindow):
             self.sidebar_excel_button.setText(
                 "Hiện Excel" if self.excel_context else "Mở Excel"
             )
+            self.author_info_button.setText("Thông tin tác giả")
             for button in self.nav_buttons:
                 button.setText(str(button.property("fullText")))
         else:
@@ -797,6 +899,7 @@ class MainWindow(QMainWindow):
             self.version_label.hide()
             self.brand_button.setToolTip("Nhấn để mở rộng menu")
             self.sidebar_excel_button.setText("XL")
+            self.author_info_button.setText("i")
             for button in self.nav_buttons:
                 button.setText("")
 
@@ -819,12 +922,33 @@ class MainWindow(QMainWindow):
             self._show_quyet_toan_tin_dung_page()
             return
 
+        if title == "Quyết toán kế toán":
+            self._show_quyet_toan_ke_toan_page()
+            return
+
         if title.startswith("Tạo Mẫu biểu 05/QT ("):
             self._run_mau05_dialog()
             return
 
         if title.startswith("Tạo Mẫu biểu 06/QT ("):
             self._run_mau06_dialog()
+            return
+
+        for spec_key in (
+            "credit.15a",
+            "credit.15b",
+            "credit.16",
+            "credit.18",
+            "credit.20a",
+        ):
+            spec = SETTLEMENT_SPECS[spec_key]
+            expected_prefix = f"Tạo Mẫu biểu {spec.report_code}/QT ("
+            if title.casefold().startswith(expected_prefix.casefold()):
+                self._run_mau1516_dialog(spec_key)
+                return
+
+        if title.casefold().startswith("tạo mẫu biểu 30a/qt"):
+            self._run_mau30_dialog()
             return
 
         if title == "Chuyển kiểu chữ":
@@ -1062,17 +1186,171 @@ class MainWindow(QMainWindow):
         if open_answer == QMessageBox.StandardButton.Yes:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
 
+    def _run_mau1516_dialog(self, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+
+        dialog = Mau1516SettlementDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source_path = dialog.source_path
+        output_path = dialog.output_path()
+        if source_path is None or output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        progress = self._show_busy_dialog(
+            f"Đang tạo mẫu quyết toán {spec.report_code}/QT...\n"
+            "Vui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            result = self.settlement_engine.execute(
+                SettlementRequest(
+                    spec=spec,
+                    profile=profile,
+                    options=dialog.options(),
+                    source_paths=(source_path,),
+                )
+            )
+        except (SettlementError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                str(execution_error),
+            )
+            return
+
+        if result is None or result.output_path is None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                "Processor không trả về file kết quả.",
+            )
+            return
+        self.statusBar().showMessage(
+            f"Đã tạo {result.output_path.name} từ {source_path.name}"
+        )
+        open_answer = QMessageBox.question(
+            self,
+            f"Hoàn thành {spec.title}",
+            f"Đã tạo file:\n{result.output_path}\n\nMở file kết quả bây giờ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if open_answer == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+
+    def _run_mau30_dialog(self) -> None:
+        spec = SETTLEMENT_SPECS["credit.30a"]
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+
+        last_balance_text = self.settings_widget.database.load_preference(
+            "mau30_last_balance_path"
+        )
+        last_balance_path = (
+            Path(last_balance_text) if last_balance_text else None
+        )
+        dialog = Mau30SettlementDialog(profile, last_balance_path, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source_path = dialog.source_path
+        output_path = dialog.output_path()
+        if source_path is None or output_path is None:
+            return
+        progress = self._show_busy_dialog(
+            f"Đang tạo mẫu quyết toán 30/QT từ Mẫu {dialog.selected_model}/QT...\n"
+            "Vui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            source_paths = (
+                (source_path, dialog.balance_path)
+                if dialog.balance_path is not None
+                else (source_path,)
+            )
+            result = self.settlement_engine.execute(
+                SettlementRequest(
+                    spec=spec,
+                    profile=profile,
+                    options=dialog.options(),
+                    source_paths=source_paths,
+                )
+            )
+        except (SettlementError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                str(execution_error),
+            )
+            return
+
+        if result is None or result.output_path is None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                "Processor không trả về file kết quả.",
+            )
+            return
+        if dialog.balance_path is not None:
+            try:
+                self.settings_widget.database.save_preference(
+                    "mau30_last_balance_path",
+                    str(dialog.balance_path),
+                )
+            except SettingsDatabaseError:
+                pass
+        self.statusBar().showMessage(
+            f"Đã thêm {result.worksheet_name} vào {source_path.name}"
+        )
+        open_answer = QMessageBox.question(
+            self,
+            f"Hoàn thành {spec.title}",
+            f"Đã thêm sheet {result.worksheet_name} vào file:\n{result.output_path}\n\nMở file bây giờ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if open_answer == QMessageBox.StandardButton.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+
     def _show_busy_dialog(self, message: str) -> QDialog:
         progress = QDialog(self)
         progress.setWindowTitle("Đang xử lý")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setModal(True)
-        progress.setMinimumSize(420, 130)
+        progress.setFixedSize(420, 92)
         layout = QVBoxLayout(progress)
-        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setContentsMargins(18, 10, 18, 10)
+        layout.setSpacing(0)
         label = QLabel(message, progress)
         label.setWordWrap(True)
-        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("font-weight: 600;")
         layout.addWidget(label)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)

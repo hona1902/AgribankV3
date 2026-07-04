@@ -35,6 +35,7 @@ class SettlementOptions:
     include_accrual_accounts: bool = True
     use_default_accrual_accounts: bool = True
     include_loan_deposit_schedule: bool = False
+    source_report_code: str = ""
 
 
 @dataclass(frozen=True, slots=True)

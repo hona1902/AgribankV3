@@ -62,38 +62,105 @@ QUYET_TOAN_TIN_DUNG_FEATURES: list[Feature] = [
     Feature(
         "Tạo Mẫu biểu 05/QT (From {MaCN}_rt05.csv)",
         "- Báo Cáo Kiểm Kê Hồ Sơ, Tài Sản Thế Chấp, Cầm Cố Của Khách Hàng",
-        "m05.png",
+        "QT/Mau_05_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 06/QT (From {MaCN}QT05.xls)",
         "- Báo Cáo Tổng Hợp Kiểm Kê Hồ Sơ, Tài Sản Thế Chấp, Cầm Cố Của Khách Hàng",
-        "m06.png",
+        "QT/Mau_06_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 15A/QT (From {MaCN}_rt15a.csv)",
         "- Sao Kê Chi Tiết Tài Khoản Cho Vay Khách Hàng Là Tổ Chức, Hộ Kinh Doanh Và Cá Nhân",
-        "m15A.png",
+        "QT/Mau_15a_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 15B/QT (From {MaCN}_rt15b.csv)",
         "- Sao Kê Chi Tiết Tài Khoản Cho Vay Khách Hàng Là Tổ Chức, Hộ Kinh Doanh Và Cá Nhân "
         "Có Lãi Phải Thu Hạch Toán Ngoại Bảng (Tài Khoản 941)",
-        "m15B.png",
+        "QT/Mau_15b_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 16/QT (From {MaCN}_rt16.csv)",
         "- Sao Kê Chi Tiết Khách Hàng Có Dư Nợ Từ 10 Tỷ Việt Nam Đồng Trở Lên",
-        "m16.png",
+        "QT/Mau_16_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 18/QT (From {MaCN}_rt18.csv)",
         "- Sao Kê Chi Tiết Tài Khoản 92, 93 : Bảo Lãnh Và Thư Tín Dụng Cho Khách Hàng",
-        "m18.png",
+        "QT/Mau_18_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 20a/QT (From {MaCN}_rt20.xls from lnlr20)",
         "- Báo Cáo Nợ Được Xử Lý Bằng Nguồn Dự Phòng",
-        "m20A.png",
+        "QT/Mau_20a_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 30a/QT",
+        "- Tạo mẫu biểu 30a Quyết toán năm",
+        "qt.png",
+    ),
+]
+
+
+QUYET_TOAN_KE_TOAN_FEATURES: list[Feature] = [
+    Feature(
+        "Tạo Mẫu biểu 04/QT (From IC_100435)",
+        "- Báo Cáo Tình Hình Sử Dụng Ấn Chỉ Quan Trọng (From IC_100435)",
+        "QT/Mau_04_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 07a/QT (From WT_100642)",
+        "- Báo Cáo Kiểm Kê Công Cụ Dụng Cụ (From WT_100642)",
+        "QT/Mau_07a_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 08/QT (From FA_100586)",
+        "- Báo Cáo Kiểm Kê Tài Sản Cố Định (From FA_100586)",
+        "QT/Mau_08_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 09a/QT (From Mshr32_TMBCTC_TSCD008)",
+        "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Hữu Hình",
+        "QT/Mau_09a_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 09b/QT (From Mshr32_TMBCTC_TSCD009)",
+        "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Vô Hình",
+        "QT/Mau_09b_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 09c/QT (From Mshr32_TMBCTC_TSCD010)",
+        "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Thuê Tài Chính",
+        "QT/Mau_09c_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 13/QT (From {MaCN}_rt13.csv)",
+        "- Sao Kê Chi Tiết Tiền Gửi Khách Hàng "
+        "(Tiền Gửi Thanh Toán, Có Kỳ Hạn, Tiết Kiệm, Kỳ Phiếu, Trái Phiếu)",
+        "QT/Mau_13_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 14/QT (From {MaCN}_rt14.csv)",
+        "- Sao Kê Chi Tiết Số Dư Tiền Gửi, Tiết Kiệm, Kỳ Phiếu, Trái Phiếu "
+        "Của Khách Hàng Có Số Dư Từ 10 Tỷ VNĐ Trở Lên",
+        "QT/Mau_14_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 22/QT (From GL_glst34)",
+        "- Sao Kê Chi Tiết Số Dư Tài Khoản Doanh Thu Và Chi Phí Chờ Phân Bổ "
+        "Đến Ngày Quyết Toán",
+        "QT/Mau_22_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 23/QT (From GL_glcb06)",
+        "- Sao Kê Chi Tiết Tài Khoản Thu Nhập Và Chi Phí Bất Thường",
+        "QT/Mau_23_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 24/QT (From {MaCN}_rt24.csv)",
+        "- Sao Kê Chi Tiết Tài Khoản Phải Thu, Phải Trả",
+        "QT/Mau_24_QT_text.svg",
     ),
     Feature(
         "Tạo Mẫu biểu 30a/QT",

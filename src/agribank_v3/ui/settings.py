@@ -267,22 +267,52 @@ class SettingsWidget(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.database_integrity_label = QLabel()
+        self.quiz_database_path_label = QLabel()
+        self.quiz_database_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.quiz_database_integrity_label = QLabel()
         self.database_size_label = QLabel()
         self.database_revision_label = QLabel()
-        status_layout.addRow("Tệp dữ liệu", self.database_path_label)
-        status_layout.addRow("Tính toàn vẹn", self.database_integrity_label)
-        status_layout.addRow("Dung lượng", self.database_size_label)
+        status_layout.addRow("Database cài đặt", self.database_path_label)
+        status_layout.addRow(
+            "Toàn vẹn database cài đặt",
+            self.database_integrity_label,
+        )
+        status_layout.addRow(
+            "Database trắc nghiệm",
+            self.quiz_database_path_label,
+        )
+        status_layout.addRow(
+            "Toàn vẹn database trắc nghiệm",
+            self.quiz_database_integrity_label,
+        )
+        status_layout.addRow("Tổng dung lượng", self.database_size_label)
         status_layout.addRow("Số lần cập nhật thông tin CN", self.database_revision_label)
 
         actions_group = QGroupBox("Sao lưu và phục hồi")
         actions_layout = QVBoxLayout(actions_group)
-        warning = QLabel(
-            "Mỗi bản sao lưu là một snapshot SQLite nhất quán, bao gồm dữ liệu "
-            "trắc nghiệm và thông tin chi nhánh. Trước khi phục hồi, ứng dụng tự "
-            "tạo thêm một bản sao an toàn của dữ liệu hiện tại."
+        backup_location = QFormLayout()
+        self.backup_directory_label = QLabel(
+            str(self.database.backup_directory)
         )
-        warning.setWordWrap(True)
-        warning.setObjectName("MutedText")
+        self.backup_directory_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.backup_file_label = QLabel(
+            "AgribankV3-[ngày giờ]-[mã].zip"
+        )
+        self.backup_file_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        backup_location.addRow(
+            "Thư mục lưu bản sao",
+            self.backup_directory_label,
+        )
+        backup_location.addRow(
+            "Tên tệp sao lưu",
+            self.backup_file_label,
+        )
         buttons = QHBoxLayout()
         verify_button = QPushButton("Kiểm tra database")
         verify_button.clicked.connect(
@@ -300,7 +330,7 @@ class SettingsWidget(QWidget):
         buttons.addWidget(restore_button)
         buttons.addWidget(open_folder_button)
         buttons.addStretch()
-        actions_layout.addWidget(warning)
+        actions_layout.addLayout(backup_location)
         actions_layout.addLayout(buttons)
         self.backup_result_label = QLabel()
         self.backup_result_label.setObjectName("MutedText")
@@ -356,20 +386,30 @@ class SettingsWidget(QWidget):
 
     def refresh_database_status(self, show_message: bool = True) -> None:
         try:
-            status = self.database.status()
+            status = self.database.managed_status()
         except SettingsDatabaseError as exc:
             self._show_error(str(exc))
             return
-        self.database_path_label.setText(str(status.path))
+        self.database_path_label.setText(str(status.settings.path))
         self.database_integrity_label.setText(
-            "Tốt (OK)" if status.integrity.casefold() == "ok" else status.integrity
+            "Tốt (OK)"
+            if status.settings.integrity.casefold() == "ok"
+            else status.settings.integrity
         )
-        self.database_size_label.setText(self._format_size(status.size_bytes))
+        self.quiz_database_path_label.setText(str(status.quiz_path))
+        self.quiz_database_integrity_label.setText(
+            "Tốt (OK)"
+            if status.quiz_integrity.casefold() == "ok"
+            else status.quiz_integrity
+        )
+        self.database_size_label.setText(
+            self._format_size(status.total_size_bytes)
+        )
         self.database_revision_label.setText(
-            str(status.branch_revision)
+            str(status.settings.branch_revision)
             + (
-                f" • {status.last_updated_at}"
-                if status.last_updated_at
+                f" • {status.settings.last_updated_at}"
+                if status.settings.last_updated_at
                 else " • chưa có dữ liệu"
             )
         )
@@ -382,22 +422,26 @@ class SettingsWidget(QWidget):
         except SettingsDatabaseError as exc:
             self._show_error(str(exc))
             return
-        self.backup_result_label.setText(f"Đã sao lưu: {path}")
+        self.backup_file_label.setText(path.name)
+        self.backup_result_label.setText(
+            f"Đã sao lưu thành công: {path}"
+        )
 
     def restore_backup(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn bản sao lưu AgribankV3",
             str(self.database.backup_directory),
-            "SQLite database (*.sqlite3 *.db);;Tất cả tệp (*)",
+            "Gói sao lưu AgribankV3 (*.zip);;"
+            "Bản sao database cũ (*.sqlite3 *.db);;Tất cả tệp (*)",
         )
         if not selected:
             return
         answer = QMessageBox.question(
             self,
             "Xác nhận phục hồi",
-            "Dữ liệu hiện tại sẽ được thay bằng bản sao đã chọn. Ứng dụng sẽ "
-            "tự tạo một bản sao an toàn trước khi thực hiện. Tiếp tục?",
+            "Các database trong gói sẽ thay thế dữ liệu hiện tại. Ứng dụng sẽ "
+            "tự tạo một gói sao lưu an toàn trước khi thực hiện. Tiếp tục?",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -411,6 +455,7 @@ class SettingsWidget(QWidget):
         self.backup_result_label.setText(
             f"Đã phục hồi. Bản sao trước phục hồi: {safety_backup}"
         )
+        self.backup_file_label.setText(safety_backup.name)
 
     def open_backup_folder(self) -> None:
         from PySide6.QtCore import QUrl

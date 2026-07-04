@@ -5,6 +5,7 @@ from contextlib import closing
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
+import zipfile
 
 from agribank_v3.settings import AddinMode, AppSettingsDatabase, BranchProfile
 
@@ -16,6 +17,18 @@ class SettingsDatabaseTests(unittest.TestCase):
             Path(self.temporary_directory.name) / "DuLieuV3.db"
         )
         self.database = AppSettingsDatabase(self.database_path)
+        with closing(
+            sqlite3.connect(self.database.quiz_database_path)
+        ) as connection:
+            connection.execute(
+                """
+                CREATE TABLE questions (
+                    id INTEGER PRIMARY KEY,
+                    question_text TEXT NOT NULL
+                )
+                """
+            )
+            connection.commit()
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -66,6 +79,54 @@ class SettingsDatabaseTests(unittest.TestCase):
         self.assertEqual(restored.branch_name, "Chi nhánh A")
         self.assertTrue(safety_backup.is_file())
         self.assertEqual(self.database.status().integrity, "ok")
+
+    def test_backup_bundle_includes_and_restores_both_databases(self) -> None:
+        self.database.save_branch_profile(
+            BranchProfile(branch_code="1001", branch_name="Chi nhánh A")
+        )
+        with closing(
+            sqlite3.connect(self.database.quiz_database_path)
+        ) as connection:
+            connection.execute(
+                """
+                INSERT INTO questions(id, question_text)
+                VALUES (1, 'Nội dung trước sao lưu')
+                """
+            )
+            connection.commit()
+
+        backup = self.database.create_backup()
+        self.assertEqual(backup.suffix, ".zip")
+        with zipfile.ZipFile(backup) as archive:
+            self.assertEqual(
+                set(archive.namelist()),
+                {"manifest.json", "DuLieuV3.db", "quiz.db"},
+            )
+
+        self.database.save_branch_profile(
+            BranchProfile(branch_code="2002", branch_name="Chi nhánh B")
+        )
+        with closing(
+            sqlite3.connect(self.database.quiz_database_path)
+        ) as connection:
+            connection.execute(
+                "UPDATE questions SET question_text = 'Nội dung đã thay đổi'"
+            )
+            connection.commit()
+
+        self.database.restore_backup(backup)
+
+        self.assertEqual(
+            self.database.load_branch_profile().branch_code,
+            "1001",
+        )
+        with closing(
+            sqlite3.connect(self.database.quiz_database_path)
+        ) as connection:
+            restored_question = connection.execute(
+                "SELECT question_text FROM questions WHERE id = 1"
+            ).fetchone()[0]
+        self.assertEqual(restored_question, "Nội dung trước sao lưu")
 
     def test_addin_mode_defaults_to_permanent_and_is_durable(self) -> None:
         self.assertEqual(
