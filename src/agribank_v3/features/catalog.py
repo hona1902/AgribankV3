@@ -120,17 +120,17 @@ QUYET_TOAN_KE_TOAN_FEATURES: list[Feature] = [
         "QT/Mau_08_QT_text.svg",
     ),
     Feature(
-        "Tạo Mẫu biểu 09a/QT (From Mshr32_TMBCTC_TSCD008)",
+        "Tạo Mẫu biểu 09a/QT (Màn hình mshr32 - xuất Excel báo cáo TMBCTC_TSCD001)",
         "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Hữu Hình",
         "QT/Mau_09a_QT_text.svg",
     ),
     Feature(
-        "Tạo Mẫu biểu 09b/QT (From Mshr32_TMBCTC_TSCD009)",
+        "Tạo Mẫu biểu 09b/QT (Màn hình mshr32 - xuất Excel báo cáo TMBCTC_TSCD002)",
         "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Vô Hình",
         "QT/Mau_09b_QT_text.svg",
     ),
     Feature(
-        "Tạo Mẫu biểu 09c/QT (From Mshr32_TMBCTC_TSCD010)",
+        "Tạo Mẫu biểu 09c/QT (Màn hình mshr32 - xuất Excel báo cáo TMBCTC_TSCD003)",
         "- Báo Cáo Tình Hình Tăng, Giảm TSCĐ Thuê Tài Chính",
         "QT/Mau_09c_QT_text.svg",
     ),

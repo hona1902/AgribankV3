@@ -73,7 +73,7 @@ class Mau1516Processor:
         records, report_date = self.read_source(request, source_path)
         workbook = self.build_workbook(request, records, report_date)
         output_path = source_path.with_name(
-            f"{request.profile.branch_code.strip()}QT{request.spec.report_code}.xlsx"
+            f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}{request.spec.report_code}.xlsx"
         )
         workbook.save(output_path)
         return SettlementResult(
@@ -905,6 +905,11 @@ class Mau1516Processor:
                 code="unsupported_report",
             )
         return code
+
+    @staticmethod
+    def _output_prefix(options: SettlementOptions) -> str:
+        prefix = (options.output_prefix or "QT").strip().upper()
+        return "BN" if prefix == "BN" else "QT"
 
     @staticmethod
     def _merge_if_unmerged(sheet, start_row: int, start_column: int, end_row: int, end_column: int) -> None:

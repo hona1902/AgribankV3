@@ -36,6 +36,7 @@ class SettlementOptions:
     use_default_accrual_accounts: bool = True
     include_loan_deposit_schedule: bool = False
     source_report_code: str = ""
+    output_prefix: str = "QT"
 
 
 @dataclass(frozen=True, slots=True)

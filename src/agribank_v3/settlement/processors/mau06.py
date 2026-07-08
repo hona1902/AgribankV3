@@ -7,7 +7,7 @@ from openpyxl.styles import Alignment, Border, Font, Side
 from openpyxl.utils import get_column_letter
 
 from agribank_v3.settlement.engine import SettlementError
-from agribank_v3.settlement.models import SettlementRequest, SettlementResult
+from agribank_v3.settlement.models import SettlementOptions, SettlementRequest, SettlementResult
 from agribank_v3.settlement.processors.formatting import (
     setup_a4_print_layout,
     style_agency_header,
@@ -26,7 +26,7 @@ class Mau06Processor:
         values = load_workbook(source_path, data_only=True)["05"]
         output = self.build_workbook(request, values)
         output_path = source_path.with_name(
-            f"{request.profile.branch_code.strip()}QT06.xlsx"
+            f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}06.xlsx"
         )
         output.save(output_path)
         return SettlementResult(
@@ -216,3 +216,8 @@ class Mau06Processor:
         sheet.row_dimensions[10].height = 60
         sheet.sheet_view.showGridLines = False
         setup_a4_print_layout(sheet, print_area="A1:K40")
+
+    @staticmethod
+    def _output_prefix(options: SettlementOptions) -> str:
+        prefix = (options.output_prefix or "QT").strip().upper()
+        return "BN" if prefix == "BN" else "QT"

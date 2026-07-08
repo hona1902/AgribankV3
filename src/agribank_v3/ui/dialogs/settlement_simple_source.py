@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,28 +15,31 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QVBoxLayout,
     QWidget,
-    QGroupBox,
 )
 
 from agribank_v3.settings import BranchProfile
-from agribank_v3.settlement.models import SettlementOptions
+from agribank_v3.settlement.models import SettlementOptions, SettlementSpec
 from agribank_v3.ui.dialogs.settlement_period import (
     load_output_prefix,
     save_output_prefix,
 )
 
 
-class Mau06SettlementDialog(QDialog):
+class SimpleSourceSettlementDialog(QDialog):
+    """Compact one-source settlement dialog used by accounting fixed templates."""
+
     def __init__(
         self,
+        spec: SettlementSpec,
         profile: BranchProfile,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.spec = spec
         self.profile = profile
         self.source_path: Path | None = None
 
-        self.setWindowTitle("Tạo Mẫu biểu Quyết toán 06/QT")
+        self.setWindowTitle(f"Tạo Mẫu biểu Quyết toán {spec.report_code}/QT")
         self.setModal(True)
         self.setMinimumWidth(690)
 
@@ -44,8 +48,8 @@ class Mau06SettlementDialog(QDialog):
         layout.setSpacing(12)
 
         source_label = QLabel(
-            "Tên File nguồn Mẫu 05/QT dùng xử lý để tạo ra Mẫu biểu 06QT là: "
-            f"{profile.branch_code.strip()}QT05.xlsx"
+            "Tên File nguồn dùng xử lý để tạo ra Mẫu biểu "
+            f"{spec.report_code}QT là: {self._source_hint_text()}"
         )
         source_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         source_label.setWordWrap(True)
@@ -62,7 +66,9 @@ class Mau06SettlementDialog(QDialog):
 
         layout.addWidget(self._output_prefix_group())
 
-        output_label = QLabel("Tên File quyết toán Mẫu 06/QT sẽ được tạo ra:")
+        output_label = QLabel(
+            f"Tên File quyết toán Mẫu {spec.report_code}/QT sẽ được tạo ra:"
+        )
         output_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         layout.addWidget(output_label)
         self.output_edit = QLineEdit()
@@ -96,9 +102,9 @@ class Mau06SettlementDialog(QDialog):
         initial = str(self.source_path.parent) if self.source_path else ""
         file_name, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn file Mẫu 05/QT",
+            f"Chọn file nguồn Mẫu {self.spec.report_code}/QT",
             initial,
-            "File Mẫu 05/QT (*.xlsx *.xlsm *.xls)",
+            self._source_file_filter(),
         )
         if not file_name:
             return
@@ -111,7 +117,7 @@ class Mau06SettlementDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Chưa chọn file nguồn",
-                "Hãy chọn file Mẫu 05/QT trước khi tạo Mẫu biểu 06/QT.",
+                f"Hãy chọn file nguồn trước khi tạo Mẫu biểu {self.spec.report_code}/QT.",
             )
             return
         super().accept()
@@ -120,14 +126,27 @@ class Mau06SettlementDialog(QDialog):
         if self.source_path is None:
             return None
         return self.source_path.with_name(
-            f"{self.profile.branch_code.strip()}{self.output_prefix()}06.xlsx"
+            f"{self.profile.branch_code.strip()}{self.output_prefix()}{self.output_report_code()}.xlsx"
         )
+
+    def output_prefix(self) -> str:
+        return "BN" if self.bn_prefix_radio.isChecked() else "QT"
+
+    def output_report_code(self) -> str:
+        special_codes = {
+            "accounting.07a": "07A",
+            "accounting.09a": "9a",
+            "accounting.09b": "9b",
+            "accounting.09c": "9c",
+        }
+        return special_codes.get(self.spec.key, self.spec.report_code)
 
     def options(self) -> SettlementOptions:
         return SettlementOptions(output_prefix=self.output_prefix())
 
-    def output_prefix(self) -> str:
-        return "BN" if self.bn_prefix_radio.isChecked() else "QT"
+    def _refresh_output_path(self) -> None:
+        output_path = self.output_path()
+        self.output_edit.setText(str(output_path) if output_path else "")
 
     def _apply_saved_output_prefix(self) -> None:
         if load_output_prefix() == "BN":
@@ -139,6 +158,15 @@ class Mau06SettlementDialog(QDialog):
         save_output_prefix(self.output_prefix())
         self._refresh_output_path()
 
-    def _refresh_output_path(self) -> None:
-        output_path = self.output_path()
-        self.output_edit.setText(str(output_path) if output_path else "")
+    def _source_hint_text(self) -> str:
+        return self.spec.source_hint.replace(
+            "{MaCN}",
+            self.profile.branch_code.strip() or "MaCN",
+        )
+
+    def _source_file_filter(self) -> str:
+        return (
+            "File Excel nguồn (*.xls *.xlsx *.xlsm);;"
+            "CSV nguồn quyết toán (*.csv);;"
+            "Tất cả file (*.*)"
+        )

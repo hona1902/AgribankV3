@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import date
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
@@ -70,7 +71,7 @@ class Mau30Processor:
         model: str,
         balance: dict[str, Decimal] | None = None,
     ):
-        if model.casefold() != "20a" and "SoLieuTongHop" not in values_workbook.sheetnames:
+        if model.casefold() not in {"20a", "22", "23"} and "SoLieuTongHop" not in values_workbook.sheetnames:
             raise SettlementError("File nguồn không có sheet SoLieuTongHop.")
         source_sheet_name = self._sheet_name(values_workbook, model)
         if not source_sheet_name:
@@ -113,6 +114,39 @@ class Mau30Processor:
                     )
             return list(grouped.items())
 
+        if model == "22":
+            source_sheet_name = self._sheet_name(values_workbook, model)
+            if not source_sheet_name:
+                raise SettlementError("File nguồn không có sheet 22.")
+            source = values_workbook[source_sheet_name]
+            grouped: OrderedDict[str, Decimal] = OrderedDict()
+            for row in range(12, source.max_row + 1):
+                label = self._text(source.cell(row, 1).value)
+                if label.casefold().startswith("cộng"):
+                    break
+                account = self._text(source.cell(row, 3).value)
+                if not account or not account[:1].isdigit():
+                    continue
+                grouped[account] = grouped.get(account, Decimal(0)) + self._number(
+                    source.cell(row, 13).value
+                )
+            return list(grouped.items())
+
+        if model == "23":
+            source_sheet_name = self._sheet_name(values_workbook, model)
+            if not source_sheet_name:
+                raise SettlementError("File nguồn không có sheet 23.")
+            source = values_workbook[source_sheet_name]
+            rows: list[tuple[str, Decimal]] = []
+            for row in range(12, source.max_row + 1):
+                label = self._text(source.cell(row, 1).value)
+                if not label.casefold().startswith("cộng tk"):
+                    continue
+                account = "".join(ch for ch in label if ch.isdigit())
+                if account:
+                    rows.append((account, self._number(source.cell(row, 4).value)))
+            return rows
+
         source = values_workbook["SoLieuTongHop"]
         if model == "05":
             rows = []
@@ -133,7 +167,7 @@ class Mau30Processor:
                 source.cell(row, 3).value
             )
 
-        if model.casefold() in {"15a", "15b"} and request.options.include_accrual_accounts:
+        if model.casefold() in {"13", "15a", "15b"} and request.options.include_accrual_accounts:
             for column in range(6, source.max_column + 1):
                 account = self._text(source.cell(2, column).value)
                 if not account:
@@ -157,12 +191,12 @@ class Mau30Processor:
             f"{model}"
         )
         sheet["A6"] = f"Tên mẫu biểu: {self._source_title(source_sheet, model)}"
-        sheet["A7"] = self._source_report_date(source_sheet, model)
+        sheet["A7"] = self._source_report_date(source_sheet, model, request)
         sheet["H8"] = "Đơn vị : VND"
         sheet["F1"] = "1. Mẫu số 30/QT"
         sheet["F2"] = "2. CN loại I gửi kèm trong file mẫu biểu QT về TSC"
         sheet["F3"] = "3. Lưu tại chi nhánh"
-        for address in ("A1:C1", "A2:C2", "A3:C3", "A4:C4", "A5:H5", "A6:H6", "A7:H7"):
+        for address in ("A1:D1", "A2:D2", "A3:D3", "A4:D4", "A5:H5", "A6:H6", "A7:H7"):
             sheet.merge_cells(address)
 
         headers = {
@@ -301,6 +335,7 @@ class Mau30Processor:
         sheet.row_dimensions[9].height = 16
         sheet.row_dimensions[10].height = 65
         sheet.row_dimensions[5].height = 25
+        sheet.row_dimensions[6].height = 40
         sheet.row_dimensions[5].font = Font(name="Times New Roman", size=16, bold=True)
         setup_a4_print_layout(
             sheet,
@@ -319,12 +354,30 @@ class Mau30Processor:
         return str(source_sheet["A6"].value or "")
 
     @staticmethod
-    def _source_report_date(source_sheet, model: str) -> str:
+    def _source_report_date(source_sheet, model: str, request: SettlementRequest) -> str:
         if model == "05":
             return str(source_sheet["A6"].value or "")
         if model == "13":
             return str(source_sheet["A7"].value or "")
-        return str(source_sheet["A7"].value or "")
+        value = str(source_sheet["A7"].value or "")
+        if model == "22":
+            return Mau30Processor._normalize_report_date(value, request)
+        return value
+
+    @staticmethod
+    def _normalize_report_date(value: str, request: SettlementRequest) -> str:
+        text = value.strip()
+        compact = text.replace("/", " ").replace("-", " ")
+        parts = [part for part in compact.split() if part.isdigit()]
+        if len(parts) >= 3:
+            day, month, year = parts[-3:]
+            return f"ngày {int(day)} tháng {int(month)} năm {int(year)}"
+        if text.casefold().startswith("ngày "):
+            return "ngày " + text[5:].strip()
+        today = date.today()
+        if request.options.output_prefix == "BN":
+            return f"ngày 30 tháng 6 năm {today.year}"
+        return f"ngày 31 tháng 12 năm {today.year}"
 
     @staticmethod
     def _model_from_request(request: SettlementRequest, source_path: Path, workbook) -> str:
@@ -333,9 +386,9 @@ class Mau30Processor:
             return selected
         for part in source_path.stem.upper().split("QT", 1)[-1:]:
             normalized = part.replace("A", "a")
-            if normalized in {"05", "15a", "15b", "18", "20a"}:
+            if normalized in {"05", "13", "15a", "15b", "18", "20a", "22", "23", "24"}:
                 return normalized
-        for candidate in ("05", "15a", "15b", "18", "20a"):
+        for candidate in ("05", "13", "15a", "15b", "18", "20a", "22", "23", "24"):
             if Mau30Processor._sheet_name(workbook, candidate):
                 return candidate
         raise SettlementError("Không xác định được mã mẫu QT nguồn để tạo Mẫu 30/QT.")

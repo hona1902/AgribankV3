@@ -20,6 +20,10 @@ from PySide6.QtWidgets import (
 
 from agribank_v3.settings import BranchProfile
 from agribank_v3.settlement.models import SettlementOptions
+from agribank_v3.ui.dialogs.settlement_period import (
+    load_output_prefix,
+    save_output_prefix,
+)
 
 
 class Mau05SettlementDialog(QDialog):
@@ -70,6 +74,8 @@ class Mau05SettlementDialog(QDialog):
         second_options_row.addWidget(self._cleanup_group())
         layout.addLayout(second_options_row)
 
+        layout.addWidget(self._output_prefix_group())
+
         output_label = QLabel("Tên File quyết toán Mẫu 05/QT sẽ được tạo ra:")
         output_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         layout.addWidget(output_label)
@@ -94,9 +100,6 @@ class Mau05SettlementDialog(QDialog):
         layout.addWidget(self.convert_checkbox)
 
         buttons = QDialogButtonBox()
-        about_button = QPushButton("About")
-        about_button.setEnabled(False)
-        buttons.addButton(about_button, QDialogButtonBox.ButtonRole.HelpRole)
         create_button = QPushButton("Tạo Mẫu biểu")
         create_button.setObjectName("PrimaryButton")
         buttons.addButton(create_button, QDialogButtonBox.ButtonRole.AcceptRole)
@@ -105,6 +108,8 @@ class Mau05SettlementDialog(QDialog):
         create_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
         layout.addWidget(buttons)
+
+        self._apply_saved_output_prefix()
 
     def _customer_code_group(self) -> QGroupBox:
         group = QGroupBox("Thêm mã Chi nhánh vào đầu mỗi Mã số KH")
@@ -146,6 +151,17 @@ class Mau05SettlementDialog(QDialog):
         layout.addWidget(self.keep_unused_radio)
         return group
 
+    def _output_prefix_group(self) -> QGroupBox:
+        group = QGroupBox("Loại kỳ báo cáo")
+        layout = QHBoxLayout(group)
+        self.qt_prefix_radio = QRadioButton("Quyết toán năm (QT)")
+        self.bn_prefix_radio = QRadioButton("Bán niên (BN)")
+        self.qt_prefix_radio.toggled.connect(self._sync_output_prefix)
+        self.bn_prefix_radio.toggled.connect(self._sync_output_prefix)
+        layout.addWidget(self.qt_prefix_radio)
+        layout.addWidget(self.bn_prefix_radio)
+        return group
+
     def choose_source_file(self) -> None:
         initial = str(self.source_path.parent) if self.source_path else ""
         file_name, _ = QFileDialog.getOpenFileName(
@@ -158,7 +174,7 @@ class Mau05SettlementDialog(QDialog):
             return
         self.source_path = Path(file_name)
         self.source_edit.setText(str(self.source_path))
-        self.output_edit.setText(str(self.output_path()))
+        self._refresh_output_path()
 
     def accept(self) -> None:
         if self.source_path is None:
@@ -174,8 +190,11 @@ class Mau05SettlementDialog(QDialog):
         if self.source_path is None:
             return None
         return self.source_path.with_name(
-            f"{self.profile.branch_code.strip()}QT05.xlsx"
+            f"{self.profile.branch_code.strip()}{self.output_prefix()}05.xlsx"
         )
+
+    def output_prefix(self) -> str:
+        return "BN" if self.bn_prefix_radio.isChecked() else "QT"
 
     def options(self) -> SettlementOptions:
         return SettlementOptions(
@@ -186,4 +205,19 @@ class Mau05SettlementDialog(QDialog):
             remove_unused_columns=self.remove_unused_radio.isChecked(),
             include_customer_totals=False,
             remove_customer_total_rows=True,
+            output_prefix=self.output_prefix(),
         )
+
+    def _apply_saved_output_prefix(self) -> None:
+        if load_output_prefix() == "BN":
+            self.bn_prefix_radio.setChecked(True)
+        else:
+            self.qt_prefix_radio.setChecked(True)
+
+    def _sync_output_prefix(self) -> None:
+        save_output_prefix(self.output_prefix())
+        self._refresh_output_path()
+
+    def _refresh_output_path(self) -> None:
+        output_path = self.output_path()
+        self.output_edit.setText(str(output_path) if output_path else "")

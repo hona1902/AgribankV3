@@ -78,7 +78,7 @@ class Mau18Processor:
         records, report_date = self.read_source(request, source_path)
         workbook = self.build_workbook(request, records, report_date)
         output_path = source_path.with_name(
-            f"{request.profile.branch_code.strip()}QT18.xlsx"
+            f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}18.xlsx"
         )
         workbook.save(output_path)
         return SettlementResult(
@@ -581,3 +581,8 @@ class Mau18Processor:
         )
         if cell_range not in {str(merged) for merged in sheet.merged_cells.ranges}:
             sheet.merge_cells(cell_range)
+
+    @staticmethod
+    def _output_prefix(options: SettlementOptions) -> str:
+        prefix = (options.output_prefix or "QT").strip().upper()
+        return "BN" if prefix == "BN" else "QT"

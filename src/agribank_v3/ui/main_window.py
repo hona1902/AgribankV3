@@ -40,11 +40,18 @@ from agribank_v3.settlement import (
     SettlementRequest,
 )
 from agribank_v3.settlement.processors import (
+    Mau04Processor,
     Mau05Processor,
     Mau06Processor,
+    Mau0708Processor,
+    Mau09Processor,
+    Mau1314Processor,
     Mau1516Processor,
     Mau18Processor,
     Mau20aProcessor,
+    Mau22Processor,
+    Mau23Processor,
+    Mau24Processor,
     Mau30Processor,
 )
 from agribank_v3.excel import (
@@ -60,6 +67,8 @@ from agribank_v3.ui.dialogs.settlement_mau1516 import Mau1516SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau05 import Mau05SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau06 import Mau06SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau30 import Mau30SettlementDialog
+from agribank_v3.ui.dialogs.settlement_multi_source import MultiSourceSettlementDialog
+from agribank_v3.ui.dialogs.settlement_simple_source import SimpleSourceSettlementDialog
 from agribank_v3.ui.dialogs.quiz import QuizWidget
 from agribank_v3.ui.icons import app_icon, icon_path
 from agribank_v3.ui.settings import SettingsWidget
@@ -196,11 +205,19 @@ class MainWindow(QMainWindow):
         self.nav_buttons: list[QPushButton] = []
         self.excel_service = ExcelService()
         self.settlement_engine = SettlementEngine()
+        self.settlement_engine.register("mau04", Mau04Processor())
         self.settlement_engine.register("mau05", Mau05Processor())
         self.settlement_engine.register("mau06", Mau06Processor())
+        self.settlement_engine.register("mau07", Mau0708Processor())
+        self.settlement_engine.register("mau08", Mau0708Processor())
+        self.settlement_engine.register("mau09", Mau09Processor())
+        self.settlement_engine.register("mau13_14", Mau1314Processor())
         self.settlement_engine.register("mau15_16", Mau1516Processor())
         self.settlement_engine.register("mau18", Mau18Processor())
         self.settlement_engine.register("mau20a", Mau20aProcessor())
+        self.settlement_engine.register("mau22", Mau22Processor())
+        self.settlement_engine.register("mau23", Mau23Processor())
+        self.settlement_engine.register("mau24", Mau24Processor())
         self.settlement_engine.register("mau30", Mau30Processor())
         self.excel_context: ExcelContext | None = None
         self.sidebar_expanded = True
@@ -574,6 +591,32 @@ class MainWindow(QMainWindow):
         self.nav_buttons[NAVIGATION.index("Quyết toán")].setChecked(True)
 
     def _open_quyet_toan_ke_toan_feature(self, title: str) -> None:
+        for spec_key in (
+            "accounting.04",
+            "accounting.07a",
+            "accounting.08",
+            "accounting.09a",
+            "accounting.09b",
+            "accounting.09c",
+            "accounting.13",
+            "accounting.14",
+            "accounting.22",
+            "accounting.23",
+            "accounting.24",
+            "accounting.30a",
+        ):
+            spec = SETTLEMENT_SPECS[spec_key]
+            expected_prefix = f"Tạo Mẫu biểu {spec.report_code}/QT"
+            if title.casefold().startswith(expected_prefix.casefold()):
+                if spec_key == "accounting.30a":
+                    self._run_mau30_dialog(spec_key)
+                elif spec_key in self._simple_source_settlement_keys():
+                    self._run_simple_source_dialog(spec_key)
+                elif spec_key in self._multi_source_settlement_keys():
+                    self._run_multi_source_dialog(spec_key)
+                else:
+                    self._run_mau1516_dialog(spec_key)
+                return
         QMessageBox.information(
             self,
             title,
@@ -864,6 +907,14 @@ class MainWindow(QMainWindow):
                 "thanh tác vụ Windows.",
             )
 
+    def _open_result_file(self, path: Path) -> None:
+        timer_was_active = self.auto_connect_timer.isActive()
+        if timer_was_active:
+            self.auto_connect_timer.stop()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        if timer_was_active:
+            QTimer.singleShot(60_000, self.auto_connect_timer.start)
+
     def auto_detect_excel(self) -> None:
         try:
             if self.excel_service.is_connected:
@@ -948,7 +999,7 @@ class MainWindow(QMainWindow):
                 return
 
         if title.casefold().startswith("tạo mẫu biểu 30a/qt"):
-            self._run_mau30_dialog()
+            self._run_mau30_dialog("credit.30a")
             return
 
         if title == "Chuyển kiểu chữ":
@@ -1108,12 +1159,16 @@ class MainWindow(QMainWindow):
         open_answer = QMessageBox.question(
             self,
             f"Hoàn thành {spec.title}",
-            f"Đã tạo file:\n{result.output_path}\n\nMở file kết quả bây giờ?",
+            (
+                f"Đã tạo file:\n{result.output_path}"
+                + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
+                + "\n\nMở file kết quả bây giờ?"
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if open_answer == QMessageBox.StandardButton.Yes:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+            self._open_result_file(result.output_path)
 
     def _run_mau06_dialog(self) -> None:
         spec = SETTLEMENT_SPECS["credit.06"]
@@ -1151,6 +1206,7 @@ class MainWindow(QMainWindow):
                 SettlementRequest(
                     spec=spec,
                     profile=profile,
+                    options=dialog.options(),
                     source_paths=(source_path,),
                 )
             )
@@ -1179,12 +1235,16 @@ class MainWindow(QMainWindow):
         open_answer = QMessageBox.question(
             self,
             f"Hoàn thành {spec.title}",
-            f"Đã tạo file:\n{result.output_path}\n\nMở file kết quả bây giờ?",
+            (
+                f"Đã tạo file:\n{result.output_path}"
+                + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
+                + "\n\nMở file kết quả bây giờ?"
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if open_answer == QMessageBox.StandardButton.Yes:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+            self._open_result_file(result.output_path)
 
     def _run_mau1516_dialog(self, spec_key: str) -> None:
         spec = SETTLEMENT_SPECS[spec_key]
@@ -1251,15 +1311,174 @@ class MainWindow(QMainWindow):
         open_answer = QMessageBox.question(
             self,
             f"Hoàn thành {spec.title}",
-            f"Đã tạo file:\n{result.output_path}\n\nMở file kết quả bây giờ?",
+            (
+                f"Đã tạo file:\n{result.output_path}"
+                + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
+                + "\n\nMở file kết quả bây giờ?"
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if open_answer == QMessageBox.StandardButton.Yes:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+            self._open_result_file(result.output_path)
 
-    def _run_mau30_dialog(self) -> None:
-        spec = SETTLEMENT_SPECS["credit.30a"]
+    def _run_simple_source_dialog(self, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+
+        dialog = SimpleSourceSettlementDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source_path = dialog.source_path
+        output_path = dialog.output_path()
+        if source_path is None or output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        progress = self._show_busy_dialog(
+            f"Đang tạo mẫu quyết toán {spec.report_code}/QT...\n"
+            "Vui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            result = self.settlement_engine.execute(
+                SettlementRequest(
+                    spec=spec,
+                    profile=profile,
+                    options=dialog.options(),
+                    source_paths=(source_path,),
+                )
+            )
+        except (SettlementError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                str(execution_error),
+            )
+            return
+
+        if result is None or result.output_path is None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                "Processor không trả về file kết quả.",
+            )
+            return
+        self.statusBar().showMessage(
+            f"Đã tạo {result.output_path.name} từ {source_path.name}"
+        )
+        open_answer = QMessageBox.question(
+            self,
+            f"Hoàn thành {spec.title}",
+            (
+                f"Đã tạo file:\n{result.output_path}"
+                + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
+                + "\n\nMở file kết quả bây giờ?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if open_answer == QMessageBox.StandardButton.Yes:
+            self._open_result_file(result.output_path)
+
+    def _run_multi_source_dialog(self, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+
+        dialog = MultiSourceSettlementDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        output_path = dialog.output_path()
+        if output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        progress = self._show_busy_dialog(
+            f"Đang tạo mẫu quyết toán {spec.report_code}/QT...\n"
+            "Vui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            result = self.settlement_engine.execute(
+                SettlementRequest(
+                    spec=spec,
+                    profile=profile,
+                    options=dialog.options(),
+                    source_paths=tuple(dialog.source_paths),
+                )
+            )
+        except (SettlementError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(execution_error))
+            return
+        if result is None or result.output_path is None:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", "Processor không trả về file kết quả.")
+            return
+        self.statusBar().showMessage(f"Đã tạo {result.output_path.name}")
+        open_answer = QMessageBox.question(
+            self,
+            f"Hoàn thành {spec.title}",
+            (
+                f"Đã tạo file:\n{result.output_path}"
+                + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
+                + "\n\nMở file kết quả bây giờ?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if open_answer == QMessageBox.StandardButton.Yes:
+            self._open_result_file(result.output_path)
+
+    @staticmethod
+    def _simple_source_settlement_keys() -> set[str]:
+        return {
+            "accounting.04",
+            "accounting.07a",
+            "accounting.08",
+            "accounting.09a",
+            "accounting.09b",
+            "accounting.09c",
+        }
+
+    @staticmethod
+    def _multi_source_settlement_keys() -> set[str]:
+        return {"accounting.22", "accounting.23"}
+
+    def _run_mau30_dialog(self, spec_key: str = "credit.30a") -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
         try:
             profile = self.settings_widget.database.load_branch_profile()
         except SettingsDatabaseError as exc:
@@ -1272,7 +1491,7 @@ class MainWindow(QMainWindow):
         last_balance_path = (
             Path(last_balance_text) if last_balance_text else None
         )
-        dialog = Mau30SettlementDialog(profile, last_balance_path, self)
+        dialog = Mau30SettlementDialog(profile, spec, last_balance_path, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         source_path = dialog.source_path
@@ -1337,7 +1556,7 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes,
         )
         if open_answer == QMessageBox.StandardButton.Yes:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path)))
+            self._open_result_file(result.output_path)
 
     def _show_busy_dialog(self, message: str) -> QDialog:
         progress = QDialog(self)

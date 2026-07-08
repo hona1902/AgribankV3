@@ -70,7 +70,7 @@ class Mau05Processor:
         source_path = request.source_paths[0]
         records, report_date = self.read_source(request, source_path)
         output_path = source_path.with_name(
-            f"{request.profile.branch_code.strip()}QT05.xlsx"
+            f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}05.xlsx"
         )
         workbook = self.build_workbook(request, records, report_date)
         workbook.save(output_path)
@@ -632,3 +632,8 @@ class Mau05Processor:
             return int(float(value.strip() or "0"))
         except ValueError:
             return 0
+
+    @staticmethod
+    def _output_prefix(options: SettlementOptions) -> str:
+        prefix = (options.output_prefix or "QT").strip().upper()
+        return "BN" if prefix == "BN" else "QT"

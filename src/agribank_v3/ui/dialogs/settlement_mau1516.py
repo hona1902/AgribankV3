@@ -21,6 +21,10 @@ from PySide6.QtWidgets import (
 
 from agribank_v3.settings import BranchProfile
 from agribank_v3.settlement.models import SettlementOptions, SettlementSpec
+from agribank_v3.ui.dialogs.settlement_period import (
+    load_output_prefix,
+    save_output_prefix,
+)
 
 
 class Mau1516SettlementDialog(QDialog):
@@ -79,6 +83,9 @@ class Mau1516SettlementDialog(QDialog):
         self.lds_checkbox.setVisible(spec.report_code.casefold() in {"15a", "15b"})
         layout.addWidget(self.lds_checkbox)
 
+        self.output_prefix_group = self._output_prefix_group()
+        layout.addWidget(self.output_prefix_group)
+
         output_label = QLabel(f"Tên File quyết toán Mẫu {spec.report_code}/QT sẽ được tạo ra:")
         output_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         layout.addWidget(output_label)
@@ -96,6 +103,8 @@ class Mau1516SettlementDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
         layout.addWidget(buttons)
 
+        self._apply_saved_output_prefix()
+
     def _customer_code_group(self) -> QGroupBox:
         group = QGroupBox("Thêm mã Chi nhánh vào đầu mỗi Mã số KH")
         layout = QVBoxLayout(group)
@@ -104,6 +113,17 @@ class Mau1516SettlementDialog(QDialog):
         self.no_branch_radio.setChecked(True)
         layout.addWidget(self.add_branch_radio)
         layout.addWidget(self.no_branch_radio)
+        return group
+
+    def _output_prefix_group(self) -> QGroupBox:
+        group = QGroupBox("Loại kỳ báo cáo")
+        layout = QHBoxLayout(group)
+        self.qt_prefix_radio = QRadioButton("Quyết toán năm (QT)")
+        self.bn_prefix_radio = QRadioButton("Bán niên (BN)")
+        self.qt_prefix_radio.toggled.connect(self._sync_output_prefix)
+        self.bn_prefix_radio.toggled.connect(self._sync_output_prefix)
+        layout.addWidget(self.qt_prefix_radio)
+        layout.addWidget(self.bn_prefix_radio)
         return group
 
     def _control_sheet_group(self) -> QGroupBox:
@@ -122,7 +142,9 @@ class Mau1516SettlementDialog(QDialog):
         self.add_accrual_radio.setChecked(True)
         accrual_layout.addWidget(self.add_accrual_radio)
         accrual_layout.addWidget(self.default_accrual_radio)
-        self.accrual_frame.setVisible(self.spec.report_code.casefold() in {"15a", "15b"})
+        self.accrual_frame.setVisible(
+            self.spec.report_code.casefold() in {"13", "15a", "15b"}
+        )
         layout.addWidget(self.accrual_frame)
 
         layout.addWidget(self.no_control_radio)
@@ -131,10 +153,10 @@ class Mau1516SettlementDialog(QDialog):
         return group
 
     def _sync_accrual_options(self, enabled: bool) -> None:
-        is_1516 = self.spec.report_code.casefold() in {"15a", "15b"}
-        self.accrual_frame.setEnabled(enabled and is_1516)
-        self.add_accrual_radio.setEnabled(enabled and is_1516)
-        self.default_accrual_radio.setEnabled(enabled and is_1516)
+        supports_accrual = self.spec.report_code.casefold() in {"13", "15a", "15b"}
+        self.accrual_frame.setEnabled(enabled and supports_accrual)
+        self.add_accrual_radio.setEnabled(enabled and supports_accrual)
+        self.default_accrual_radio.setEnabled(enabled and supports_accrual)
 
     def _date_format_group(self) -> QGroupBox:
         group = QGroupBox("Định dạng cột ngày tháng năm theo dạng:")
@@ -169,7 +191,7 @@ class Mau1516SettlementDialog(QDialog):
             return
         self.source_path = Path(file_name)
         self.source_edit.setText(str(self.source_path))
-        self.output_edit.setText(str(self.output_path()))
+        self._refresh_output_path()
 
     def accept(self) -> None:
         if self.source_path is None:
@@ -185,8 +207,20 @@ class Mau1516SettlementDialog(QDialog):
         if self.source_path is None:
             return None
         return self.source_path.with_name(
-            f"{self.profile.branch_code.strip()}QT{self.spec.report_code}.xlsx"
+            f"{self.profile.branch_code.strip()}{self.output_prefix()}{self.output_report_code()}.xlsx"
         )
+
+    def output_prefix(self) -> str:
+        return "BN" if self.bn_prefix_radio.isChecked() else "QT"
+
+    def output_report_code(self) -> str:
+        special_codes = {
+            "accounting.09a": "9a",
+            "accounting.09b": "9b",
+            "accounting.09c": "9c",
+            "accounting.24": "24a",
+        }
+        return special_codes.get(self.spec.key, self.spec.report_code)
 
     def options(self) -> SettlementOptions:
         return SettlementOptions(
@@ -204,7 +238,22 @@ class Mau1516SettlementDialog(QDialog):
                 and self.default_accrual_radio.isChecked()
             ),
             include_loan_deposit_schedule=self.lds_checkbox.isChecked(),
+            output_prefix=self.output_prefix(),
         )
+
+    def _refresh_output_path(self) -> None:
+        output_path = self.output_path()
+        self.output_edit.setText(str(output_path) if output_path else "")
+
+    def _apply_saved_output_prefix(self) -> None:
+        if load_output_prefix() == "BN":
+            self.bn_prefix_radio.setChecked(True)
+        else:
+            self.qt_prefix_radio.setChecked(True)
+
+    def _sync_output_prefix(self) -> None:
+        save_output_prefix(self.output_prefix())
+        self._refresh_output_path()
 
     def _source_hint_text(self) -> str:
         return self.spec.source_hint.replace(
@@ -214,7 +263,14 @@ class Mau1516SettlementDialog(QDialog):
 
     def _source_file_filter(self) -> str:
         source_hint = self.spec.source_hint.casefold()
-        if ".xls" in source_hint:
+        if ".xls" in source_hint or self.spec.key in {
+            "accounting.04",
+            "accounting.07a",
+            "accounting.08",
+            "accounting.09a",
+            "accounting.09b",
+            "accounting.09c",
+        }:
             return (
                 "File Excel nguồn (*.xls *.xlsx *.xlsm);;"
                 "CSV nguồn quyết toán (*.csv);;"

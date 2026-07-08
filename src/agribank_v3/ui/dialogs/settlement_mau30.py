@@ -18,18 +18,20 @@ from PySide6.QtWidgets import (
 )
 
 from agribank_v3.settings import BranchProfile
-from agribank_v3.settlement.models import SettlementOptions
+from agribank_v3.settlement.models import SettlementOptions, SettlementSpec
 
 
 class Mau30SettlementDialog(QDialog):
     def __init__(
         self,
         profile: BranchProfile,
+        spec: SettlementSpec,
         last_balance_path: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.profile = profile
+        self.spec = spec
         self.source_path: Path | None = None
         self.balance_path: Path | None = last_balance_path if last_balance_path and last_balance_path.exists() else None
 
@@ -44,7 +46,7 @@ class Mau30SettlementDialog(QDialog):
         model_row = QHBoxLayout()
         model_label = QLabel("Chọn mẫu quyết toán nguồn:")
         self.model_combo = QComboBox()
-        self.model_combo.addItems(("05", "15a", "15b", "18", "20a"))
+        self.model_combo.addItems(self._available_models())
         self.model_combo.currentTextChanged.connect(self._sync_options)
         model_row.addWidget(model_label)
         model_row.addWidget(self.model_combo, 1)
@@ -157,8 +159,13 @@ class Mau30SettlementDialog(QDialog):
         )
 
     def _sync_options(self, model: str) -> None:
-        enabled = model.casefold() in {"15a", "15b"}
+        enabled = model.casefold() in {"13", "15a", "15b"}
         self.include_accrual_checkbox.setEnabled(enabled)
         self.include_accrual_checkbox.setVisible(enabled)
         if self.source_path is not None:
             self.output_edit.setText(str(self.output_path()))
+
+    def _available_models(self) -> tuple[str, ...]:
+        if self.spec.key == "accounting.30a":
+            return ("13", "22", "23", "24")
+        return ("05", "15a", "15b", "18", "20a")
