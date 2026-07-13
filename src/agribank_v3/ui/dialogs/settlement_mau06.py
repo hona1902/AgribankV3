@@ -30,12 +30,18 @@ class Mau06SettlementDialog(QDialog):
         self,
         profile: BranchProfile,
         parent: QWidget | None = None,
+        *,
+        window_title: str = "Tạo Mẫu biểu Quyết toán 06/QT",
+        source_label_text: str | None = None,
+        output_label_text: str = "Tên File quyết toán Mẫu 06/QT sẽ được tạo ra:",
+        consolidation_output: bool = False,
     ) -> None:
         super().__init__(parent)
         self.profile = profile
         self.source_path: Path | None = None
+        self.consolidation_output = consolidation_output
 
-        self.setWindowTitle("Tạo Mẫu biểu Quyết toán 06/QT")
+        self.setWindowTitle(window_title)
         self.setModal(True)
         self.setMinimumWidth(690)
 
@@ -44,8 +50,11 @@ class Mau06SettlementDialog(QDialog):
         layout.setSpacing(12)
 
         source_label = QLabel(
-            "Tên File nguồn Mẫu 05/QT dùng xử lý để tạo ra Mẫu biểu 06QT là: "
-            f"{profile.branch_code.strip()}QT05.xlsx"
+            source_label_text
+            or (
+                "Tên File nguồn Mẫu 05/QT dùng xử lý để tạo ra Mẫu biểu 06QT là: "
+                f"{profile.branch_code.strip()}QT05.xlsx"
+            )
         )
         source_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         source_label.setWordWrap(True)
@@ -62,7 +71,7 @@ class Mau06SettlementDialog(QDialog):
 
         layout.addWidget(self._output_prefix_group())
 
-        output_label = QLabel("Tên File quyết toán Mẫu 06/QT sẽ được tạo ra:")
+        output_label = QLabel(output_label_text)
         output_label.setStyleSheet("color: #0000ff; font-weight: 700;")
         layout.addWidget(output_label)
         self.output_edit = QLineEdit()
@@ -119,12 +128,19 @@ class Mau06SettlementDialog(QDialog):
     def output_path(self) -> Path | None:
         if self.source_path is None:
             return None
+        if self.consolidation_output:
+            return self.source_path.with_name(
+                f"{self.profile.branch_code.strip()}{self.output_prefix()}Mau06_TongHop.xlsx"
+            )
         return self.source_path.with_name(
             f"{self.profile.branch_code.strip()}{self.output_prefix()}06.xlsx"
         )
 
     def options(self) -> SettlementOptions:
-        return SettlementOptions(output_prefix=self.output_prefix())
+        return SettlementOptions(
+            output_prefix=self.output_prefix(),
+            source_report_code="consolidation" if self.consolidation_output else "",
+        )
 
     def output_prefix(self) -> str:
         return "BN" if self.bn_prefix_radio.isChecked() else "QT"

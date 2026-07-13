@@ -113,7 +113,13 @@ class Mau1516Processor:
         branch_code = request.profile.branch_code.strip()
         options = request.options
         records = [
-            self._row_to_record(row, source_headers, report_code, branch_code, options)
+            self._row_to_record(
+                row,
+                source_headers,
+                report_code,
+                self._row_branch_code(row, branch_code),
+                options,
+            )
             for row in rows
         ]
         if report_code == "16":
@@ -910,6 +916,14 @@ class Mau1516Processor:
     def _output_prefix(options: SettlementOptions) -> str:
         prefix = (options.output_prefix or "QT").strip().upper()
         return "BN" if prefix == "BN" else "QT"
+
+    @staticmethod
+    def _row_branch_code(row: dict[str, str], fallback: str) -> str:
+        for key in ("CHI_NHANH", "MA_CN"):
+            value = str(row.get(key, "")).strip()
+            if value:
+                return value
+        return fallback
 
     @staticmethod
     def _merge_if_unmerged(sheet, start_row: int, start_column: int, end_row: int, end_column: int) -> None:

@@ -8,6 +8,11 @@ from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 
+from agribank_v3.file_merge import (
+    FileMergeError,
+    merge_same_structure_csv_to_csv,
+    merge_same_structure_csv_to_xlsx,
+)
 from agribank_v3.settings import BranchProfile
 from agribank_v3.settlement import (
     ACTIVE_SETTLEMENT_SPECS,
@@ -43,6 +48,7 @@ from agribank_v3.settlement.processors import (
     Mau24Processor,
     Mau30Processor,
 )
+from agribank_v3.settlement.processors.summary05 import Summary05Processor
 from agribank_v3.settlement.processors.mau05 import CollateralRecord
 from agribank_v3.settlement.processors.mau13_14 import DepositRecord
 from agribank_v3.settlement.processors.mau24 import ReceivablePayableRecord
@@ -562,7 +568,8 @@ class SettlementFixtureParityTests(unittest.TestCase):
             self.assertTrue(sheet.cell(signature_row, column).font.bold)
             self.assertTrue(sheet.cell(signature_row + 1, column).font.italic)
         self.assertTrue(sheet.cell(signature_row - 1, 12).font.italic)
-        self.assertGreaterEqual(sheet.column_dimensions["A"].width, 26)
+        self.assertLessEqual(sheet.column_dimensions["A"].width, 18)
+        self.assertGreaterEqual(sheet.column_dimensions["B"].width, 32)
         self.assertGreaterEqual(sheet.column_dimensions["E"].width, 17)
         self.assertGreaterEqual(sheet.column_dimensions["H"].width, 17)
         self.assertEqual(sheet.page_setup.paperSize, 9)
@@ -1379,6 +1386,199 @@ class SettlementFixtureParityTests(unittest.TestCase):
         self.assertGreater(sheet.max_column, 18)
         self.assertEqual(sheet.cell(11, 19).value, "NGAY")
         self.assertEqual(str(sheet.print_area), f"'05'!$A$1:$R${sheet.max_row}")
+
+    def test_merge_same_structure_csv_to_xlsx_appends_without_repeating_header(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_a.csv"
+        source_b = test_dir / "merge_b.csv"
+        output = test_dir / "merge_output.xlsx"
+        source_a.write_text("NGAY,MA_CN,MA_KH\n20251231,5491,001\n", encoding="utf-8")
+        source_b.write_text("NGAY,MA_CN,MA_KH\n20251231,5492,002\n", encoding="utf-8")
+        try:
+            result = merge_same_structure_csv_to_xlsx((source_a, source_b), output)
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Data"]
+
+            self.assertEqual(result.source_count, 2)
+            self.assertEqual(result.row_count, 2)
+            self.assertEqual(sheet.max_row, 3)
+            self.assertEqual(sheet["A1"].value, "NGAY")
+            self.assertEqual(sheet["B2"].value, "5491")
+            self.assertEqual(sheet["B3"].value, "5492")
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_merge_same_structure_csv_to_xlsx_rejects_different_headers(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_header_a.csv"
+        source_b = test_dir / "merge_header_b.csv"
+        output = test_dir / "merge_header_output.xlsx"
+        source_a.write_text("NGAY,MA_CN\n20251231,5491\n", encoding="utf-8")
+        source_b.write_text("NGAY,KHAC\n20251231,5491\n", encoding="utf-8")
+        try:
+            with self.assertRaises(FileMergeError):
+                merge_same_structure_csv_to_xlsx((source_a, source_b), output)
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_summary05_builds_consolidation_sheet_from_merged_rt05(self) -> None:
+        source_dir = self.FIXTURE_DIR / "TESTTONGHOP"
+        sources = (
+            source_dir / "5400_rt05_20251231.csv",
+            source_dir / "5491_rt05_20251231.csv",
+        )
+        if not all(source.exists() for source in sources):
+            self.skipTest("Tổng hợp mẫu 05 fixtures are not available.")
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        merged_csv = test_dir / "summary05_merged.csv"
+        output = test_dir / "summary05_merged.xlsx"
+        try:
+            merge_same_structure_csv_to_csv(sources, merged_csv)
+            request = SettlementRequest(
+                SETTLEMENT_SPECS["consolidation.05"],
+                self.PROFILE,
+                options=SettlementOptions(
+                    create_control_sheet=False,
+                    include_branch_in_customer_id=True,
+                ),
+                source_paths=(merged_csv,),
+            )
+            processed_rows = Summary05Processor().execute(request, merged_csv, output)
+            workbook = load_workbook(output, data_only=True)
+            self.assertEqual(workbook.sheetnames, ["SoLieu_Mau05", "TongHop_Mau05"])
+            detail_sheet = workbook["SoLieu_Mau05"]
+            customer_ids = {
+                str(detail_sheet.cell(row, 1).value)
+                for row in range(11, detail_sheet.max_row + 1)
+                if detail_sheet.cell(row, 1).value
+            }
+            sheet = workbook["TongHop_Mau05"]
+            branches = {
+                str(sheet.cell(row, 1).value)
+                for row in range(3, sheet.max_row)
+            }
+            headers = {
+                str(sheet.cell(2, column).value)
+                for column in range(2, sheet.max_column)
+            }
+
+            self.assertGreater(processed_rows, 0)
+            self.assertTrue(any(value.startswith("5400") for value in customer_ids))
+            self.assertTrue(any(value.startswith("5491") for value in customer_ids))
+            self.assertIn("5400", branches)
+            self.assertIn("5491", branches)
+            self.assertIn("Cộng chi nhánh", str(sheet.cell(2, sheet.max_column).value))
+            self.assertTrue(any(header.startswith("994") for header in headers))
+        finally:
+            for path in (merged_csv, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_consolidation06_uses_summary05_detail_sheet(self) -> None:
+        source_dir = self.FIXTURE_DIR / "TESTTONGHOP"
+        sources = (
+            source_dir / "5400_rt05_20251231.csv",
+            source_dir / "5491_rt05_20251231.csv",
+        )
+        if not all(source.exists() for source in sources):
+            self.skipTest("Tổng hợp mẫu 05 fixtures are not available.")
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        merged_csv = test_dir / "summary06_source_merged.csv"
+        summary05_output = test_dir / "summary06_source_05.xlsx"
+        summary06_output = test_dir / "5491QT06.xlsx"
+        try:
+            merge_same_structure_csv_to_csv(sources, merged_csv)
+            Summary05Processor().execute(
+                SettlementRequest(
+                    SETTLEMENT_SPECS["consolidation.05"],
+                    self.PROFILE,
+                    options=SettlementOptions(
+                        create_control_sheet=False,
+                        include_branch_in_customer_id=True,
+                    ),
+                    source_paths=(merged_csv,),
+                ),
+                merged_csv,
+                summary05_output,
+            )
+
+            result = Mau06Processor().execute(
+                SettlementRequest(
+                    SETTLEMENT_SPECS["consolidation.06"],
+                    self.PROFILE,
+                    options=SettlementOptions(output_prefix="QT"),
+                    source_paths=(summary05_output,),
+                )
+            )
+            workbook = load_workbook(result.output_path, data_only=False)
+
+            self.assertEqual(result.output_path, summary06_output)
+            self.assertIn("06", workbook.sheetnames)
+            self.assertEqual(workbook["06"]["A12"].value, "I. TSTC của khách hàng trực tiếp vay vốn")
+            self.assertEqual(workbook["06"]["A18"].value, "II. TSTC của đơn vị bảo lãnh cho bên thứ ba vay vốn")
+        finally:
+            for path in (merged_csv, summary05_output, summary06_output):
+                if path.exists():
+                    path.unlink()
+
+    def test_consolidation13_uses_source_branch_in_customer_id(self) -> None:
+        root = self.FIXTURE_DIR.parent
+        sources = (
+            root / "5401" / "5401_rt13_20251231.csv",
+            root / "5404" / "5404_rt13_20251231.csv",
+        )
+        if not all(source.exists() for source in sources):
+            self.skipTest("Tổng hợp mẫu 13 fixtures are not available.")
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        merged_csv = test_dir / "summary13_merged.csv"
+        output = test_dir / "summary13_merged.xlsx"
+        try:
+            merge_same_structure_csv_to_csv(sources, merged_csv)
+            request = SettlementRequest(
+                SETTLEMENT_SPECS["consolidation.13"],
+                self.PROFILE,
+                options=SettlementOptions(
+                    include_branch_in_customer_id=True,
+                    create_control_sheet=True,
+                ),
+                source_paths=(merged_csv,),
+            )
+            processor = Mau1314Processor()
+            records, report_date, currency_order = processor.read_source(
+                request,
+                merged_csv,
+            )
+            processor.save_mau13_streaming_workbook(
+                request,
+                records,
+                report_date,
+                currency_order,
+                output,
+            )
+            output_workbook = load_workbook(output, data_only=False)
+            sheet = output_workbook["SoLieu_Mau13"]
+            customer_ids = {
+                str(sheet.cell(row, 2).value)
+                for row in range(11, min(sheet.max_row, 2000) + 1)
+                if sheet.cell(row, 2).value
+            }
+
+            self.assertTrue(any(value.startswith("5401") for value in customer_ids))
+            self.assertTrue(any(value.startswith("5404") for value in customer_ids))
+            self.assertIn("TongHop_Mau13", output_workbook.sheetnames)
+        finally:
+            for path in (merged_csv, output):
+                if path.exists():
+                    path.unlink()
 
 
 if __name__ == "__main__":

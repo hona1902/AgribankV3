@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -14,6 +14,10 @@ from openpyxl.utils import get_column_letter
 from agribank_v3.settlement.engine import SettlementError
 from agribank_v3.settlement.models import SettlementRequest, SettlementResult
 from agribank_v3.settlement.processors.formatting import setup_a4_print_layout
+
+
+Mau30SummaryRow: TypeAlias = tuple[str, Decimal] | tuple[str, str, Decimal]
+Mau30BalanceMap: TypeAlias = dict[str, Decimal] | dict[tuple[str, str], Decimal]
 
 
 class Mau30Processor:
@@ -69,9 +73,13 @@ class Mau30Processor:
         workbook,
         values_workbook,
         model: str,
-        balance: dict[str, Decimal] | None = None,
+        balance: Mau30BalanceMap | None = None,
     ):
-        if model.casefold() not in {"20a", "22", "23"} and "SoLieuTongHop" not in values_workbook.sheetnames:
+        if (
+            model.casefold() not in {"20a", "22", "23"}
+            and "SoLieuTongHop" not in values_workbook.sheetnames
+            and not self._consolidation_sheet_name(values_workbook, model)
+        ):
             raise SettlementError("File nguồn không có sheet SoLieuTongHop.")
         source_sheet_name = self._sheet_name(values_workbook, model)
         if not source_sheet_name:
@@ -94,7 +102,15 @@ class Mau30Processor:
         values_workbook,
         model: str,
         request: SettlementRequest,
-    ) -> list[tuple[str, Decimal]]:
+    ) -> list[Mau30SummaryRow]:
+        consolidation_sheet_name = self._consolidation_sheet_name(values_workbook, model)
+        if request.spec.key == "consolidation.30a" and consolidation_sheet_name:
+            return self._summary_rows_from_consolidation_sheet(
+                values_workbook[consolidation_sheet_name],
+                model=model,
+                include_accrual_accounts=request.options.include_accrual_accounts,
+            )
+
         if model.casefold() == "20a":
             source_sheet_name = self._sheet_name(values_workbook, model)
             if not source_sheet_name:
@@ -137,14 +153,25 @@ class Mau30Processor:
             if not source_sheet_name:
                 raise SettlementError("File nguồn không có sheet 23.")
             source = values_workbook[source_sheet_name]
-            rows: list[tuple[str, Decimal]] = []
+            rows: list[Mau30SummaryRow] = []
+            current_account = ""
+            running_total = Decimal(0)
             for row in range(12, source.max_row + 1):
                 label = self._text(source.cell(row, 1).value)
-                if not label.casefold().startswith("cộng tk"):
+                if label.casefold().startswith("cộng tk"):
+                    account = "".join(ch for ch in label if ch.isdigit())
+                    if account:
+                        cached_total = self._number(source.cell(row, 4).value)
+                        rows.append((account, cached_total if cached_total else running_total))
+                    current_account = ""
+                    running_total = Decimal(0)
                     continue
-                account = "".join(ch for ch in label if ch.isdigit())
-                if account:
-                    rows.append((account, self._number(source.cell(row, 4).value)))
+                if label and label.isdigit():
+                    current_account = label
+                    running_total = self._number(source.cell(row, 4).value)
+                    continue
+                if current_account:
+                    running_total += self._number(source.cell(row, 4).value)
             return rows
 
         source = values_workbook["SoLieuTongHop"]
@@ -178,6 +205,133 @@ class Mau30Processor:
                 )
                 grouped[account] = grouped.get(account, Decimal(0)) + total
         return list(grouped.items())
+
+    def _summary_rows_from_consolidation_sheet(
+        self,
+        sheet,
+        *,
+        model: str,
+        include_accrual_accounts: bool,
+    ) -> list[Mau30SummaryRow]:
+        rows: list[Mau30SummaryRow] = []
+        table_starts = [
+            row
+            for row in range(1, sheet.max_row + 1)
+            if "mã chi nhánh" in self._text(sheet.cell(row, 1).value).casefold()
+        ]
+        if model.casefold() == "15b":
+            table_starts = [
+                row
+                for row in table_starts
+                if "phải thu" in self._text(sheet.cell(row - 1, 1).value).casefold()
+            ]
+        if not include_accrual_accounts and table_starts:
+            table_starts = table_starts[:1]
+        for index, header_row in enumerate(table_starts):
+            next_header = table_starts[index + 1] if index + 1 < len(table_starts) else sheet.max_row + 2
+            first_data_row = header_row + 1
+            if first_data_row >= next_header:
+                continue
+            if self._header_columns_are_branches(sheet, header_row):
+                rows.extend(
+                    self._summary_rows_from_branch_columns(
+                        sheet,
+                        header_row,
+                        next_header - 1,
+                    )
+                )
+            else:
+                rows.extend(
+                    self._summary_rows_from_branch_rows(
+                        sheet,
+                        header_row,
+                        next_header - 1,
+                    )
+                )
+        return self._group_branch_account_rows(rows)
+
+    def _summary_rows_from_branch_rows(
+        self,
+        sheet,
+        header_row: int,
+        table_end_row: int,
+    ) -> list[Mau30SummaryRow]:
+        rows: list[Mau30SummaryRow] = []
+        account_columns: list[tuple[int, str]] = []
+        for column in range(2, sheet.max_column + 1):
+            header = self._text(sheet.cell(header_row, column).value)
+            if not header:
+                break
+            if self._is_branch_total_header(header):
+                break
+            account_columns.append((column, self._normalize_summary_account(header)))
+        for row in range(header_row + 1, table_end_row + 1):
+            branch = self._text(sheet.cell(row, 1).value)
+            if not branch or not branch[:1].isdigit():
+                break
+            for column, account in account_columns:
+                if not account:
+                    continue
+                rows.append((branch, account, self._number(sheet.cell(row, column).value)))
+        return rows
+
+    def _summary_rows_from_branch_columns(
+        self,
+        sheet,
+        header_row: int,
+        table_end_row: int,
+    ) -> list[Mau30SummaryRow]:
+        rows: list[Mau30SummaryRow] = []
+        branch_columns: list[tuple[int, str]] = []
+        for column in range(2, sheet.max_column + 1):
+            header = self._text(sheet.cell(header_row, column).value)
+            if not header:
+                break
+            if self._is_branch_total_header(header):
+                break
+            branch_columns.append((column, header))
+        for row in range(header_row + 1, table_end_row + 1):
+            account = self._normalize_summary_account(sheet.cell(row, 1).value)
+            if not account or account.casefold().startswith("tổng"):
+                break
+            for column, branch in branch_columns:
+                rows.append((branch, account, self._number(sheet.cell(row, column).value)))
+        return self._order_branch_columns_by_branch(rows, branch_columns)
+
+    @staticmethod
+    def _group_branch_account_rows(rows: list[Mau30SummaryRow]) -> list[Mau30SummaryRow]:
+        grouped: OrderedDict[tuple[str, str], Decimal] = OrderedDict()
+        branch_order: list[str] = []
+        for row in rows:
+            if len(row) != 3:
+                continue
+            branch, account, amount = row
+            if branch not in branch_order:
+                branch_order.append(branch)
+            key = (branch, account)
+            grouped[key] = grouped.get(key, Decimal(0)) + amount
+        ordered_rows: list[Mau30SummaryRow] = []
+        for selected_branch in branch_order:
+            ordered_rows.extend(
+                (branch, account, amount)
+                for (branch, account), amount in grouped.items()
+                if branch == selected_branch
+            )
+        return ordered_rows
+
+    @staticmethod
+    def _order_branch_columns_by_branch(
+        rows: list[Mau30SummaryRow],
+        branch_columns: list[tuple[int, str]],
+    ) -> list[Mau30SummaryRow]:
+        ordered: list[Mau30SummaryRow] = []
+        for _, branch in branch_columns:
+            ordered.extend(
+                row
+                for row in rows
+                if len(row) == 3 and row[0] == branch
+            )
+        return ordered
 
     def _write_header(self, sheet, request, source_sheet, model: str) -> None:
         profile = request.profile
@@ -222,17 +376,25 @@ class Mau30Processor:
         self,
         sheet,
         request,
-        rows: list[tuple[str, Decimal]],
-        balance: dict[str, Decimal],
+        rows: list[Mau30SummaryRow],
+        balance: Mau30BalanceMap,
     ) -> None:
         parent_code = request.profile.parent_branch_code.strip()
         branch_code = request.profile.branch_code.strip()
-        for index, (account, amount) in enumerate(rows, start=12):
+        for index, row_data in enumerate(rows, start=12):
+            if len(row_data) == 3:
+                row_branch, account, amount = row_data
+            else:
+                account, amount = row_data
+                row_branch = branch_code
             sheet.cell(index, 1).value = index - 11
             sheet.cell(index, 2).value = parent_code
-            sheet.cell(index, 3).value = branch_code
+            sheet.cell(index, 3).value = row_branch
             sheet.cell(index, 4).value = account
-            if account in balance:
+            branch_balance_key = (row_branch, account)
+            if branch_balance_key in balance:
+                sheet.cell(index, 5).value = self._number_to_cell(balance[branch_balance_key])
+            elif account in balance:
                 sheet.cell(index, 5).value = self._number_to_cell(balance[account])
             sheet.cell(index, 6).value = self._number_to_cell(amount)
             sheet.cell(index, 7).value = f"=F{index}-E{index}"
@@ -398,11 +560,50 @@ class Mau30Processor:
         for sheet_name in workbook.sheetnames:
             if sheet_name.casefold() == model.casefold():
                 return sheet_name
+        detail_name = f"SoLieu_Mau{model}".casefold()
+        for sheet_name in workbook.sheetnames:
+            if sheet_name.casefold() == detail_name:
+                return sheet_name
         return ""
 
-    def _read_balance(self, balance_path: Path | None) -> dict[str, Decimal]:
+    @staticmethod
+    def _consolidation_sheet_name(workbook, model: str) -> str:
+        expected = f"TongHop_Mau{model}".casefold()
+        for sheet_name in workbook.sheetnames:
+            if sheet_name.casefold() == expected:
+                return sheet_name
+        return ""
+
+    @classmethod
+    def _normalize_summary_account(cls, value: Any) -> str:
+        account = cls._text(value)
+        if "_" in account:
+            account = account.split("_", 1)[0]
+        return account.strip()
+
+    @staticmethod
+    def _is_branch_total_header(value: str) -> bool:
+        text = value.casefold()
+        return text.startswith(("cộng", "cong")) or (
+            "chi nh" in text and ("cộng" in text or "cong" in text)
+        )
+
+    @classmethod
+    def _header_columns_are_branches(cls, sheet, header_row: int) -> bool:
+        for column in range(2, sheet.max_column + 1):
+            header = cls._text(sheet.cell(header_row, column).value)
+            if not header:
+                break
+            if cls._is_branch_total_header(header):
+                break
+            return header.isdigit() and len(header) == 4
+        return False
+
+    def _read_balance(self, balance_path: Path | None) -> Mau30BalanceMap:
         if balance_path is None:
             return {}
+        if balance_path.is_dir():
+            return self._read_balance_folder(balance_path)
         suffix = balance_path.suffix.casefold()
         if suffix == ".xls":
             rows_by_sheet = self._read_xls_balance_sheets(balance_path)
@@ -430,6 +631,25 @@ class Mau30Processor:
         raise SettlementError(
             "File cân đối không có các cột Acctcd, afterbal_dr, afterbal_cr."
         )
+
+    def _read_balance_folder(self, folder_path: Path) -> dict[tuple[str, str], Decimal]:
+        result: dict[tuple[str, str], Decimal] = {}
+        for path in sorted(folder_path.iterdir(), key=lambda item: item.name.casefold()):
+            if (
+                not path.is_file()
+                or path.name.startswith("~$")
+                or path.suffix.casefold() not in {".xls", ".xlsx", ".xlsm"}
+            ):
+                continue
+            branch_code = path.stem.strip()
+            if not branch_code.isdigit():
+                continue
+            branch_balance = self._read_balance(path)
+            for account, amount in branch_balance.items():
+                if isinstance(account, tuple):
+                    continue
+                result[(branch_code, account)] = amount
+        return result
 
     def _read_xls_balance_sheets(self, path: Path) -> list[list[dict[str, Any]]]:
         try:

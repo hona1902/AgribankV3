@@ -118,11 +118,15 @@ class Mau05Processor:
         options = request.options
         records: list[CollateralRecord] = []
         for row in rows:
+            row_branch_code = (
+                row.get("MA_CN", "").strip().lstrip("'").strip()
+                or branch_code
+            )
             collateral_type = row["LOAI_THE_CHAP_BAO_LANH"].strip()
             customer_id = row["MA_KH"]
             sort_customer_id = normalize_customer_id(
                 customer_id,
-                branch_code,
+                row_branch_code,
                 include_branch=options.include_branch_in_customer_id,
             )
             customer_name = row["TEN_KH"]
@@ -137,7 +141,7 @@ class Mau05Processor:
                 customer_name = row["TEN_CHU_TSDB"]
             customer_id = normalize_customer_id(
                 customer_id,
-                branch_code,
+                row_branch_code,
                 include_branch=options.include_branch_in_customer_id,
             )
             not_marketable = row["KHONG_CO_KHA_NANG_PHAT_MAI"]
@@ -540,8 +544,8 @@ class Mau05Processor:
             name="Times New Roman", italic=True
         )
         widths = {
-            1: 26,
-            2: 18,
+            1: 18,
+            2: 32,
             3: 20,
             4: 11.5,
             5: 17.5,

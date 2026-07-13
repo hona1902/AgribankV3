@@ -21,13 +21,18 @@ class Mau06Processor:
             raise SettlementError("Mẫu 06/QT cần đúng một file Mẫu 05/QT.")
         source_path = request.source_paths[0]
         workbook = load_workbook(source_path, data_only=False)
-        if "05" not in workbook.sheetnames:
-            raise SettlementError("File nguồn không có sheet 05.")
-        values = load_workbook(source_path, data_only=True)["05"]
+        sheet_name = self._source_sheet_name(workbook.sheetnames)
+        values = load_workbook(source_path, data_only=True)[sheet_name]
         output = self.build_workbook(request, values)
-        output_path = source_path.with_name(
-            f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}06.xlsx"
-        )
+        if request.options.source_report_code == "consolidation":
+            output_path = source_path.with_name(
+                f"{request.profile.branch_code.strip()}"
+                f"{self._output_prefix(request.options)}Mau06_TongHop.xlsx"
+            )
+        else:
+            output_path = source_path.with_name(
+                f"{request.profile.branch_code.strip()}{self._output_prefix(request.options)}06.xlsx"
+            )
         output.save(output_path)
         return SettlementResult(
             spec_key=request.spec.key,
@@ -36,6 +41,13 @@ class Mau06Processor:
             worksheet_name="06",
             processed_rows=12,
         )
+
+    @staticmethod
+    def _source_sheet_name(sheetnames: list[str]) -> str:
+        for name in ("05", "SoLieu_Mau05"):
+            if name in sheetnames:
+                return name
+        raise SettlementError("File nguồn không có sheet 05 hoặc SoLieu_Mau05.")
 
     def build_workbook(self, request: SettlementRequest, source) -> Workbook:
         direct_start, direct_total, guarantee_start, guarantee_total = self._sections(source)

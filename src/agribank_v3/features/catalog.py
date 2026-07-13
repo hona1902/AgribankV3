@@ -46,7 +46,7 @@ SECTIONS: dict[str, list[Feature]] = {
         Feature("Quyết toán tín dụng", "Xử lý biểu quyết toán tín dụng.", "qttd.png"),
         Feature("Quyết toán kế toán", "Xử lý biểu quyết toán kế toán.", "qtkt.png"),
         Feature("Quyết toán tổng hợp", "Tổng hợp báo cáo quyết toán.", "qt.png"),
-        Feature("Kiểm tra báo cáo", "Kiểm tra cấu trúc và số liệu báo cáo.", "chinhta.png"),
+        Feature("Hướng dẫn", "Hướng dẫn tạo mẫu 30a và tổng hợp quyết toán.", "file.png"),
     ],
     "Trắc nghiệm": [
         Feature("Kiểm tra nghiệp vụ", "Mở bộ câu hỏi kiểm tra nghiệp vụ.", "tracnghiem.png"),
@@ -166,5 +166,59 @@ QUYET_TOAN_KE_TOAN_FEATURES: list[Feature] = [
         "Tạo Mẫu biểu 30a/QT",
         "- Tạo mẫu biểu 30a Quyết toán năm",
         "qt.png",
+    ),
+]
+
+
+QUYET_TOAN_TONG_HOP_FEATURES: list[Feature] = [
+    Feature(
+        "Tổng hợp Mẫu biểu 05/QT (From {MaCN}_rt05.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 05 - TSĐB",
+        "QT/Mau_05_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 06/QT (From {MaCN}QT05.xls)",
+        "- Báo Cáo Tổng Hợp Kiểm Kê Hồ Sơ, Tài Sản Thế Chấp, Cầm Cố Của Khách Hàng",
+        "QT/Mau_06_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 13/QT (From {MaCN}_rt13.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 13 - Tiền gửi",
+        "QT/Mau_13_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 14/QT (From {MaCN}_rt14.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 14 - Tiền gửi (Từ 10 tỷ)",
+        "QT/Mau_14_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 15a/QT (From {MaCN}_rt15a.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 15a - Tín dụng",
+        "QT/Mau_15a_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 15b/QT (From {MaCN}_rt15b.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 15b - Tín dụng",
+        "QT/Mau_15b_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 16/QT (From {MaCN}_rt16.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 16 - Tín dụng (Từ 10 tỷ)",
+        "QT/Mau_16_QT_text.svg",
+    ),
+    Feature(
+        "Tổng hợp Mẫu biểu 18/QT (From {MaCN}_rt18.csv)",
+        "- Tạo file Tổng hợp quyết toán mẫu 18 - Bảo lãnh và thư tín dụng",
+        "QT/Mau_18_QT_text.svg",
+    ),
+    Feature(
+        "Tạo Mẫu biểu 30a/QT - CN loại I",
+        "- Tạo mẫu biểu 30a Quyết toán năm - Chi nhánh Loại I",
+        "qt.png",
+    ),
+    Feature(
+        "Hướng dẫn tổng hợp số liệu quyết toán",
+        "- Hướng dẫn tổng hợp số liệu quyết toán",
+        "file.png",
     ),
 ]

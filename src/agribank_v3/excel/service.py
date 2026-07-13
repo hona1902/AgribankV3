@@ -951,6 +951,39 @@ class ExcelService:
                 code="open_output_failed",
             ) from exc
 
+    def run_macro(
+        self,
+        macro_name: str,
+        *,
+        addin_path: Path | None = None,
+    ) -> ExcelContext:
+        application = self._require_application()
+        try:
+            active_workbook = application.ActiveWorkbook
+            macro_ref = macro_name
+            if addin_path is not None:
+                resolved = Path(addin_path).resolve()
+                workbook = self._find_open_workbook_by_path(application, resolved)
+                if workbook is None:
+                    workbook = self._open_addin_workbook(application, resolved)
+                if workbook is None:
+                    raise ExcelConnectionError(
+                        f"Không mở được add-in chứa macro: {resolved.name}",
+                        code="open_addin_failed",
+                    )
+                macro_ref = f"'{resolved.name}'!{macro_name}"
+            if active_workbook is not None:
+                active_workbook.Activate()
+            application.Run(macro_ref)
+            return self.get_context()
+        except ExcelConnectionError:
+            raise
+        except (com_error, AttributeError, TypeError, OSError) as exc:
+            raise ExcelConnectionError(
+                f"Không chạy được macro Excel: {macro_name}",
+                code="run_macro_failed",
+            ) from exc
+
     @classmethod
     def is_system_worksheet(cls, context: ExcelContext) -> bool:
         """Return True for internal worksheets shipped inside legacy add-ins."""

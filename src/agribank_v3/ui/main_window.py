@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
+import json
 from pathlib import Path
+import sys
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QMouseEvent, QPixmap
+from PySide6.QtCore import QProcess, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QIcon, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QDialog,
@@ -30,6 +32,7 @@ from agribank_v3.features.catalog import (
     Feature,
     QUYET_TOAN_KE_TOAN_FEATURES,
     QUYET_TOAN_TIN_DUNG_FEATURES,
+    QUYET_TOAN_TONG_HOP_FEATURES,
     SECTIONS,
 )
 from agribank_v3.settings import AddinMode, SettingsDatabaseError
@@ -38,6 +41,7 @@ from agribank_v3.settlement import (
     SettlementEngine,
     SettlementError,
     SettlementRequest,
+    SettlementResult,
 )
 from agribank_v3.settlement.processors import (
     Mau04Processor,
@@ -54,24 +58,29 @@ from agribank_v3.settlement.processors import (
     Mau24Processor,
     Mau30Processor,
 )
+from agribank_v3.settlement.processors.summary05 import Summary05Processor
 from agribank_v3.excel import (
     ExcelCompatibility,
     ExcelConnectionError,
     ExcelContext,
     ExcelService,
 )
+from agribank_v3.file_merge import FileMergeError, merge_same_structure_csv_to_csv
 from agribank_v3.ui.dialogs.author_info import AuthorInfoDialog
 from agribank_v3.ui.dialogs.case_conversion import CaseConversionDialog
+from agribank_v3.ui.dialogs.consolidation_csv import ConsolidationCsvDialog
 from agribank_v3.ui.dialogs.excel_launcher import ExcelLauncherDialog
 from agribank_v3.ui.dialogs.settlement_mau1516 import Mau1516SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau05 import Mau05SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau06 import Mau06SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau30 import Mau30SettlementDialog
+from agribank_v3.ui.dialogs.settlement_guidance import SettlementGuidanceDialog
 from agribank_v3.ui.dialogs.settlement_multi_source import MultiSourceSettlementDialog
 from agribank_v3.ui.dialogs.settlement_simple_source import SimpleSourceSettlementDialog
 from agribank_v3.ui.dialogs.quiz import QuizWidget
 from agribank_v3.ui.icons import app_icon, icon_path
 from agribank_v3.ui.settings import SettingsWidget
+from agribank_v3.ui.workers import run_in_thread
 from agribank_v3.quiz import QuizDatabaseError
 
 
@@ -96,6 +105,7 @@ class FeatureCard(QFrame):
         super().__init__(parent)
         self.feature = feature
         self.setObjectName("FeatureCard")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(164)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -122,16 +132,15 @@ class FeatureCard(QFrame):
         description.setObjectName("MutedText")
         description.setWordWrap(True)
 
-        action = QPushButton("Mở chức năng")
-        action.setObjectName("SecondaryButton")
-        action.setCursor(Qt.CursorShape.PointingHandCursor)
-        action.clicked.connect(lambda: self.requested.emit(self.feature.title))
-
         layout.addWidget(icon)
         layout.addWidget(title)
         layout.addWidget(description)
         layout.addStretch()
-        layout.addWidget(action, alignment=Qt.AlignmentFlag.AlignLeft)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.requested.emit(self.feature.title)
+        super().mousePressEvent(event)
 
 
 class FeatureMenuItem(QFrame):
@@ -170,14 +179,8 @@ class FeatureMenuItem(QFrame):
         text_layout.addWidget(title)
         text_layout.addWidget(description)
 
-        action = QPushButton("Mở")
-        action.setObjectName("SecondaryButton")
-        action.setCursor(Qt.CursorShape.PointingHandCursor)
-        action.clicked.connect(lambda: self.requested.emit(self.feature.title))
-
         row.addWidget(icon)
         row.addLayout(text_layout, stretch=1)
-        row.addWidget(action)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -208,10 +211,12 @@ class MainWindow(QMainWindow):
         self.settlement_engine.register("mau04", Mau04Processor())
         self.settlement_engine.register("mau05", Mau05Processor())
         self.settlement_engine.register("mau06", Mau06Processor())
+        self.settlement_engine.register("summary_06", Mau06Processor())
         self.settlement_engine.register("mau07", Mau0708Processor())
         self.settlement_engine.register("mau08", Mau0708Processor())
         self.settlement_engine.register("mau09", Mau09Processor())
         self.settlement_engine.register("mau13_14", Mau1314Processor())
+        self.settlement_engine.register("summary_13_14", Mau1314Processor())
         self.settlement_engine.register("mau15_16", Mau1516Processor())
         self.settlement_engine.register("mau18", Mau18Processor())
         self.settlement_engine.register("mau20a", Mau20aProcessor())
@@ -219,11 +224,17 @@ class MainWindow(QMainWindow):
         self.settlement_engine.register("mau23", Mau23Processor())
         self.settlement_engine.register("mau24", Mau24Processor())
         self.settlement_engine.register("mau30", Mau30Processor())
+        self.settlement_engine.register("summary_30", Mau30Processor())
         self.excel_context: ExcelContext | None = None
         self.sidebar_expanded = True
         self.quyet_toan_tin_dung_page: QWidget | None = None
         self.quyet_toan_ke_toan_page: QWidget | None = None
+        self.quyet_toan_tong_hop_page: QWidget | None = None
         self.author_info_dialog: AuthorInfoDialog | None = None
+        self.settlement_guidance_dialog: SettlementGuidanceDialog | None = None
+        self._background_threads: list[object] = []
+        self._background_processes: list[QProcess] = []
+        self._nonblocking_messages: list[QMessageBox] = []
 
         root = QWidget()
         root.setObjectName("AppRoot")
@@ -418,6 +429,30 @@ class MainWindow(QMainWindow):
         if self.author_info_dialog is not None:
             self.author_info_dialog.deleteLater()
             self.author_info_dialog = None
+
+    def show_settlement_guidance(
+        self,
+        active_tab: int = SettlementGuidanceDialog.CREATE_30A_TAB,
+    ) -> None:
+        if (
+            self.settlement_guidance_dialog is not None
+            and self.settlement_guidance_dialog.isVisible()
+        ):
+            self.settlement_guidance_dialog.tabs.setCurrentIndex(active_tab)
+            self.settlement_guidance_dialog.raise_()
+            self.settlement_guidance_dialog.activateWindow()
+            return
+
+        dialog = SettlementGuidanceDialog(self, active_tab=active_tab)
+        self.settlement_guidance_dialog = dialog
+        dialog.finished.connect(self._clear_settlement_guidance_dialog)
+        dialog.move(self.frameGeometry().center() - dialog.rect().center())
+        dialog.open()
+
+    def _clear_settlement_guidance_dialog(self) -> None:
+        if self.settlement_guidance_dialog is not None:
+            self.settlement_guidance_dialog.deleteLater()
+            self.settlement_guidance_dialog = None
 
     def _build_dashboard(self) -> QWidget:
         page = self._scroll_page()
@@ -622,6 +657,502 @@ class MainWindow(QMainWindow):
             title,
             "Chức năng này đang nằm trong lộ trình chuyển đổi từ VBA sang Python.",
         )
+
+    def _build_quyet_toan_tong_hop_page(self) -> QWidget:
+        page = self._scroll_page()
+        body = page.widget()
+        layout = body.layout()
+
+        header = QHBoxLayout()
+        title = QLabel("Quyết toán tổng hợp")
+        title.setObjectName("PageTitle")
+        back_button = QPushButton("Quay lại quyết toán")
+        back_button.setObjectName("SecondaryButton")
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(
+            lambda: self.select_page(NAVIGATION.index("Quyết toán"))
+        )
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(back_button)
+        layout.addLayout(header)
+
+        for feature in self._quyet_toan_tong_hop_features():
+            item = FeatureMenuItem(feature)
+            item.requested.connect(self._open_quyet_toan_tong_hop_feature)
+            layout.addWidget(item)
+        layout.addStretch()
+        return page
+
+    def _quyet_toan_tong_hop_features(self) -> list[Feature]:
+        branch_code = self._current_branch_code()
+        return [
+            Feature(
+                feature.title.replace("{MaCN}", branch_code),
+                feature.description,
+                feature.icon,
+            )
+            for feature in QUYET_TOAN_TONG_HOP_FEATURES
+        ]
+
+    def _show_quyet_toan_tong_hop_page(self) -> None:
+        if self.quyet_toan_tong_hop_page is not None:
+            self.pages.removeWidget(self.quyet_toan_tong_hop_page)
+            self.quyet_toan_tong_hop_page.deleteLater()
+        self.quyet_toan_tong_hop_page = self._build_quyet_toan_tong_hop_page()
+        self.pages.addWidget(self.quyet_toan_tong_hop_page)
+        self.pages.setCurrentWidget(self.quyet_toan_tong_hop_page)
+        self.nav_buttons[NAVIGATION.index("Quyết toán")].setChecked(True)
+
+    def _open_quyet_toan_tong_hop_feature(self, title: str) -> None:
+        if title == "Hướng dẫn tổng hợp số liệu quyết toán":
+            self.show_settlement_guidance(
+                SettlementGuidanceDialog.CONSOLIDATION_TAB
+            )
+            return
+        for spec_key in (
+            "consolidation.05",
+            "consolidation.06",
+            "consolidation.13",
+            "consolidation.14",
+            "consolidation.15a",
+            "consolidation.15b",
+            "consolidation.16",
+            "consolidation.18",
+            "consolidation.30a",
+        ):
+            spec = SETTLEMENT_SPECS[spec_key]
+            if title.casefold().startswith(f"Tổng hợp Mẫu biểu {spec.report_code}/QT".casefold()):
+                if spec_key == "consolidation.05":
+                    self._run_consolidation_05_dialog()
+                    return
+                if spec_key == "consolidation.06":
+                    self._run_mau06_dialog("consolidation.06")
+                    return
+                if spec_key == "consolidation.13":
+                    self._run_consolidation_1314_dialog("consolidation.13")
+                    return
+                if spec_key == "consolidation.14":
+                    self._run_consolidation_1314_dialog("consolidation.14")
+                    return
+                if spec_key == "consolidation.15a":
+                    self._run_consolidation_15ab_dialog("consolidation.15a")
+                    return
+                if spec_key == "consolidation.15b":
+                    self._run_consolidation_15ab_dialog("consolidation.15b")
+                    return
+                if spec_key == "consolidation.16":
+                    self._run_consolidation_15ab_dialog("consolidation.16")
+                    return
+                if spec_key == "consolidation.18":
+                    self._run_consolidation_15ab_dialog("consolidation.18")
+                    return
+                self._show_consolidation_not_ready(title, spec_key)
+                return
+            if title.casefold().startswith(f"Tạo Mẫu biểu {spec.report_code}/QT".casefold()):
+                if spec_key == "consolidation.06":
+                    self._run_mau06_dialog("consolidation.06")
+                    return
+                if spec_key == "consolidation.30a":
+                    self._run_mau30_dialog("consolidation.30a")
+                    return
+                self._show_consolidation_not_ready(title, spec_key)
+                return
+        QMessageBox.information(
+            self,
+            title,
+            "Chức năng này đang nằm trong lộ trình chuyển đổi từ VBA sang Python.",
+        )
+
+    def _show_consolidation_not_ready(self, title: str, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        QMessageBox.information(
+            self,
+            title,
+            f"{spec.title} đã có trong menu tổng hợp. Processor tổng hợp sẽ được chuyển từ VBA sang Python ở bước tiếp theo.",
+        )
+
+    def _run_consolidation_05_dialog(self) -> None:
+        spec = SETTLEMENT_SPECS["consolidation.05"]
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+        dialog = ConsolidationCsvDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        output_path = dialog.output_path()
+        if output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        progress = self._show_busy_dialog(
+            "Đang nối các file CSV và tạo tổng hợp Mẫu 05/QT...\n"
+            "Vui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        merge_result = None
+        processed_rows = 0
+        merged_csv_path = output_path.with_suffix(".merged.csv")
+        try:
+            merge_result = merge_same_structure_csv_to_csv(
+                dialog.source_paths,
+                merged_csv_path,
+            )
+            processed_rows = Summary05Processor().execute(
+                SettlementRequest(
+                    spec=spec,
+                    profile=profile,
+                    options=dialog.options(),
+                    source_paths=(merged_csv_path,),
+                ),
+                merged_csv_path,
+                output_path,
+            )
+        except (FileMergeError, SettlementError, OSError) as exc:
+            execution_error = exc
+        finally:
+            if merged_csv_path.exists():
+                try:
+                    merged_csv_path.unlink()
+                except OSError:
+                    pass
+            self._close_busy_dialog(progress)
+
+        if execution_error is not None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                str(execution_error),
+            )
+            return
+        if merge_result is None:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                "Không nhận được kết quả nối file.",
+            )
+            return
+        self.statusBar().showMessage(
+            f"Đã nối {merge_result.source_count} file CSV và tạo tổng hợp Mẫu 05/QT"
+        )
+        self._show_result_message(
+            f"Hoàn thành {spec.title}",
+            "Đã nối file CSV và tạo sheet TongHop_Mau05 trong file:\n"
+            f"{output_path}\n\n"
+            f"Số dòng dữ liệu đã xử lý: {processed_rows:,}",
+            output_path,
+        )
+
+    def _run_consolidation_1314_dialog(self, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        report_code = spec.report_code
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+        dialog = ConsolidationCsvDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        output_path = dialog.output_path()
+        if output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        source_paths = tuple(dialog.source_paths)
+        options = dialog.options()
+        merged_csv_path = output_path.with_suffix(".merged.csv")
+        request_path = output_path.with_suffix(".request.json")
+        try:
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "source_paths": [str(path) for path in source_paths],
+                        "output_path": str(output_path),
+                        "merged_csv_path": str(merged_csv_path),
+                        "spec_key": spec_key,
+                        "profile": asdict(profile),
+                        "options": asdict(options),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không ghi được file request xử lý mẫu {report_code}:\n{exc}",
+            )
+            return
+        progress = self._show_busy_dialog(
+            f"Đang nối các file CSV và tạo tổng hợp Mẫu {report_code}/QT...\n"
+            "Dữ liệu lớn có thể mất vài phút, vui lòng chờ!"
+        )
+
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments(
+            [
+                "-m",
+                "agribank_v3.settlement.consolidation1314_worker",
+                str(request_path),
+            ]
+        )
+        process.setWorkingDirectory(str(Path(__file__).resolve().parents[3]))
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        process_done = False
+
+        def read_stdout() -> None:
+            text = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stdout_chunks.append(text)
+            print(text, end="", flush=True)
+            last_line = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+            if last_line:
+                self.statusBar().showMessage(last_line)
+
+        def read_stderr() -> None:
+            text = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stderr_chunks.append(text)
+            print(text, end="", flush=True)
+
+        def cleanup_request() -> None:
+            if request_path.exists():
+                try:
+                    request_path.unlink()
+                except OSError:
+                    pass
+
+        def on_finished(exit_code: int, exit_status: QProcess.ExitStatus) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            read_stdout()
+            read_stderr()
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks).strip()
+            if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
+                self.statusBar().showMessage(f"Đã tạo {output_path.name}")
+                self._show_result_message(
+                    f"Hoàn thành {spec.title}",
+                    (
+                        f"Đã tạo file tổng hợp Mẫu {report_code}/QT:\n"
+                        f"{output_path}\n\n"
+                        "Do file lớn, ứng dụng không tự mở Excel. Hãy mở file từ thư mục kết quả."
+                    ),
+                    output_path,
+                )
+                return
+
+            detail = stderr_text or stdout_text.strip() or f"Tiến trình kết thúc với mã lỗi {exit_code}."
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                detail[-4000:],
+            )
+
+        def on_error(error: QProcess.ProcessError) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không chạy được tiến trình xử lý mẫu {report_code}: {error.name}",
+            )
+
+        process.readyReadStandardOutput.connect(read_stdout)
+        process.readyReadStandardError.connect(read_stderr)
+        process.finished.connect(on_finished)
+        process.errorOccurred.connect(on_error)
+        self._background_processes.append(process)
+        process.start()
+
+    def _run_consolidation_15ab_dialog(self, spec_key: str) -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
+        report_code = spec.report_code
+        report_code_lower = report_code.casefold()
+        try:
+            profile = self.settings_widget.database.load_branch_profile()
+        except SettingsDatabaseError as exc:
+            QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
+            return
+        dialog = ConsolidationCsvDialog(spec, profile, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        output_path = dialog.output_path()
+        if output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                f"Tạo {spec.title}",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        source_paths = tuple(dialog.source_paths)
+        merged_csv_path = output_path.with_suffix(".merged.csv")
+        request_path = output_path.with_suffix(".request.json")
+        try:
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "source_paths": [str(path) for path in source_paths],
+                        "output_path": str(output_path),
+                        "merged_csv_path": str(merged_csv_path),
+                        "profile": asdict(profile),
+                        "options": asdict(dialog.options()),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không ghi được file request xử lý mẫu {report_code_lower}:\n{exc}",
+            )
+            return
+        progress = self._show_busy_dialog(
+            f"Đang nối các file CSV và tạo tổng hợp Mẫu {report_code_lower}/QT...\n"
+            "Dữ liệu lớn có thể mất vài phút, vui lòng chờ!"
+        )
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments(
+            [
+                "-m",
+                f"agribank_v3.settlement.consolidation{report_code_lower}_worker",
+                str(request_path),
+            ]
+        )
+        process.setWorkingDirectory(str(Path(__file__).resolve().parents[3]))
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        process_done = False
+
+        def read_stdout() -> None:
+            text = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stdout_chunks.append(text)
+            print(text, end="", flush=True)
+            last_line = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+            if last_line:
+                self.statusBar().showMessage(last_line)
+
+        def read_stderr() -> None:
+            text = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stderr_chunks.append(text)
+            print(text, end="", flush=True)
+
+        def cleanup_request() -> None:
+            if request_path.exists():
+                try:
+                    request_path.unlink()
+                except OSError:
+                    pass
+
+        def on_finished(exit_code: int, exit_status: QProcess.ExitStatus) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            read_stdout()
+            read_stderr()
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks).strip()
+            if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
+                self.statusBar().showMessage(f"Đã tạo {output_path.name}")
+                self._show_result_message(
+                    f"Hoàn thành {spec.title}",
+                    f"Đã tạo file tổng hợp Mẫu {report_code_lower}/QT:\n"
+                    f"{output_path}\n\n"
+                    "Do file lớn, ứng dụng không tự mở Excel. Hãy mở file từ thư mục kết quả.",
+                    output_path,
+                )
+                return
+            detail = stderr_text or stdout_text.strip() or f"Tiến trình kết thúc với mã lỗi {exit_code}."
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                detail[-4000:],
+            )
+
+        def on_error(error: QProcess.ProcessError) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không chạy được tiến trình xử lý mẫu {report_code_lower}: {error.name}",
+            )
+
+        process.readyReadStandardOutput.connect(read_stdout)
+        process.readyReadStandardError.connect(read_stderr)
+        process.finished.connect(on_finished)
+        process.errorOccurred.connect(on_error)
+        self._background_processes.append(process)
+        process.start()
 
     @staticmethod
     def _scroll_page() -> QScrollArea:
@@ -911,9 +1442,62 @@ class MainWindow(QMainWindow):
         timer_was_active = self.auto_connect_timer.isActive()
         if timer_was_active:
             self.auto_connect_timer.stop()
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        target = str(path)
+
+        def open_detached() -> None:
+            started = QProcess.startDetached(
+                "explorer.exe",
+                ["/select,", target],
+                str(path.parent),
+            )
+            message = (
+                f"Đã mở thư mục chứa file: {path.name}"
+                if started
+                else f"Không mở được thư mục chứa file: {path}"
+            )
+            self.statusBar().showMessage(message)
+
+        QTimer.singleShot(250, open_detached)
         if timer_was_active:
-            QTimer.singleShot(60_000, self.auto_connect_timer.start)
+            QTimer.singleShot(300_000, self.auto_connect_timer.start)
+
+    def _show_result_message(
+        self,
+        title: str,
+        text: str,
+        result_path: Path | None = None,
+    ) -> None:
+        message = QMessageBox(
+            QMessageBox.Icon.Information,
+            title,
+            text,
+            QMessageBox.StandardButton.Ok,
+            self,
+        )
+        message.setModal(False)
+        message.setWindowModality(Qt.WindowModality.NonModal)
+        if result_path is not None:
+            open_folder_button = message.addButton(
+                "Mở thư mục",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+
+            def on_button_clicked(button) -> None:
+                if button is open_folder_button:
+                    self._open_result_file(result_path)
+
+            message.buttonClicked.connect(on_button_clicked)
+        self._nonblocking_messages.append(message)
+        message.finished.connect(
+            lambda _=0, box=message: (
+                self._nonblocking_messages.remove(box)
+                if box in self._nonblocking_messages
+                else None
+            )
+        )
+        message.show()
+        message.raise_()
+        message.activateWindow()
 
     def auto_detect_excel(self) -> None:
         try:
@@ -975,6 +1559,16 @@ class MainWindow(QMainWindow):
 
         if title == "Quyết toán kế toán":
             self._show_quyet_toan_ke_toan_page()
+            return
+
+        if title == "Quyết toán tổng hợp":
+            self._show_quyet_toan_tong_hop_page()
+            return
+
+        if title.startswith("Hướng dẫn"):
+            self.show_settlement_guidance(
+                SettlementGuidanceDialog.CREATE_30A_TAB
+            )
             return
 
         if title.startswith("Tạo Mẫu biểu 05/QT ("):
@@ -1156,29 +1750,38 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đã tạo {result.output_path.name} từ {source_path.name}"
         )
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
             (
                 f"Đã tạo file:\n{result.output_path}"
                 + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
-                + "\n\nMở file kết quả bây giờ?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
 
-    def _run_mau06_dialog(self) -> None:
-        spec = SETTLEMENT_SPECS["credit.06"]
+    def _run_mau06_dialog(self, spec_key: str = "credit.06") -> None:
+        spec = SETTLEMENT_SPECS[spec_key]
         try:
             profile = self.settings_widget.database.load_branch_profile()
         except SettingsDatabaseError as exc:
             QMessageBox.warning(self, f"Không thể tạo {spec.title}", str(exc))
             return
 
-        dialog = Mau06SettlementDialog(profile, self)
+        dialog_kwargs = {"window_title": f"Tạo {spec.title}"}
+        if spec_key == "consolidation.06":
+            dialog_kwargs.update(
+                {
+                    "source_label_text": (
+                        "Tên File nguồn tổng hợp Mẫu 05/QT dùng xử lý để tạo ra "
+                        "Mẫu biểu 06QT là: file Tổng hợp Mẫu 05/QT đã tạo."
+                    ),
+                    "output_label_text": (
+                        "Tên File tổng hợp Mẫu 06/QT sẽ được tạo ra:"
+                    ),
+                    "consolidation_output": True,
+                }
+            )
+        dialog = Mau06SettlementDialog(profile, self, **dialog_kwargs)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         source_path = dialog.source_path
@@ -1232,19 +1835,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đã tạo {result.output_path.name} từ {source_path.name}"
         )
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
             (
                 f"Đã tạo file:\n{result.output_path}"
                 + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
-                + "\n\nMở file kết quả bây giờ?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
 
     def _run_mau1516_dialog(self, spec_key: str) -> None:
         spec = SETTLEMENT_SPECS[spec_key]
@@ -1308,19 +1906,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đã tạo {result.output_path.name} từ {source_path.name}"
         )
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
             (
                 f"Đã tạo file:\n{result.output_path}"
                 + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
-                + "\n\nMở file kết quả bây giờ?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
 
     def _run_simple_source_dialog(self, spec_key: str) -> None:
         spec = SETTLEMENT_SPECS[spec_key]
@@ -1384,19 +1977,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đã tạo {result.output_path.name} từ {source_path.name}"
         )
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
             (
                 f"Đã tạo file:\n{result.output_path}"
                 + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
-                + "\n\nMở file kết quả bây giờ?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
 
     def _run_multi_source_dialog(self, spec_key: str) -> None:
         spec = SETTLEMENT_SPECS[spec_key]
@@ -1448,19 +2036,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, f"Không thể tạo {spec.title}", "Processor không trả về file kết quả.")
             return
         self.statusBar().showMessage(f"Đã tạo {result.output_path.name}")
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
             (
                 f"Đã tạo file:\n{result.output_path}"
                 + (f"\n\n{chr(10).join(result.warnings)}" if result.warnings else "")
-                + "\n\nMở file kết quả bây giờ?"
             ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
 
     @staticmethod
     def _simple_source_settlement_keys() -> set[str]:
@@ -1497,6 +2080,9 @@ class MainWindow(QMainWindow):
         source_path = dialog.source_path
         output_path = dialog.output_path()
         if source_path is None or output_path is None:
+            return
+        if spec_key == "consolidation.30a":
+            self._run_mau30_background_process(spec, profile, dialog, source_path)
             return
         progress = self._show_busy_dialog(
             f"Đang tạo mẫu quyết toán 30/QT từ Mẫu {dialog.selected_model}/QT...\n"
@@ -1548,21 +2134,156 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đã thêm {result.worksheet_name} vào {source_path.name}"
         )
-        open_answer = QMessageBox.question(
-            self,
+        self._show_result_message(
             f"Hoàn thành {spec.title}",
-            f"Đã thêm sheet {result.worksheet_name} vào file:\n{result.output_path}\n\nMở file bây giờ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            f"Đã thêm sheet {result.worksheet_name} vào file:\n{result.output_path}",
+            result.output_path,
         )
-        if open_answer == QMessageBox.StandardButton.Yes:
-            self._open_result_file(result.output_path)
+
+    def _run_mau30_background_process(
+        self,
+        spec,
+        profile,
+        dialog: Mau30SettlementDialog,
+        source_path: Path,
+    ) -> None:
+        source_paths = (
+            (source_path, dialog.balance_path)
+            if dialog.balance_path is not None
+            else (source_path,)
+        )
+        request_path = source_path.with_suffix(".mau30.request.json")
+        try:
+            request_path.write_text(
+                json.dumps(
+                    {
+                        "spec_key": spec.key,
+                        "source_paths": [str(path) for path in source_paths],
+                        "profile": asdict(profile),
+                        "options": asdict(dialog.options()),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không ghi được file request xử lý mẫu 30a:\n{exc}",
+            )
+            return
+
+        progress = self._show_busy_dialog(
+            f"Đang tạo mẫu 30a tổng hợp từ Mẫu {dialog.selected_model}/QT...\n"
+            "File lớn có thể mất vài phút, vui lòng chờ!"
+        )
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments(
+            [
+                "-m",
+                "agribank_v3.settlement.mau30_worker",
+                str(request_path),
+            ]
+        )
+        process.setWorkingDirectory(str(Path(__file__).resolve().parents[3]))
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        process_done = False
+
+        def read_stdout() -> None:
+            text = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stdout_chunks.append(text)
+            print(text, end="", flush=True)
+            last_line = next((line for line in reversed(text.splitlines()) if line.strip()), "")
+            if last_line:
+                self.statusBar().showMessage(last_line)
+
+        def read_stderr() -> None:
+            text = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+            if not text:
+                return
+            stderr_chunks.append(text)
+            print(text, end="", flush=True)
+
+        def cleanup_request() -> None:
+            if request_path.exists():
+                try:
+                    request_path.unlink()
+                except OSError:
+                    pass
+
+        def on_finished(exit_code: int, exit_status: QProcess.ExitStatus) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            read_stdout()
+            read_stderr()
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks).strip()
+            if exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
+                if dialog.balance_path is not None:
+                    try:
+                        self.settings_widget.database.save_preference(
+                            "mau30_last_balance_path",
+                            str(dialog.balance_path),
+                        )
+                    except SettingsDatabaseError:
+                        pass
+                self.statusBar().showMessage(f"Đã thêm Mau30QT-{dialog.selected_model} vào {source_path.name}")
+                self._show_result_message(
+                    f"Hoàn thành {spec.title}",
+                    f"Đã thêm sheet Mau30QT-{dialog.selected_model} vào file:\n{source_path}",
+                    source_path,
+                )
+                return
+
+            detail = stderr_text or stdout_text.strip() or f"Tiến trình kết thúc với mã lỗi {exit_code}."
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                detail[-4000:],
+            )
+
+        def on_error(error: QProcess.ProcessError) -> None:
+            nonlocal process_done
+            if process_done:
+                return
+            process_done = True
+            self._close_busy_dialog(progress)
+            cleanup_request()
+            if process in self._background_processes:
+                self._background_processes.remove(process)
+            process.deleteLater()
+            QMessageBox.warning(
+                self,
+                f"Không thể tạo {spec.title}",
+                f"Không chạy được tiến trình xử lý mẫu 30a: {error.name}",
+            )
+
+        process.readyReadStandardOutput.connect(read_stdout)
+        process.readyReadStandardError.connect(read_stderr)
+        process.finished.connect(on_finished)
+        process.errorOccurred.connect(on_error)
+        self._background_processes.append(process)
+        process.start()
 
     def _show_busy_dialog(self, message: str) -> QDialog:
         progress = QDialog(self)
         progress.setWindowTitle("Đang xử lý")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setModal(True)
+        progress.setWindowModality(Qt.WindowModality.NonModal)
+        progress.setModal(False)
         progress.setFixedSize(420, 92)
         layout = QVBoxLayout(progress)
         layout.setContentsMargins(18, 10, 18, 10)
@@ -1572,6 +2293,7 @@ class MainWindow(QMainWindow):
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("font-weight: 600;")
         layout.addWidget(label)
+        progress.setProperty("message_label", label)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         progress.show()
         progress.raise_()
@@ -1582,9 +2304,23 @@ class MainWindow(QMainWindow):
         return progress
 
     @staticmethod
+    def _update_busy_dialog(progress: QDialog, message: str) -> None:
+        label = progress.property("message_label")
+        if isinstance(label, QLabel):
+            label.setText(message)
+            label.repaint()
+        QApplication.processEvents()
+
+    @staticmethod
     def _close_busy_dialog(progress: QDialog) -> None:
+        progress.setModal(False)
+        progress.setWindowModality(Qt.WindowModality.NonModal)
+        progress.hide()
+        progress.reject()
         progress.close()
-        QApplication.restoreOverrideCursor()
+        progress.deleteLater()
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
         QApplication.processEvents()
 
     def _ask_mau05_processing_options(self, base_options):
@@ -1631,3 +2367,4 @@ class MainWindow(QMainWindow):
             self.excel_service.cleanup_session_addins()
         self.excel_service.disconnect()
         super().closeEvent(event)
+

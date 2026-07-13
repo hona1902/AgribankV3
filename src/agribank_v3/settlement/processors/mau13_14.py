@@ -6,10 +6,16 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import gc
+import re
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.cell import WriteOnlyCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -180,7 +186,7 @@ class Mau1314Processor:
                     records.append(
                         self._row_to_record(
                             row,
-                            branch_code,
+                            self._row_branch_code(row, branch_code),
                             request.options,
                         )
                     )
@@ -258,6 +264,771 @@ class Mau1314Processor:
         workbook.calculation.calcMode = "auto"
         return workbook
 
+    def save_mau13_streaming_workbook(
+        self,
+        request: SettlementRequest,
+        records: list[DepositRecord],
+        report_date: str,
+        currency_order: tuple[str, ...],
+        output_path: Path,
+    ) -> None:
+        workbook = Workbook(write_only=True)
+        sheet = workbook.create_sheet("SoLieu_Mau13")
+        final_row = self._write_mau13_streaming_sheet(
+            sheet,
+            request,
+            records,
+            report_date,
+            currency_order,
+        )
+        if request.options.create_control_sheet:
+            self._write_consolidation_mau13_summary_sheet(
+                workbook,
+                request.options,
+                records,
+            )
+        self._write_style_reference_sheet(workbook)
+        workbook.save(output_path)
+        workbook.close()
+        self._apply_mau13_streaming_xml_styles(output_path, final_row)
+
+    def _write_mau13_streaming_sheet(
+        self,
+        sheet,
+        request: SettlementRequest,
+        records: list[DepositRecord],
+        report_date: str,
+        currency_order: tuple[str, ...],
+    ) -> int:
+        profile = request.profile
+        branch_name = profile.reporting_branch_name.strip() or profile.branch_name.strip()
+        final_column = 16
+        styles = self._streaming_styles()
+        widths = {
+            "A": 9,
+            "B": 15,
+            "C": 28,
+            "D": 14.5,
+            "E": 20,
+            "F": 6.5,
+            "G": 20,
+            "H": 20,
+            "I": 7,
+            "J": 12,
+            "K": 12,
+            "L": 7,
+            "M": 12,
+            "N": 12,
+            "O": 15,
+            "P": 11,
+        }
+        for column, width in widths.items():
+            sheet.column_dimensions[column].width = width
+
+        def cell(value=None, style_name: str = "body"):
+            item = WriteOnlyCell(sheet, value=value)
+            style = styles[style_name]
+            item.font = style["font"]
+            item.alignment = style["alignment"]
+            if style["border"] is not None:
+                item.border = style["border"]
+            if style["fill"] is not None:
+                item.fill = style["fill"]
+            if style["number_format"] is not None:
+                item.number_format = style["number_format"]
+            return item
+
+        def append(values: tuple[object, ...], style_name: str = "body") -> None:
+            sheet.append(
+                [
+                    cell(values[index] if index < len(values) else None, style_name)
+                    for index in range(final_column)
+                ]
+            )
+
+        def append_title_row(left_value: str, right_value: str) -> None:
+            row = [cell(None) for _ in range(final_column)]
+            row[0] = cell(left_value, "agency")
+            row[12] = cell(right_value, "instruction")
+            sheet.append(row)
+
+        append_title_row("NGÂN HÀNG NÔNG NGHIỆP", "1. Mẫu số 13/QT")
+        append_title_row(
+            "VÀ PHÁT TRIỂN NÔNG THÔN VIỆT NAM",
+            "2. CN loại I gửi file về TSC",
+        )
+        append_title_row(
+            f"Mã chi nhánh: {profile.branch_code.strip()}",
+            "3. Lưu tại Chi nhánh",
+        )
+        append((f"Tên {branch_name}",), "agency")
+        append(("SAO KÊ CHI TIẾT TIỀN GỬI KHÁCH HÀNG",), "title")
+        append((
+            "(TIỀN GỬI THANH TOÁN, TIỀN GỬI CÓ KỲ HẠN, "
+            "TIỀN GỬI TIẾT KIỆM, KỲ PHIẾU, TRÁI PHIẾU)",
+        ), "subtitle")
+        append((report_date,), "date_title")
+        unit_row = [cell(None) for _ in range(final_column)]
+        unit_row[14] = cell("Đơn vị: VNĐ", "italic_left")
+        sheet.append(unit_row)
+        headers = (
+            "SỐ HIỆU TÀI KHOẢN",
+            "MÃ KHÁCH HÀNG",
+            "TÊN KHÁCH HÀNG",
+            "SỐ TÀI KHOẢN KHÁCH HÀNG",
+            "SỐ SỔ TIẾT KIỆM",
+            "LOẠI TIỀN TỆ",
+            "SỐ DƯ NGUYÊN TỆ TẠI THỜI ĐIỂM 31/12",
+            "SỐ DƯ QUY ĐỔI VNĐ TẠI THỜI ĐIỂM 31/12",
+            "KỲ HẠN (tháng)",
+            "NGÀY GỬI",
+            "NGÀY ĐÁO HẠN",
+            "LÃI SUẤT (%/năm)",
+            "NGÀY TRẢ LÃI CUỐI CÙNG",
+            "SỐ LÃI TRẢ TRƯỚC ĐẾN 31/12",
+            "SỐ LÃI CÒN PHẢI TRẢ ĐẾN 31/12",
+            "TÀI KHOẢN LÃI DỰ CHI",
+        )
+        append(headers, "header")
+        append(tuple(range(1, final_column + 1)), "header")
+
+        row_number = 11
+        grouped: OrderedDict[str, OrderedDict[str, list[DepositRecord]]] = OrderedDict()
+        for record in records:
+            grouped.setdefault(record.ledger_account, OrderedDict()).setdefault(
+                record.currency,
+                [],
+            ).append(record)
+
+        currency_subtotals: dict[str, list[int]] = defaultdict(list)
+        all_currency_subtotals: list[int] = []
+        for account, account_groups in grouped.items():
+            account_subtotals: list[int] = []
+            for currency, group_records in account_groups.items():
+                start_row = row_number
+                for record in group_records:
+                    self._append_streaming_record(sheet, record, cell)
+                    row_number += 1
+                subtotal_row = row_number
+                sheet.append(
+                    self._streaming_summary_row(
+                        sheet,
+                        cell,
+                        f"     Cộng theo loại tiền: {currency}",
+                        subtotal_row,
+                        start_row,
+                        row_number - 1,
+                        (7, 8, 14, 15),
+                    )
+                )
+                account_subtotals.append(subtotal_row)
+                currency_subtotals[currency].append(subtotal_row)
+                all_currency_subtotals.append(subtotal_row)
+                row_number += 1
+            account_row = row_number
+            sheet.append(
+                self._streaming_sum_rows(
+                    sheet,
+                    cell,
+                    f"Cộng TK: {account}",
+                    account_subtotals,
+                    (8, 14, 15),
+                )
+            )
+            row_number += 1
+
+        append(tuple(), "body")
+        row_number += 1
+        for currency in currency_order:
+            subtotal_rows = currency_subtotals.get(currency)
+            if not subtotal_rows:
+                continue
+            sheet.append(
+                self._streaming_sum_rows(
+                    sheet,
+                    cell,
+                    f"TỔNG CỘNG THEO LOẠI TIỀN: {currency}",
+                    subtotal_rows,
+                    (7, 8, 14, 15),
+                )
+            )
+            row_number += 1
+        sheet.append(
+            self._streaming_sum_rows(
+                sheet,
+                cell,
+                "TỔNG CỘNG:",
+                all_currency_subtotals,
+                (8, 14, 15),
+            )
+        )
+        final_row = row_number
+
+        location = profile.report_location.strip()
+        append((
+            None, None, None, None, None, None, None, None, None, None,
+            f"{location}, {report_date}" if location else report_date,
+        ), "italic")
+        append((
+            "LẬP BIỂU", None, None, None,
+            "TRƯỞNG PHÒNG KẾ TOÁN", None, None, None, None, None,
+            "GIÁM ĐỐC",
+        ), "signature")
+        append((
+            "(Ký, ghi rõ họ tên, số ĐT liên hệ)", None, None, None,
+            "(Ký, ghi rõ họ tên)", None, None, None, None, None,
+            "(Ký, đóng dấu, ghi rõ họ tên)",
+        ), "italic")
+        for _ in range(5):
+            append(tuple(), "body")
+        append((f"({profile.report_preparer} - SĐT: {profile.phone})",), "italic_left")
+        append(tuple(), "body")
+        append(("Ghi chú:",), "note_title")
+        for note in (
+            "1. Sao kê đối với TK 42; 43",
+            "2. Cột 8 được quy đổi từ cột 7 theo tỷ giá TSC thông báo ngày 31/12",
+            "3. Cột 7, cột 8: Dòng tổng cộng khớp với tổng số dư Có của các tài khoản 42, 43.",
+            "4. Cột 14: Dòng tổng cộng khớp với dòng lãi huy động trả trước trên Sao kê chi tiết tài khoản 388 - Mẫu số 22/QT",
+            "5. Cột 15: Dòng tổng cộng + dự chi lãi tiền gửi (đi vay) của các TCTD khác (cột 11, mẫu 12/QT) + dự chi lãi vay TSC (cột 12, mẫu 26/QT) phải khớp với tổng số dư Có của tài khoản 491, 492; 493",
+            "6. Cột 10, 11 & 13: ghi theo thứ tự ngày/tháng/năm (không ghi tháng trước ngày sau)",
+            "7. Dòng tổng cộng tính bằng công thức, không nhập số liệu trực tiếp",
+        ):
+            append((note,), "body")
+
+        sheet.freeze_panes = "B11"
+        sheet.page_setup.paperSize = 9
+        sheet.page_setup.orientation = "landscape"
+        sheet.page_setup.fitToWidth = 0
+        sheet.page_setup.fitToHeight = 0
+        sheet.sheet_properties.pageSetUpPr.fitToPage = False
+        sheet.print_area = f"A1:P{final_row + 18}"
+        sheet.print_title_rows = "$9:$10"
+        sheet.print_title_cols = "$A:$P"
+        sheet.page_setup.scale = 62
+        sheet.print_options.horizontalCentered = True
+        sheet.page_margins.left = 0.25
+        sheet.page_margins.right = 0.25
+        sheet.page_margins.top = 0.5
+        sheet.page_margins.bottom = 0.5
+        sheet.page_margins.header = 0.25
+        sheet.page_margins.footer = 0.25
+        sheet.HeaderFooter.differentFirst = True
+        sheet.oddHeader.center.text = "&P/&N"
+        sheet.firstHeader.center.text = ""
+        return final_row
+
+    def _append_streaming_record(self, sheet, record: DepositRecord, cell) -> None:
+        sheet.append((
+            self._numeric_code(record.ledger_account),
+            record.customer_id,
+            record.customer_name,
+            record.deposit_account or None,
+            record.savings_book or None,
+            record.currency,
+            self._number_to_cell(record.original_balance),
+            self._number_to_cell(record.converted_balance),
+            record.term_months or None,
+            record.deposit_date,
+            record.maturity_date,
+            record.interest_rate,
+            record.last_interest_date,
+            record.prepaid_interest_display,
+            record.accrued_interest_display,
+            record.interest_account or None,
+        ))
+
+    @staticmethod
+    def _streaming_summary_row(
+        sheet,
+        cell,
+        label: str,
+        row_number: int,
+        start_row: int,
+        end_row: int,
+        sum_columns: tuple[int, ...],
+    ) -> list[WriteOnlyCell]:
+        row = []
+        for column in range(1, 17):
+            value = label if column == 1 else None
+            if column in sum_columns:
+                letter = get_column_letter(column)
+                value = f"=SUM({letter}{start_row}:{letter}{end_row})"
+            row.append(cell(value, "summary_number" if column in sum_columns else "summary"))
+        return row
+
+    @staticmethod
+    def _streaming_sum_rows(
+        sheet,
+        cell,
+        label: str,
+        rows: list[int],
+        sum_columns: tuple[int, ...],
+    ) -> list[WriteOnlyCell]:
+        output = []
+        for column in range(1, 17):
+            value = label if column == 1 else None
+            if column in sum_columns:
+                letter = get_column_letter(column)
+                value = "=" + "+".join(f"{letter}{row}" for row in rows) if rows else "=0"
+            output.append(cell(value, "summary_number" if column in sum_columns else "summary"))
+        return output
+
+    @staticmethod
+    def _streaming_styles() -> dict[str, dict[str, object]]:
+        thin = Side(style="thin", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        return {
+            "body": {
+                "font": Font(name="Times New Roman", size=11),
+                "alignment": Alignment(vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "text": {
+                "font": Font(name="Times New Roman", size=11),
+                "alignment": Alignment(vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": "@",
+            },
+            "number": {
+                "font": Font(name="Times New Roman", size=11),
+                "alignment": Alignment(vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": "#,##0",
+            },
+            "date": {
+                "font": Font(name="Times New Roman", size=11),
+                "alignment": Alignment(horizontal="center", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": "dd/mm/yyyy",
+            },
+            "header": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(horizontal="center", vertical="center", wrap_text=True),
+                "border": border,
+                "fill": PatternFill("solid", fgColor="FFFFFF"),
+                "number_format": None,
+            },
+            "agency": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(horizontal="center", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "instruction": {
+                "font": Font(name="Times New Roman", size=11),
+                "alignment": Alignment(horizontal="left", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "title": {
+                "font": Font(name="Times New Roman", size=18, bold=True),
+                "alignment": Alignment(horizontal="centerContinuous", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "subtitle": {
+                "font": Font(name="Times New Roman", size=16, bold=True),
+                "alignment": Alignment(horizontal="centerContinuous", vertical="center", wrap_text=True),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "date_title": {
+                "font": Font(name="Times New Roman", size=14, bold=True, italic=True),
+                "alignment": Alignment(horizontal="centerContinuous", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "summary": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(vertical="center"),
+                "border": border,
+                "fill": None,
+                "number_format": None,
+            },
+            "summary_number": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(vertical="center"),
+                "border": border,
+                "fill": None,
+                "number_format": "#,##0",
+            },
+            "signature": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(horizontal="centerContinuous", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "italic": {
+                "font": Font(name="Times New Roman", size=11, italic=True),
+                "alignment": Alignment(horizontal="centerContinuous", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "italic_left": {
+                "font": Font(name="Times New Roman", size=11, italic=True),
+                "alignment": Alignment(horizontal="left", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "note_title": {
+                "font": Font(name="Times New Roman", size=11, bold=True),
+                "alignment": Alignment(horizontal="left", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+        }
+
+    def _write_style_reference_sheet(self, workbook: Workbook) -> None:
+        sheet = workbook.create_sheet("_styles")
+        sheet.sheet_state = "hidden"
+        thin = Side(style="thin", color="000000")
+        qt_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        def style_cell(value=None, *, number_format=None, alignment=None):
+            cell = WriteOnlyCell(sheet, value=value)
+            cell.font = Font(name="Times New Roman", size=11)
+            cell.border = qt_border
+            cell.alignment = alignment or Alignment(vertical="center")
+            if number_format is not None:
+                cell.number_format = number_format
+            return cell
+
+        sheet.append((
+            style_cell("body"),
+            style_cell("text", number_format="@"),
+            style_cell(123, number_format="#,##0"),
+            style_cell(date(2025, 12, 31), number_format="dd/mm/yyyy"),
+        ))
+
+    @staticmethod
+    def _apply_mau13_streaming_xml_styles(output_path: Path, final_row: int) -> None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            temp_path = Path(tmp.name)
+        style_ids: dict[str, str] = {}
+        with ZipFile(output_path, "r") as source_zip:
+            style_xml = ""
+            for sheet_path in ("xl/worksheets/sheet3.xml", "xl/worksheets/sheet2.xml"):
+                try:
+                    candidate = source_zip.read(sheet_path).decode("utf-8")
+                except KeyError:
+                    continue
+                if "body" in candidate and "text" in candidate:
+                    style_xml = candidate
+                    break
+            for column, name in (("A", "body"), ("B", "text"), ("C", "number"), ("D", "date")):
+                match = re.search(rf'<c r="{column}1"[^>]* s="([^"]+)"', style_xml)
+                if match:
+                    style_ids[name] = match.group(1)
+            if set(style_ids) != {"body", "text", "number", "date"}:
+                shutil.copyfile(output_path, temp_path)
+            else:
+                with ZipFile(temp_path, "w", ZIP_DEFLATED) as target_zip:
+                    for info in source_zip.infolist():
+                        data = source_zip.read(info.filename)
+                        if info.filename == "xl/worksheets/sheet1.xml":
+                            xml = data.decode("utf-8")
+                            xml = Mau1314Processor._style_mau13_sheet_xml(
+                                xml,
+                                final_row,
+                                style_ids,
+                            )
+                            data = xml.encode("utf-8")
+                        target_zip.writestr(info, data)
+        shutil.move(str(temp_path), output_path)
+
+    @staticmethod
+    def _style_mau13_sheet_xml(
+        xml: str,
+        final_row: int,
+        style_ids: dict[str, str],
+    ) -> str:
+        text_columns = {"B", "D", "E", "I", "P"}
+        number_columns = {"G", "H", "N", "O"}
+        date_columns = {"J", "K", "M"}
+
+        def replacement(match: re.Match[str]) -> str:
+            column = match.group(1)
+            row = int(match.group(2))
+            attrs = match.group(3)
+            if row < 11 or row > final_row:
+                return match.group(0)
+            if column in number_columns:
+                style = style_ids["number"]
+            elif column in date_columns:
+                style = style_ids["date"]
+            elif column in text_columns:
+                style = style_ids["text"]
+            else:
+                style = style_ids["body"]
+            if ' s="' in attrs:
+                if column not in date_columns:
+                    return match.group(0)
+                attrs = re.sub(r' s="[^"]+"', "", attrs)
+            return f'<c r="{column}{row}" s="{style}"{attrs}>'
+
+        xml = re.sub(r'<c r="([A-P])(\d+)"([^>]*)>', replacement, xml)
+        xml = Mau1314Processor._fill_missing_mau13_cells(
+            xml,
+            final_row,
+            style_ids["body"],
+        )
+        refs = [
+            "A1:D1",
+            "A2:D2",
+            "A3:D3",
+            "A4:D4",
+            "A5:O5",
+            "A6:O6",
+            "A7:O7",
+            f"K{final_row + 1}:P{final_row + 1}",
+            f"A{final_row + 2}:D{final_row + 2}",
+            f"E{final_row + 2}:J{final_row + 2}",
+            f"K{final_row + 2}:P{final_row + 2}",
+            f"A{final_row + 3}:D{final_row + 3}",
+            f"E{final_row + 3}:J{final_row + 3}",
+            f"K{final_row + 3}:P{final_row + 3}",
+            f"A{final_row + 9}:D{final_row + 9}",
+        ]
+        merge_xml = Mau1314Processor._merge_refs_xml(refs)
+        if "<mergeCells" in xml:
+            xml = re.sub(r"<mergeCells[^>]*>.*?</mergeCells>", merge_xml, xml, flags=re.S)
+        else:
+            xml = xml.replace("</sheetData>", f"</sheetData>{merge_xml}", 1)
+        return xml
+
+    @staticmethod
+    def _fill_missing_mau13_cells(xml: str, final_row: int, body_style: str) -> str:
+        columns = tuple("ABCDEFGHIJKLMNOP")
+
+        def row_replacement(match: re.Match[str]) -> str:
+            row_number = int(match.group(1))
+            row_xml = match.group(0)
+            if row_number < 11 or row_number > final_row:
+                return row_xml
+            cells_by_column = {
+                cell_match.group(1): cell_match.group(0)
+                for cell_match in re.finditer(
+                    r'<c\b(?=[^>]* r="([A-P])'
+                    + str(row_number)
+                    + r'")(?:(?:[^>]*?/>)|(?:[^>]*>.*?</c>))',
+                    row_xml,
+                    flags=re.S,
+                )
+            }
+            ordered_cells = "".join(
+                cells_by_column.get(
+                    column,
+                    f'<c r="{column}{row_number}" s="{body_style}"/>',
+                )
+                for column in columns
+            )
+            return re.sub(
+                r'(<row[^>]* r="' + str(row_number) + r'"[^>]*>).*?(</row>)',
+                lambda row_match: f"{row_match.group(1)}{ordered_cells}{row_match.group(2)}",
+                row_xml,
+                count=1,
+                flags=re.S,
+            )
+
+        return re.sub(
+            r'<row[^>]* r="(\d+)"[^>]*>.*?</row>',
+            row_replacement,
+            xml,
+            flags=re.S,
+        )
+
+    @staticmethod
+    def _merge_refs_xml(refs: list[str]) -> str:
+        merge_cells = "".join(f'<mergeCell ref="{ref}"/>' for ref in refs)
+        return f'<mergeCells count="{len(refs)}">{merge_cells}</mergeCells>'
+
+    def _write_consolidation_mau13_summary_sheet(
+        self,
+        workbook: Workbook,
+        options: SettlementOptions,
+        records: list[DepositRecord],
+    ) -> None:
+        sheet = workbook.create_sheet("TongHop_Mau13")
+        branch_order = tuple(
+            dict.fromkeys(self._record_branch(record, options) for record in records)
+        )
+        normal: OrderedDict[str, dict[str, Decimal]] = OrderedDict()
+        interest: OrderedDict[str, dict[str, Decimal]] = OrderedDict()
+        for record in records:
+            key = f"{record.ledger_account}_{record.currency}"
+            branch = self._record_branch(record, options)
+            normal.setdefault(key, {}).setdefault(branch, Decimal(0))
+            normal[key][branch] += record.converted_balance
+            if record.interest_account:
+                interest.setdefault(record.interest_account, {}).setdefault(
+                    branch,
+                    Decimal(0),
+                )
+                interest[record.interest_account][branch] += (
+                    record.prepaid_interest
+                    if record.interest_account.startswith("388")
+                    else record.accrued_interest
+                )
+
+        styles = self._summary_streaming_styles()
+
+        def cell(value=None, style_name: str = "body"):
+            item = WriteOnlyCell(sheet, value=value)
+            style = styles[style_name]
+            item.font = style["font"]
+            item.alignment = style["alignment"]
+            if style["border"] is not None:
+                item.border = style["border"]
+            if style["fill"] is not None:
+                item.fill = style["fill"]
+            if style["number_format"] is not None:
+                item.number_format = style["number_format"]
+            return item
+
+        def append_row(values: list[object], style_name: str = "body") -> None:
+            sheet.append([cell(value, style_name) for value in values])
+
+        total_label = "Cộng chi nhánh"
+        header = [" Mã Chi nhánh", *branch_order, total_label]
+        sheet.column_dimensions["A"].width = 18
+        for column in range(2, len(header) + 1):
+            sheet.column_dimensions[get_column_letter(column)].width = 22
+        sheet.page_setup.paperSize = 9
+        sheet.page_setup.orientation = "landscape"
+        sheet.page_setup.fitToWidth = 1
+        sheet.page_setup.fitToHeight = 0
+        sheet.sheet_properties.pageSetUpPr.fitToPage = True
+        sheet.print_options.horizontalCentered = True
+        append_row(["Báo cáo tổng hợp số liệu quyết toán mẫu 13/QT"], "title")
+        append_row(header, "header")
+        for key in sorted(normal):
+            branch_values = [
+                normal[key].get(branch, Decimal(0)) for branch in branch_order
+            ]
+            append_row(
+                [
+                    key,
+                    *[self._number_to_cell(value) for value in branch_values],
+                    self._number_to_cell(sum(branch_values, Decimal(0))),
+                ],
+                "number",
+            )
+        totals = [
+            sum((normal[key].get(branch, Decimal(0)) for key in normal), Decimal(0))
+            for branch in branch_order
+        ]
+        append_row(
+            [
+                "Tổng cộng",
+                *[self._number_to_cell(value) for value in totals],
+                self._number_to_cell(sum(totals, Decimal(0))),
+            ],
+            "total",
+        )
+
+        append_row([])
+        append_row(["Số liệu dự chi đến 31/12 mẫu 13/QT"], "title")
+        append_row(header, "header")
+        if options.include_accrual_accounts:
+            for account in sorted(interest, reverse=True):
+                branch_values = [
+                    interest[account].get(branch, Decimal(0))
+                    for branch in branch_order
+                ]
+                append_row(
+                    [
+                        self._numeric_code(account),
+                        *[self._number_to_cell(value) for value in branch_values],
+                        self._number_to_cell(sum(branch_values, Decimal(0))),
+                    ],
+                    "number",
+                )
+            interest_totals = [
+                sum(
+                    (
+                        interest[account].get(branch, Decimal(0))
+                        for account in interest
+                        if not account.startswith("388")
+                    ),
+                    Decimal(0),
+                )
+                for branch in branch_order
+            ]
+            append_row(
+                [
+                    "Tổng cộng",
+                    *[self._number_to_cell(value) for value in interest_totals],
+                    self._number_to_cell(sum(interest_totals, Decimal(0))),
+                ],
+                "total",
+            )
+
+    @staticmethod
+    def _summary_streaming_styles() -> dict[str, dict[str, object]]:
+        thin = Side(style="thin", color="000000")
+        medium = Side(style="medium", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        total_border = Border(left=thin, right=thin, top=medium, bottom=medium)
+        return {
+            "body": {
+                "font": Font(name="Times New Roman", size=12),
+                "alignment": Alignment(vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "title": {
+                "font": Font(name="Times New Roman", size=12, bold=True, color="000080"),
+                "alignment": Alignment(horizontal="left", vertical="center"),
+                "border": None,
+                "fill": None,
+                "number_format": None,
+            },
+            "header": {
+                "font": Font(name="Times New Roman", size=12, bold=True),
+                "alignment": Alignment(horizontal="center", vertical="center"),
+                "border": border,
+                "fill": PatternFill("solid", fgColor="FFFF00"),
+                "number_format": None,
+            },
+            "number": {
+                "font": Font(name="Times New Roman", size=12),
+                "alignment": Alignment(vertical="center"),
+                "border": border,
+                "fill": None,
+                "number_format": "#,##0",
+            },
+            "total": {
+                "font": Font(name="Times New Roman", size=12, bold=True),
+                "alignment": Alignment(vertical="center"),
+                "border": total_border,
+                "fill": None,
+                "number_format": "#,##0",
+            },
+        }
+
+    @staticmethod
+    def _record_branch(record: DepositRecord, options: SettlementOptions) -> str:
+        if options.include_branch_in_customer_id and len(record.customer_id) >= 4:
+            return record.customer_id[:4]
+        if len(record.extra_values) >= 6 and str(record.extra_values[5]).strip():
+            return str(record.extra_values[5]).strip()
+        return ""
+
     def _row_to_record(
         self,
         row: dict[str, str],
@@ -273,10 +1044,10 @@ class Mau1314Processor:
                 branch_code,
                 include_branch=options.include_branch_in_customer_id,
             ),
-            customer_name=row["TEN_KH"].strip(),
+            customer_name=self._clean_text(row["TEN_KH"]),
             deposit_account=self._clean_code(row["SO_TK_TIEN_GUI"]),
             savings_book=self._clean_code(row["SO_SO_TIEN_GUI"]),
-            currency=row["LOAI_TIEN_TE"].strip(),
+            currency=self._clean_text(row["LOAI_TIEN_TE"]),
             original_balance=self._parse_source_amount(
                 row["SO_DU_NGUYEN_TE_TAI_3112"]
             ),
@@ -293,8 +1064,15 @@ class Mau1314Processor:
             interest_account=self._clean_code(row.get("TK_LAI_DU_CHI", "")),
             prepaid_interest_display=self._amount_display(prepaid_text),
             accrued_interest_display=self._amount_display(accrued_text),
-            extra_values=tuple(row.get(header, "") for header in self.EXTRA_HEADERS),
+            extra_values=tuple(
+                self._clean_text(row.get(header, ""))
+                for header in self.EXTRA_HEADERS
+            ),
         )
+
+    @staticmethod
+    def _row_branch_code(row: dict[str, str], fallback_branch_code: str) -> str:
+        return row.get("MA_CN", "").strip().lstrip("'").strip() or fallback_branch_code
 
     def _write_header(
         self,
@@ -963,7 +1741,14 @@ class Mau1314Processor:
 
     @staticmethod
     def _clean_code(value: Any) -> str:
-        return str(value or "").strip().lstrip("'").strip()
+        return ILLEGAL_CHARACTERS_RE.sub(
+            "",
+            str(value or "").strip().lstrip("'").strip(),
+        )
+
+    @staticmethod
+    def _clean_text(value: Any) -> str:
+        return ILLEGAL_CHARACTERS_RE.sub("", str(value or "").strip())
 
     @classmethod
     def _normalized_headers(cls, headers: set[str]) -> set[str]:
