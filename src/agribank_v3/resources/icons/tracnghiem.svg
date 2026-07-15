@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="green" x1="180" y1="180" x2="850" y2="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F7A43"/>
+      <stop offset="0.55" stop-color="#006B3A"/>
+      <stop offset="1" stop-color="#004F2C"/>
+    </linearGradient>
+    <linearGradient id="greenLight" x1="350" y1="280" x2="650" y2="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#158A4B"/>
+      <stop offset="1" stop-color="#005D35"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="410" y1="70" x2="615" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE36A"/>
+      <stop offset="0.45" stop-color="#D8A915"/>
+      <stop offset="1" stop-color="#B98406"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="300" y1="220" x2="760" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F7FAF8"/>
+    </linearGradient>
+    <linearGradient id="pencil" x1="680" y1="360" x2="840" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#168A4A"/>
+      <stop offset="1" stop-color="#005B34"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#002916" flood-opacity="0.22"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Transparent background -->
+  <g filter="url(#shadow)">
+    <!-- Clipboard board -->
+    <rect x="220" y="155" width="580" height="735" rx="56" fill="url(#green)"/>
+    <rect x="258" y="195" width="505" height="640" rx="34" fill="url(#paper)"/>
+
+    <!-- Bottom folded page corner -->
+    <path d="M705 835 L763 776 L763 832 C763 855 745 873 722 873 L666 873 Z" fill="#E7ECE8"/>
+    <path d="M705 835 C720 822 743 800 763 776 L723 776 C711 776 705 784 705 796 Z" fill="#FFFFFF" opacity="0.95"/>
+
+    <!-- Gold clip -->
+    <g filter="url(#soft)">
+      <path d="M425 142 C425 94 464 55 512 55 C560 55 599 94 599 142 L684 142 C707 142 725 160 725 183 L725 237 C725 252 713 264 698 264 L326 264 C311 264 299 252 299 237 L299 183 C299 160 317 142 340 142 Z" fill="url(#gold)"/>
+      <circle cx="512" cy="141" r="38" fill="#8D6507" opacity="0.35"/>
+      <circle cx="512" cy="141" r="26" fill="#FFFFFF"/>
+      <path d="M330 234 H694" stroke="#A77B08" stroke-width="8" stroke-linecap="round" opacity="0.35"/>
+    </g>
+
+    <!-- Answer boxes -->
+    <rect x="335" y="305" width="92" height="92" rx="14" fill="url(#greenLight)"/>
+    <path d="M359 350 L382 373 L407 333" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="335" y="458" width="92" height="92" rx="14" fill="url(#greenLight)"/>
+    <path d="M359 503 L382 526 L407 486" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="339" y="615" width="84" height="84" rx="12" fill="none" stroke="#006B3A" stroke-width="10"/>
+    <rect x="339" y="762" width="84" height="84" rx="12" fill="none" stroke="#006B3A" stroke-width="10"/>
+
+    <!-- Lines -->
+    <line x1="485" y1="340" x2="710" y2="340" stroke="#006B3A" stroke-width="14" stroke-linecap="round"/>
+    <line x1="485" y1="383" x2="660" y2="383" stroke="#B9C9BE" stroke-width="12" stroke-linecap="round"/>
+    <line x1="485" y1="493" x2="710" y2="493" stroke="#006B3A" stroke-width="14" stroke-linecap="round"/>
+    <line x1="485" y1="536" x2="660" y2="536" stroke="#B9C9BE" stroke-width="12" stroke-linecap="round"/>
+    <line x1="485" y1="652" x2="660" y2="652" stroke="#006B3A" stroke-width="14" stroke-linecap="round"/>
+    <line x1="485" y1="695" x2="625" y2="695" stroke="#B9C9BE" stroke-width="12" stroke-linecap="round"/>
+    <line x1="485" y1="799" x2="605" y2="799" stroke="#006B3A" stroke-width="14" stroke-linecap="round"/>
+    <line x1="485" y1="842" x2="610" y2="842" stroke="#B9C9BE" stroke-width="12" stroke-linecap="round"/>
+
+    <!-- Pencil -->
+    <g transform="rotate(28 720 610)" filter="url(#soft)">
+      <rect x="690" y="340" width="85" height="420" rx="36" fill="url(#pencil)"/>
+      <path d="M690 405 H775" stroke="#0E7841" stroke-width="16" opacity="0.45"/>
+      <path d="M707 360 V732" stroke="#2EA66B" stroke-width="10" opacity="0.45" stroke-linecap="round"/>
+      <path d="M690 340 C690 318 708 300 730 300 H735 C757 300 775 318 775 340 V365 H690 Z" fill="#0A6A3C"/>
+      <rect x="690" y="390" width="85" height="42" fill="url(#gold)"/>
+      <line x1="690" y1="402" x2="775" y2="402" stroke="#B98406" stroke-width="5"/>
+      <line x1="690" y1="423" x2="775" y2="423" stroke="#FFE36A" stroke-width="4" opacity="0.7"/>
+      <path d="M690 760 L733 842 L775 760 Z" fill="#E8B93D"/>
+      <path d="M717 812 L733 862 L749 812 Z" fill="#004F2C"/>
+    </g>
+  </g>
+</svg>

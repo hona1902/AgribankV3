@@ -358,6 +358,53 @@ class AppSettingsDatabase:
             ) from exc
         return normalized_value
 
+    def load_quick_access_items(
+        self,
+        default_ids: tuple[str, ...],
+        valid_ids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        valid = set(valid_ids)
+        raw_value = self.load_preference("quick_access_items", "")
+        if not raw_value:
+            return tuple(item_id for item_id in default_ids if item_id in valid)
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return tuple(item_id for item_id in default_ids if item_id in valid)
+        if not isinstance(parsed, list):
+            return tuple(item_id for item_id in default_ids if item_id in valid)
+        selected: list[str] = []
+        seen: set[str] = set()
+        for value in parsed:
+            item_id = str(value)
+            if item_id in valid and item_id not in seen:
+                selected.append(item_id)
+                seen.add(item_id)
+        return tuple(selected)
+
+    def save_quick_access_items(
+        self,
+        item_ids: tuple[str, ...] | list[str],
+        valid_ids: tuple[str, ...],
+        *,
+        limit: int = 8,
+    ) -> tuple[str, ...]:
+        valid = set(valid_ids)
+        selected: list[str] = []
+        seen: set[str] = set()
+        for value in item_ids:
+            item_id = str(value)
+            if item_id in valid and item_id not in seen:
+                selected.append(item_id)
+                seen.add(item_id)
+            if len(selected) >= limit:
+                break
+        self.save_preference(
+            "quick_access_items",
+            json.dumps(selected, ensure_ascii=False, separators=(",", ":")),
+        )
+        return tuple(selected)
+
     def load_addin_states(
         self, file_names: tuple[str, ...] | list[str]
     ) -> dict[str, bool]:

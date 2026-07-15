@@ -337,9 +337,10 @@ QCheckBox::indicator:checked, QTreeView::indicator:checked {
 }
 QToolTip {
     color: #26313b;
-    background: white;
-    border: 1px solid #cfd7de;
-    padding: 5px;
+    background: #fffdf7;
+    border: 1px solid #d8c4cf;
+    border-radius: 6px;
+    padding: 8px;
 }
 QMainWindow, QWidget#AppRoot {
     background: #f6f7f9;
@@ -374,15 +375,33 @@ QPushButton#NavButton:checked {
     background: #a72a53;
     font-weight: 600;
 }
+QPushButton#QuickSettingsButton {
+    color: #8b1743;
+    background: #fff7fa;
+    border: 1px solid #e7b8c8;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-weight: 650;
+}
+QPushButton#QuickSettingsButton:hover {
+    background: #fce7ef;
+    border-color: #c95b82;
+}
 QLabel#PageTitle {
     color: #3d1626;
     font-size: 24px;
     font-weight: 700;
 }
+QLabel#SectionTitle {
+    color: #831f41;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 8px 0 2px 0;
+}
 QLabel#MutedText {
     color: #68737d;
 }
-QFrame#FeatureCard, QFrame#MetricCard, QFrame#WelcomeCard {
+QFrame#FeatureCard, QFrame#MetricCard, QFrame#WelcomeCard, QFrame#SettingsCard {
     background: white;
     border: 1px solid #e1e6e9;
     border-radius: 12px;
@@ -399,10 +418,60 @@ QFrame#FeatureMenuItem:hover {
     background: #fff8fb;
     border: 1px solid #b75a79;
 }
+QFrame#QuickAccessDialogHeader {
+    background: #8b1743;
+    border-radius: 10px;
+}
+QLabel#DialogHeaderTitle {
+    color: white;
+    font-size: 18px;
+    font-weight: 750;
+}
+QLabel#DialogHeaderSubtitle {
+    color: #fbeaf1;
+}
+QWidget#QuickAccessRow {
+    background: transparent;
+}
+QListWidget::item {
+    border-bottom: 1px solid #edf0f3;
+}
+QListWidget::item:hover {
+    background: #fff7fa;
+}
+QListWidget::item:selected {
+    background: #fff1f5;
+}
+QLabel#QuickAccessListText {
+    color: #1f2937;
+    font-size: 13px;
+    font-weight: 550;
+}
+QLabel#QuickAccessGroupBadge {
+    color: #8b1743;
+    background: #fff1f5;
+    border: 1px solid #efd0db;
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
 QLabel#CardTitle {
     color: #34131f;
     font-size: 15px;
     font-weight: 650;
+}
+QLabel#AutoCardTitle {
+    color: #34131f;
+    font-weight: 650;
+}
+QLabel#AutoCardDescription {
+    color: #68737d;
+}
+QLabel#CardArrow {
+    color: #9b1b49;
+    font-size: 18px;
+    font-weight: 750;
 }
 QLabel#MetricValue {
     color: #831f41;

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="512" height="512" viewBox="0 0 512 512"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Biểu tượng nhóm người</title>
+  <desc id="desc">Biểu tượng ba người màu xanh, nền trong suốt.</desc>
+
+  <defs>
+    <clipPath id="left-head-right-half" clipPathUnits="userSpaceOnUse">
+      <rect x="100.5" y="0" width="100" height="512"/>
+    </clipPath>
+    <clipPath id="right-head-right-half" clipPathUnits="userSpaceOnUse">
+      <rect x="411.5" y="0" width="100.5" height="512"/>
+    </clipPath>
+    <clipPath id="center-right-half" clipPathUnits="userSpaceOnUse">
+      <rect x="256" y="0" width="256" height="512"/>
+    </clipPath>
+  </defs>
+
+  <!-- Hai thân người phía sau -->
+  <g id="side-bodies" fill="#9BC9FF">
+    <path id="left-body"
+          d="M -0.5 369
+             A 101 101 0 0 1 201.5 369
+             L 201.5 389
+             L -0.5 389 Z"/>
+    <path id="right-body"
+          d="M 310.5 369
+             A 101 101 0 0 1 512.5 369
+             L 512.5 389
+             L 310.5 389 Z"/>
+  </g>
+
+  <!-- Đầu người bên trái -->
+  <g id="left-person-head">
+    <circle cx="100.5" cy="188" r="64.5" fill="#9BC9FF"/>
+    <circle cx="100.5" cy="188" r="64.5" fill="#57A4FF"
+            clip-path="url(#left-head-right-half)"/>
+  </g>
+
+  <!-- Đầu người bên phải -->
+  <g id="right-person-head">
+    <circle cx="411.5" cy="188" r="64.5" fill="#9BC9FF"/>
+    <circle cx="411.5" cy="188" r="64.5" fill="#57A4FF"
+            clip-path="url(#right-head-right-half)"/>
+  </g>
+
+  <!-- Đầu người ở giữa -->
+  <g id="center-person-head">
+    <circle cx="256" cy="171" r="81" fill="#005ECE"/>
+    <circle cx="256" cy="171" r="81" fill="#003F8A"
+            clip-path="url(#center-right-half)"/>
+  </g>
+
+  <!-- Thân người ở giữa -->
+  <g id="center-person-body">
+    <path d="M 126 402
+             A 130 130 0 0 1 386 402
+             L 386 422
+             L 126 422 Z"
+          fill="#005ECE"/>
+    <path d="M 126 402
+             A 130 130 0 0 1 386 402
+             L 386 422
+             L 126 422 Z"
+          fill="#003F8A" clip-path="url(#center-right-half)"/>
+  </g>
+</svg>

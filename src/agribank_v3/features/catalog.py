@@ -10,6 +10,19 @@ class Feature:
     icon: str
 
 
+@dataclass(frozen=True, slots=True)
+class FeatureGroup:
+    title: str
+    features: tuple[Feature, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class QuickAccessFeature:
+    id: str
+    group: str
+    feature: Feature
+
+
 SECTIONS: dict[str, list[Feature]] = {
     "Cài đặt": [
         Feature("Kết nối Excel", "Kết nối tới phiên Excel đang hoạt động.", "caidat.png"),
@@ -21,7 +34,10 @@ SECTIONS: dict[str, list[Feature]] = {
         Feature("Chuyển kiểu chữ", "Đổi chữ hoa, chữ thường và viết hoa tên.", "case.png"),
         Feature("Chuyển bảng mã", "Chuyển đổi Unicode, VNI và TCVN3.", "conver.png"),
         Feature("Ngày và chuỗi", "Chuyển đổi ngày, chuỗi và định dạng dữ liệu.", "chchuoidate.png"),
-        Feature("Ghép tệp Excel", "Ghép hoặc tách nhiều workbook và worksheet.", "gopsheet.png"),
+        Feature("Nối file cùng cấu trúc", "Nối nhiều file Excel hoặc CSV có cùng dòng tiêu đề.", "gopsheet.png"),
+        Feature("Tách sheet thành từng file", "Lưu mỗi sheet trong workbook thành một file Excel riêng.", "gopsheet.png"),
+        Feature("Chuyển CSV sang Excel", "Chuyển một file CSV thành workbook Excel .xlsx.", "file.png"),
+        Feature("In tất cả file Word trong 1 folder", "In hàng loạt file Word trong một thư mục.", "printer.png"),
         Feature("Sắp xếp dữ liệu", "Sắp xếp tiếng Việt và vùng dữ liệu.", "sort.png"),
         Feature("Bảo vệ workbook", "Quản lý bảo vệ sheet và workbook.", "protectwb.png"),
     ],
@@ -36,6 +52,16 @@ SECTIONS: dict[str, list[Feature]] = {
         Feature("Danh sách đến hạn", "Tạo danh sách khoản vay đến hạn.", "m09b.png"),
         Feature("Quản lý CBTD", "Quản lý danh sách cán bộ tín dụng.", "nv2.png"),
         Feature("Sao kê tín dụng", "Tạo sao kê và tổng hợp tín dụng.", "m15A.png"),
+        Feature(
+            "Tổ vay vốn",
+            "Mở nhóm chức năng tổ vay vốn, bảng kê thu lãi tổ và hồ sơ liên quan.",
+            "tovayvon.svg",
+        ),
+        Feature(
+            "Thu lãi bán tự động",
+            "Tạo file thu lãi bán tự động, báo cáo thu nợ và thiết lập liên quan.",
+            "m09a.png",
+        ),
     ],
     "Kế toán": [
         Feature("Báo cáo kế toán", "Tạo báo cáo và bảng kê nghiệp vụ.", "qtkt.png"),
@@ -55,6 +81,122 @@ SECTIONS: dict[str, list[Feature]] = {
         Feature("2048", "Trò chơi 2048 trong bộ công cụ cũ.", "BamChuot.png"),
         Feature("Bấm chuột", "Trò chơi phản xạ bấm chuột.", "BamChuot.png"),
     ],
+}
+
+
+QUICK_ACCESS_DEFAULT_IDS: tuple[str, ...] = (
+    "menu_settlement",
+    "csv_to_excel",
+    "menu_quiz",
+    "menu_settings",
+)
+
+
+QUICK_ACCESS_FEATURES: tuple[QuickAccessFeature, ...] = (
+    QuickAccessFeature(
+        "menu_overview",
+        "Menu chính",
+        Feature("Tổng quan", "Mở màn hình Tổng quan.", "Logo-HNA.png"),
+    ),
+    QuickAccessFeature(
+        "menu_features",
+        "Menu chính",
+        Feature("Chức năng", "Mở menu Chức năng.", "case.png"),
+    ),
+    QuickAccessFeature(
+        "menu_data",
+        "Menu chính",
+        Feature("Dữ liệu", "Mở menu Dữ liệu.", "access.png"),
+    ),
+    QuickAccessFeature(
+        "menu_credit",
+        "Menu chính",
+        Feature("Tín dụng", "Mở menu Tín dụng.", "m09a.png"),
+    ),
+    QuickAccessFeature(
+        "menu_accounting",
+        "Menu chính",
+        Feature("Kế toán", "Mở menu Kế toán.", "qtkt.png"),
+    ),
+    QuickAccessFeature(
+        "menu_settlement",
+        "Menu chính",
+        Feature("Quyết toán", "Mở menu Quyết toán.", "qt.png"),
+    ),
+    QuickAccessFeature(
+        "menu_quiz",
+        "Menu chính",
+        Feature("Trắc nghiệm", "Mở menu Trắc nghiệm.", "tracnghiem.svg"),
+    ),
+    QuickAccessFeature(
+        "menu_settings",
+        "Menu chính",
+        Feature("Cài đặt", "Mở menu Cài đặt.", "caidat.png"),
+    ),
+    QuickAccessFeature("convert_case", "Chuyển đổi dữ liệu", SECTIONS["Chức năng"][0]),
+    QuickAccessFeature("convert_encoding", "Chuyển đổi dữ liệu", SECTIONS["Chức năng"][1]),
+    QuickAccessFeature("date_text_tools", "Chuyển đổi dữ liệu", SECTIONS["Chức năng"][2]),
+    QuickAccessFeature("csv_to_excel", "Chuyển đổi dữ liệu", SECTIONS["Chức năng"][5]),
+    QuickAccessFeature("merge_same_structure", "Xử lý file Excel", SECTIONS["Chức năng"][3]),
+    QuickAccessFeature("split_sheets", "Xử lý file Excel", SECTIONS["Chức năng"][4]),
+    QuickAccessFeature("word_folder_print", "In ấn và sắp xếp", SECTIONS["Chức năng"][6]),
+    QuickAccessFeature("sort_data", "In ấn và sắp xếp", SECTIONS["Chức năng"][7]),
+    QuickAccessFeature("protect_workbook", "Bảo mật workbook", SECTIONS["Chức năng"][8]),
+    QuickAccessFeature("search_data", "Dữ liệu", SECTIONS["Dữ liệu"][0]),
+    QuickAccessFeature("vlookup_extended", "Dữ liệu", SECTIONS["Dữ liệu"][1]),
+    QuickAccessFeature("normalize_data", "Dữ liệu", SECTIONS["Dữ liệu"][2]),
+    QuickAccessFeature("export_report", "Dữ liệu", SECTIONS["Dữ liệu"][3]),
+    QuickAccessFeature("interest_schedule", "Tín dụng", SECTIONS["Tín dụng"][0]),
+    QuickAccessFeature("due_list", "Tín dụng", SECTIONS["Tín dụng"][1]),
+    QuickAccessFeature("credit_officer", "Tín dụng", SECTIONS["Tín dụng"][2]),
+    QuickAccessFeature("credit_statement", "Tín dụng", SECTIONS["Tín dụng"][3]),
+    QuickAccessFeature("accounting_report", "Kế toán", SECTIONS["Kế toán"][0]),
+    QuickAccessFeature("salary_file", "Kế toán", SECTIONS["Kế toán"][1]),
+    QuickAccessFeature("accounting_reconcile", "Kế toán", SECTIONS["Kế toán"][2]),
+    QuickAccessFeature("credit_settlement", "Quyết toán", SECTIONS["Quyết toán"][0]),
+    QuickAccessFeature("accounting_settlement", "Quyết toán", SECTIONS["Quyết toán"][1]),
+    QuickAccessFeature("summary_settlement", "Quyết toán", SECTIONS["Quyết toán"][2]),
+    QuickAccessFeature("settlement_guidance", "Quyết toán", SECTIONS["Quyết toán"][3]),
+    QuickAccessFeature("quiz", "Trắc nghiệm", SECTIONS["Trắc nghiệm"][0]),
+)
+
+
+FEATURE_GROUPS: dict[str, tuple[FeatureGroup, ...]] = {
+    "Chức năng": (
+        FeatureGroup(
+            "Chuyển đổi dữ liệu",
+            (
+                SECTIONS["Chức năng"][0],
+                SECTIONS["Chức năng"][1],
+                SECTIONS["Chức năng"][2],
+                SECTIONS["Chức năng"][5],
+            ),
+        ),
+        FeatureGroup(
+            "Xử lý file Excel",
+            (
+                SECTIONS["Chức năng"][3],
+                SECTIONS["Chức năng"][4],
+            ),
+        ),
+        FeatureGroup(
+            "In ấn và sắp xếp",
+            (
+                SECTIONS["Chức năng"][6],
+                SECTIONS["Chức năng"][7],
+            ),
+        ),
+        FeatureGroup(
+            "Bảo mật workbook",
+            (
+                SECTIONS["Chức năng"][8],
+            ),
+        ),
+    ),
+    "Dữ liệu": (
+        FeatureGroup("Tra cứu và đối chiếu", tuple(SECTIONS["Dữ liệu"][:2])),
+        FeatureGroup("Chuẩn hóa và xuất dữ liệu", tuple(SECTIONS["Dữ liệu"][2:])),
+    ),
 }
 
 

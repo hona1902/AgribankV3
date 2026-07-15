@@ -50,6 +50,8 @@ FIELD_DEFINITIONS = (
 class SettingsWidget(QWidget):
     connect_excel_requested = Signal()
     show_excel_requested = Signal()
+    printer_settings_requested = Signal()
+    quick_access_settings_requested = Signal()
     addin_mode_changed = Signal(str)
     addin_enabled_changed = Signal(str, bool)
 
@@ -81,7 +83,9 @@ class SettingsWidget(QWidget):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_excel_tab(), "Kết nối Excel")
         self.tabs.addTab(self._build_branch_tab(), "Thông tin chi nhánh")
-        self.tabs.addTab(self._build_database_tab(), "Cơ sở dữ liệu & sao lưu")
+        self.tabs.addTab(self._build_database_tab(), "Cơ sở dữ liệu")
+        self.tabs.addTab(self._build_printer_tab(), "Máy in")
+        self.tabs.addTab(self._build_customization_tab(), "Tùy chỉnh")
         layout.addWidget(self.tabs, stretch=1)
         self.load_profile()
         self.refresh_database_status()
@@ -204,6 +208,71 @@ class SettingsWidget(QWidget):
         layout.addStretch()
         return page
 
+    def _build_printer_tab(self) -> QWidget:
+        page, layout = self._scroll_tab()
+        card = QFrame()
+        card.setObjectName("SettingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 16)
+        card_layout.setSpacing(10)
+
+        title = QLabel("Cài đặt máy in")
+        title.setObjectName("SectionTitle")
+        description = QLabel(
+            "Thiết lập máy in mặc định, khổ giấy và tùy chọn in trước khi "
+            "in hàng loạt tài liệu."
+        )
+        description.setObjectName("MutedText")
+        description.setWordWrap(True)
+        button_row = QHBoxLayout()
+        open_button = QPushButton("Cài đặt máy in")
+        open_button.setObjectName("PrimaryButton")
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_button.clicked.connect(
+            lambda checked=False: self.printer_settings_requested.emit()
+        )
+        button_row.addWidget(open_button)
+        button_row.addStretch()
+
+        card_layout.addWidget(title)
+        card_layout.addWidget(description)
+        card_layout.addLayout(button_row)
+        layout.addWidget(card)
+        layout.addStretch()
+        return page
+
+    def _build_customization_tab(self) -> QWidget:
+        page, layout = self._scroll_tab()
+        card = QFrame()
+        card.setObjectName("SettingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 16)
+        card_layout.setSpacing(10)
+
+        title = QLabel("Truy cập nhanh")
+        title.setObjectName("SectionTitle")
+        description = QLabel(
+            "Quản lý các chức năng thường dùng hiển thị tại màn hình Tổng quan."
+        )
+        description.setObjectName("MutedText")
+        description.setWordWrap(True)
+        button_row = QHBoxLayout()
+        open_button = QPushButton("Cài đặt truy cập nhanh")
+        open_button.setObjectName("PrimaryButton")
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_button.clicked.connect(
+            lambda checked=False: self.quick_access_settings_requested.emit()
+        )
+        button_row.addWidget(open_button)
+        button_row.addStretch()
+
+        card_layout.addWidget(title)
+        card_layout.addWidget(description)
+        card_layout.addLayout(button_row)
+        layout.addWidget(card)
+        layout.addStretch()
+        return page
+
     def _build_branch_tab(self) -> QWidget:
         page, layout = self._scroll_tab()
         group = QGroupBox("Thông tin dùng chung")
@@ -274,9 +343,9 @@ class SettingsWidget(QWidget):
         self.quiz_database_integrity_label = QLabel()
         self.database_size_label = QLabel()
         self.database_revision_label = QLabel()
-        status_layout.addRow("Database cài đặt", self.database_path_label)
+        status_layout.addRow("Database AgribankV3", self.database_path_label)
         status_layout.addRow(
-            "Toàn vẹn database cài đặt",
+            "Tình trạng",
             self.database_integrity_label,
         )
         status_layout.addRow(
@@ -284,7 +353,7 @@ class SettingsWidget(QWidget):
             self.quiz_database_path_label,
         )
         status_layout.addRow(
-            "Toàn vẹn database trắc nghiệm",
+            "Tình trạng",
             self.quiz_database_integrity_label,
         )
         status_layout.addRow("Tổng dung lượng", self.database_size_label)
@@ -345,6 +414,7 @@ class SettingsWidget(QWidget):
     def _scroll_tab() -> tuple[QScrollArea, QVBoxLayout]:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
         body.setObjectName("SettingsTabBody")
@@ -392,13 +462,13 @@ class SettingsWidget(QWidget):
             return
         self.database_path_label.setText(str(status.settings.path))
         self.database_integrity_label.setText(
-            "Tốt (OK)"
+            "Tốt (OK ✅)"
             if status.settings.integrity.casefold() == "ok"
             else status.settings.integrity
         )
         self.quiz_database_path_label.setText(str(status.quiz_path))
         self.quiz_database_integrity_label.setText(
-            "Tốt (OK)"
+            "Tốt (OK ✅)"
             if status.quiz_integrity.casefold() == "ok"
             else status.quiz_integrity
         )
@@ -558,6 +628,9 @@ class SettingsWidget(QWidget):
             "Thông tin chi nhánh": 1,
             "Cơ sở dữ liệu": 2,
             "Sao lưu dữ liệu": 2,
+            "Cài đặt máy in": 3,
+            "Truy cập nhanh": 4,
+            "Cài đặt truy cập nhanh": 4,
         }.get(title, 0)
         self.tabs.setCurrentIndex(index)
 

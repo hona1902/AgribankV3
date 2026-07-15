@@ -165,6 +165,27 @@ class SettingsDatabaseTests(unittest.TestCase):
             },
         )
 
+    def test_quick_access_items_are_durable_and_ignore_unknown_ids(self) -> None:
+        default_ids = ("convert_case", "vlookup_extended")
+        valid_ids = ("convert_case", "merge_same_structure", "vlookup_extended")
+
+        self.assertEqual(
+            self.database.load_quick_access_items(default_ids, valid_ids),
+            default_ids,
+        )
+
+        saved = self.database.save_quick_access_items(
+            ["merge_same_structure", "unknown", "convert_case", "convert_case"],
+            valid_ids,
+        )
+        reopened = AppSettingsDatabase(self.database_path)
+
+        self.assertEqual(saved, ("merge_same_structure", "convert_case"))
+        self.assertEqual(
+            reopened.load_quick_access_items(default_ids, valid_ids),
+            ("merge_same_structure", "convert_case"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

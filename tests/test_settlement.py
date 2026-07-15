@@ -12,6 +12,7 @@ from agribank_v3.file_merge import (
     FileMergeError,
     merge_same_structure_csv_to_csv,
     merge_same_structure_csv_to_xlsx,
+    merge_same_structure_excel_to_xlsx,
 )
 from agribank_v3.settings import BranchProfile
 from agribank_v3.settlement import (
@@ -1422,6 +1423,122 @@ class SettlementFixtureParityTests(unittest.TestCase):
         try:
             with self.assertRaises(FileMergeError):
                 merge_same_structure_csv_to_xlsx((source_a, source_b), output)
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_merge_same_structure_csv_to_xlsx_can_add_source_filename_column(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_note_a.csv"
+        source_b = test_dir / "merge_note_b.csv"
+        output = test_dir / "merge_note_output.xlsx"
+        source_a.write_text("NGAY,MA_CN\n20251231,5491\n", encoding="utf-8")
+        source_b.write_text("NGAY,MA_CN\n20251231,5492\n", encoding="utf-8")
+        try:
+            result = merge_same_structure_csv_to_xlsx(
+                (source_a, source_b),
+                output,
+                include_source_filename=True,
+            )
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Data"]
+
+            self.assertEqual(result.column_count, 3)
+            self.assertEqual(sheet["C1"].value, "File gốc")
+            self.assertEqual(sheet["C2"].value, source_a.name)
+            self.assertEqual(sheet["C3"].value, source_b.name)
+            workbook.close()
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_merge_same_structure_excel_to_xlsx_appends_without_repeating_header(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_excel_a.xlsx"
+        source_b = test_dir / "merge_excel_b.xlsx"
+        output = test_dir / "merge_excel_output.xlsx"
+        for path, branch_code, customer_id in (
+            (source_a, "5491", "001"),
+            (source_b, "5492", "002"),
+        ):
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(["NGAY", "MA_CN", "MA_KH"])
+            sheet.append(["20251231", branch_code, customer_id])
+            workbook.save(path)
+            workbook.close()
+        try:
+            result = merge_same_structure_excel_to_xlsx((source_a, source_b), output)
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Data"]
+
+            self.assertEqual(result.source_count, 2)
+            self.assertEqual(result.row_count, 2)
+            self.assertEqual(sheet.max_row, 3)
+            self.assertEqual(sheet["A1"].value, "NGAY")
+            self.assertEqual(sheet["B2"].value, "5491")
+            self.assertEqual(sheet["B3"].value, "5492")
+            workbook.close()
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_merge_same_structure_excel_to_xlsx_rejects_different_headers(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_excel_header_a.xlsx"
+        source_b = test_dir / "merge_excel_header_b.xlsx"
+        output = test_dir / "merge_excel_header_output.xlsx"
+        for path, headers in (
+            (source_a, ["NGAY", "MA_CN"]),
+            (source_b, ["NGAY", "KHAC"]),
+        ):
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(headers)
+            sheet.append(["20251231", "5491"])
+            workbook.save(path)
+            workbook.close()
+        try:
+            with self.assertRaises(FileMergeError):
+                merge_same_structure_excel_to_xlsx((source_a, source_b), output)
+        finally:
+            for path in (source_a, source_b, output):
+                if path.exists():
+                    path.unlink()
+
+    def test_merge_same_structure_excel_to_xlsx_can_add_source_filename_column(self) -> None:
+        test_dir = self.FIXTURE_DIR / "DaTest"
+        test_dir.mkdir(exist_ok=True)
+        source_a = test_dir / "merge_excel_note_a.xlsx"
+        source_b = test_dir / "merge_excel_note_b.xlsx"
+        output = test_dir / "merge_excel_note_output.xlsx"
+        for path, branch_code in ((source_a, "5491"), (source_b, "5492")):
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(["NGAY", "MA_CN"])
+            sheet.append(["20251231", branch_code])
+            workbook.save(path)
+            workbook.close()
+        try:
+            result = merge_same_structure_excel_to_xlsx(
+                (source_a, source_b),
+                output,
+                include_source_filename=True,
+            )
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Data"]
+
+            self.assertEqual(result.column_count, 3)
+            self.assertEqual(sheet["C1"].value, "File gốc")
+            self.assertEqual(sheet["C2"].value, source_a.name)
+            self.assertEqual(sheet["C3"].value, source_b.name)
+            workbook.close()
         finally:
             for path in (source_a, source_b, output):
                 if path.exists():

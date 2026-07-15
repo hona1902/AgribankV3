@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from html import escape
 import json
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QProcess, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QIcon, QMouseEvent, QPixmap
+from PySide6.QtCore import QEvent, QProcess, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QFontMetrics, QIcon, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QDialog,
     QApplication,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -28,14 +33,19 @@ import win32con
 import win32gui
 from pywintypes import error as win32_error
 
+from agribank_v3 import __version__
 from agribank_v3.features.catalog import (
     Feature,
+    FEATURE_GROUPS,
     QUYET_TOAN_KE_TOAN_FEATURES,
+    QUICK_ACCESS_DEFAULT_IDS,
+    QUICK_ACCESS_FEATURES,
+    QuickAccessFeature,
     QUYET_TOAN_TIN_DUNG_FEATURES,
     QUYET_TOAN_TONG_HOP_FEATURES,
     SECTIONS,
 )
-from agribank_v3.settings import AddinMode, SettingsDatabaseError
+from agribank_v3.settings import AddinMode, AppSettingsDatabase, SettingsDatabaseError
 from agribank_v3.settlement import (
     SETTLEMENT_SPECS,
     SettlementEngine,
@@ -65,10 +75,33 @@ from agribank_v3.excel import (
     ExcelContext,
     ExcelService,
 )
-from agribank_v3.file_merge import FileMergeError, merge_same_structure_csv_to_csv
+from agribank_v3.file_merge import (
+    FileMergeError,
+    merge_same_structure_csv_to_csv,
+    merge_same_structure_csv_to_xlsx,
+    merge_same_structure_excel_to_xlsx,
+)
+from agribank_v3.excel_tools import (
+    ExcelToolError,
+    convert_csv_to_excel,
+    split_workbook_sheets_to_files,
+)
+from agribank_v3.features.credit.auto_interest.placeholder_windows import (
+    AUTO_INTEREST_PLACEHOLDER_TITLE,
+    AutoInterestPlaceholderDialog,
+)
+from agribank_v3.features.credit.tovayvon.menu import TOVAYVON_FEATURES
+from agribank_v3.features.credit.tovayvon.placeholder_windows import (
+    CREDIT_GROUP_MANAGEMENT_ROUTE_TITLES,
+    CREDIT_TOVAYVON_PLACEHOLDER_TITLES,
+    CreditGroupManagementPlaceholderDialog,
+    CreditMigrationPlaceholderDialog,
+)
+from agribank_v3.word_folder_print import print_word_files
 from agribank_v3.ui.dialogs.author_info import AuthorInfoDialog
 from agribank_v3.ui.dialogs.case_conversion import CaseConversionDialog
 from agribank_v3.ui.dialogs.consolidation_csv import ConsolidationCsvDialog
+from agribank_v3.ui.dialogs.excel_file_tools import CsvToExcelDialog, SplitSheetsDialog
 from agribank_v3.ui.dialogs.excel_launcher import ExcelLauncherDialog
 from agribank_v3.ui.dialogs.settlement_mau1516 import Mau1516SettlementDialog
 from agribank_v3.ui.dialogs.settlement_mau05 import Mau05SettlementDialog
@@ -77,6 +110,9 @@ from agribank_v3.ui.dialogs.settlement_mau30 import Mau30SettlementDialog
 from agribank_v3.ui.dialogs.settlement_guidance import SettlementGuidanceDialog
 from agribank_v3.ui.dialogs.settlement_multi_source import MultiSourceSettlementDialog
 from agribank_v3.ui.dialogs.settlement_simple_source import SimpleSourceSettlementDialog
+from agribank_v3.ui.dialogs.printer_settings import PrinterSettingsDialog
+from agribank_v3.ui.dialogs.same_structure_merge import SameStructureMergeDialog
+from agribank_v3.ui.dialogs.word_folder_print import WordFolderPrintDialog
 from agribank_v3.ui.dialogs.quiz import QuizWidget
 from agribank_v3.ui.icons import app_icon, icon_path
 from agribank_v3.ui.settings import SettingsWidget
@@ -84,63 +120,205 @@ from agribank_v3.ui.workers import run_in_thread
 from agribank_v3.quiz import QuizDatabaseError
 
 
-NAVIGATION = ["Tổng quan", *SECTIONS.keys()]
+APP_FOOTER_TEXT = (
+    f"AgribankV3 - Phiên bản v{__version__} - Nguyễn Hoài Nam - 0972.173.064"
+)
+FEATURE_CARD_GAP = 12
+NAVIGATION = [
+    "Tổng quan",
+    "Chức năng",
+    "Dữ liệu",
+    "Tín dụng",
+    "Kế toán",
+    "Quyết toán",
+    "Trắc nghiệm",
+    "Cài đặt",
+]
 NAVIGATION_ICONS = (
     "Logo-HNA.png",
-    "caidat.png",
     "case.png",
     "access.png",
     "m09a.png",
     "qtkt.png",
     "qt.png",
-    "tracnghiem.png",
-    "BamChuot.png",
+    "tracnghiem.svg",
+    "caidat.png",
 )
+
+
+class AutoFitLabel(QLabel):
+    def __init__(
+        self,
+        text: str,
+        *,
+        max_pixel_size: int,
+        min_pixel_size: int,
+        max_lines: int,
+        fixed_height: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._full_text = text
+        self._max_pixel_size = max_pixel_size
+        self._min_pixel_size = min_pixel_size
+        self._max_lines = max_lines
+        self._fitting = False
+        self.setWordWrap(True)
+        self.setFixedHeight(fixed_height)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setText(text)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.fit_text_to_card()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.fit_text_to_card()
+
+    def fit_text_to_card(self) -> None:
+        if self._fitting or self.width() <= 0:
+            return
+        self._fitting = True
+        try:
+            available_width = max(10, self.width())
+            available_height = max(10, self.height())
+            text = self._full_text
+            chosen_font = self.font()
+            for pixel_size in range(self._max_pixel_size, self._min_pixel_size - 1, -1):
+                candidate_font = self.font()
+                candidate_font.setPixelSize(pixel_size)
+                metrics = QFontMetrics(candidate_font)
+                max_height = min(available_height, metrics.lineSpacing() * self._max_lines)
+                text_rect = metrics.boundingRect(
+                    QRect(0, 0, available_width, max_height * 3),
+                    Qt.TextFlag.TextWordWrap,
+                    text,
+                )
+                if text_rect.height() <= max_height and text_rect.width() <= available_width:
+                    chosen_font = candidate_font
+                    self.setFont(chosen_font)
+                    QLabel.setText(self, text)
+                    return
+                chosen_font = candidate_font
+            self.setFont(chosen_font)
+            QLabel.setText(
+                self,
+                self._elided_multiline_text(
+                    text,
+                    available_width,
+                    available_height,
+                    chosen_font,
+                ),
+            )
+        finally:
+            self._fitting = False
+
+    def _elided_multiline_text(
+        self,
+        text: str,
+        available_width: int,
+        available_height: int,
+        font,
+    ) -> str:
+        metrics = QFontMetrics(font)
+        max_height = min(available_height, metrics.lineSpacing() * self._max_lines)
+        if not text:
+            return ""
+        low = 0
+        high = len(text)
+        best = "..."
+        while low <= high:
+            middle = (low + high) // 2
+            candidate = text[:middle].rstrip()
+            if middle < len(text):
+                candidate = f"{candidate}..."
+            text_rect = metrics.boundingRect(
+                QRect(0, 0, available_width, max_height * 3),
+                Qt.TextFlag.TextWordWrap,
+                candidate,
+            )
+            if text_rect.height() <= max_height and text_rect.width() <= available_width:
+                best = candidate
+                low = middle + 1
+            else:
+                high = middle - 1
+        return best
 
 
 class FeatureCard(QFrame):
     requested = Signal(str)
+    CARD_WIDTH = 260
+    CARD_HEIGHT = 126
+    ICON_SIZE = 30
+    TITLE_HEIGHT = 44
+    ACTION_HEIGHT = 30
 
     def __init__(self, feature: Feature, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.feature = feature
         self.setObjectName("FeatureCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(164)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setToolTip(self._tooltip_html(feature.description))
+        self.setFixedSize(self.CARD_WIDTH, self.CARD_HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 17, 18, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 11, 14, 10)
+        layout.setSpacing(5)
 
         icon = QLabel()
         pixmap = QPixmap(icon_path(feature.icon))
         icon.setPixmap(
             pixmap.scaled(
-                36,
-                36,
+                self.ICON_SIZE,
+                self.ICON_SIZE,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
-        icon.setFixedHeight(38)
+        icon.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        icon.setToolTip(self.toolTip())
 
-        title = QLabel(feature.title)
-        title.setObjectName("CardTitle")
-
-        description = QLabel(feature.description)
-        description.setObjectName("MutedText")
-        description.setWordWrap(True)
+        title = AutoFitLabel(
+            feature.title,
+            max_pixel_size=15,
+            min_pixel_size=11,
+            max_lines=2,
+            fixed_height=self.TITLE_HEIGHT,
+        )
+        title.setObjectName("AutoCardTitle")
+        title.setToolTip(self.toolTip())
 
         layout.addWidget(icon)
         layout.addWidget(title)
-        layout.addWidget(description)
         layout.addStretch()
+        action_area = QWidget()
+        action_area.setFixedHeight(self.ACTION_HEIGHT)
+        action_layout = QHBoxLayout(action_area)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(0)
+        action_layout.addStretch()
+        arrow = QLabel(">")
+        arrow.setObjectName("CardArrow")
+        arrow.setToolTip(self.toolTip())
+        arrow.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        arrow.setFixedSize(22, self.ACTION_HEIGHT)
+        action_layout.addWidget(arrow)
+        layout.addWidget(action_area)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.requested.emit(self.feature.title)
         super().mousePressEvent(event)
+
+    @staticmethod
+    def _tooltip_html(text: str) -> str:
+        return (
+            "<div style='white-space: normal; width: 320px;'>"
+            f"{escape(text)}"
+            "</div>"
+        )
 
 
 class FeatureMenuItem(QFrame):
@@ -188,6 +366,390 @@ class FeatureMenuItem(QFrame):
         super().mousePressEvent(event)
 
 
+class ResponsiveFeatureGrid(QWidget):
+    def __init__(
+        self,
+        features: tuple[Feature, ...] | list[Feature],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.cards = tuple(FeatureCard(feature) for feature in features)
+        self._columns = 0
+        self._viewport = None
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(FEATURE_CARD_GAP)
+        self.grid.setVerticalSpacing(FEATURE_CARD_GAP)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._relayout_cards(force=True)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._install_viewport_resize_filter()
+        self._relayout_cards(force=True)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout_cards()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._viewport and event.type() == QEvent.Type.Resize:
+            self._relayout_cards(force=True)
+        return super().eventFilter(watched, event)
+
+    def connect_requested(self, slot) -> None:
+        for card in self.cards:
+            card.requested.connect(slot)
+
+    def _column_count_for_width(self, available_width: int) -> int:
+        card_span = FeatureCard.CARD_WIDTH + FEATURE_CARD_GAP
+        return max(1, (max(1, available_width) + FEATURE_CARD_GAP) // card_span)
+
+    def _relayout_cards(self, force: bool = False) -> None:
+        columns = self._column_count_for_width(self._available_layout_width())
+        if not force and columns == self._columns:
+            return
+        self._columns = columns
+        for card in self.cards:
+            self.grid.removeWidget(card)
+        for index, card in enumerate(self.cards):
+            self.grid.addWidget(
+                card,
+                index // columns,
+                index % columns,
+                alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
+        self.updateGeometry()
+
+    def _available_layout_width(self) -> int:
+        available_width = self.width()
+        scroll_area = self._ancestor_scroll_area()
+        if scroll_area is not None:
+            viewport_width = scroll_area.viewport().width()
+            body = scroll_area.widget()
+            if body is not None and body.layout() is not None:
+                margins = body.layout().contentsMargins()
+                viewport_width -= margins.left() + margins.right()
+            if viewport_width > 0:
+                available_width = (
+                    min(available_width, viewport_width)
+                    if available_width > 0
+                    else viewport_width
+                )
+        return max(FeatureCard.CARD_WIDTH, available_width)
+
+    def _install_viewport_resize_filter(self) -> None:
+        scroll_area = self._ancestor_scroll_area()
+        viewport = scroll_area.viewport() if scroll_area is not None else None
+        if viewport is self._viewport:
+            return
+        if self._viewport is not None:
+            self._viewport.removeEventFilter(self)
+        self._viewport = viewport
+        if self._viewport is not None:
+            self._viewport.installEventFilter(self)
+
+    def _ancestor_scroll_area(self) -> QScrollArea | None:
+        parent = self.parentWidget()
+        while parent is not None:
+            if isinstance(parent, QScrollArea):
+                return parent
+            parent = parent.parentWidget()
+        return None
+
+
+class QuickAccessSettingsDialog(QDialog):
+    MAX_ITEMS = 12
+    ROW_HEIGHT = 48
+    CHECKBOX_COLUMN_WIDTH = 34
+    ICON_COLUMN_WIDTH = 34
+    GROUP_COLUMN_WIDTH = 170
+
+    def __init__(
+        self,
+        candidates: tuple[QuickAccessFeature, ...],
+        selected_ids: tuple[str, ...],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.candidates = candidates
+        self.selected_ids = selected_ids
+        self.setWindowTitle("Cài đặt truy cập nhanh")
+        self.setModal(True)
+        self.setMinimumSize(620, 560)
+        self.saved_quick_access_ids = tuple(selected_ids)
+        self.temp_quick_access_ids = tuple(selected_ids)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        header = QFrame()
+        header.setObjectName("QuickAccessDialogHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(16, 14, 16, 14)
+        header_layout.setSpacing(4)
+        title = QLabel("Cài đặt truy cập nhanh")
+        title.setObjectName("DialogHeaderTitle")
+        subtitle = QLabel(
+            "Chọn các chức năng thường dùng để hiển thị tại màn hình Tổng quan."
+        )
+        subtitle.setObjectName("DialogHeaderSubtitle")
+        subtitle.setWordWrap(True)
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Tìm chức năng...")
+        self.search_edit.textChanged.connect(self._filter_items)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.list_widget.setUniformItemSizes(True)
+        self.list_widget.itemClicked.connect(self._toggle_item_checkbox)
+
+        move_row = QHBoxLayout()
+        up_button = QPushButton("Lên")
+        up_button.clicked.connect(lambda checked=False: self._move_current(-1))
+        down_button = QPushButton("Xuống")
+        down_button.clicked.connect(lambda checked=False: self._move_current(1))
+        default_button = QPushButton("Khôi phục mặc định")
+        default_button.clicked.connect(self.restore_defaults)
+        move_row.addWidget(up_button)
+        move_row.addWidget(down_button)
+        move_row.addStretch()
+        move_row.addWidget(default_button)
+
+        button_row = QHBoxLayout()
+        save_button = QPushButton("Lưu")
+        save_button.setObjectName("PrimaryButton")
+        save_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Hủy")
+        cancel_button.clicked.connect(self.reject)
+        button_row.addStretch()
+        button_row.addWidget(save_button)
+        button_row.addWidget(cancel_button)
+
+        layout.addWidget(header)
+        layout.addWidget(self.search_edit)
+        layout.addWidget(self.list_widget, stretch=1)
+        layout.addLayout(move_row)
+        layout.addLayout(button_row)
+
+        self._populate_items()
+
+    def selected_item_ids(self) -> tuple[str, ...]:
+        self._sync_temp_from_checkboxes()
+        return self.temp_quick_access_ids
+
+    def restore_defaults(self) -> None:
+        self.temp_quick_access_ids = tuple(QUICK_ACCESS_DEFAULT_IDS)
+        self._rebuild_items(self.temp_quick_access_ids)
+        self._set_checked_ids(self.temp_quick_access_ids)
+        self.list_widget.setCurrentRow(0 if self.list_widget.count() else -1)
+
+    def accept(self) -> None:
+        selected = self.selected_item_ids()
+        if len(selected) > self.MAX_ITEMS:
+            QMessageBox.warning(
+                self,
+                "Truy cập nhanh",
+                f"Chỉ có thể chọn tối đa {self.MAX_ITEMS} chức năng truy cập nhanh.",
+            )
+            return
+        super().accept()
+
+    def _populate_items(self) -> None:
+        self._rebuild_items(self.temp_quick_access_ids)
+
+    def _rebuild_items(self, selected_ids: tuple[str, ...]) -> None:
+        self.list_widget.clear()
+        selected_order = {item_id: index for index, item_id in enumerate(selected_ids)}
+        ordered = sorted(
+            self.candidates,
+            key=lambda item: (
+                0 if item.id in selected_order else 1,
+                selected_order.get(item.id, 0),
+                item.group.casefold(),
+                item.feature.title.casefold(),
+            ),
+        )
+        for candidate in ordered:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, candidate.id)
+            item.setData(Qt.ItemDataRole.UserRole + 1, candidate.group)
+            item.setData(Qt.ItemDataRole.UserRole + 2, candidate.feature.title)
+            item.setText("")
+            item.setToolTip(candidate.feature.description)
+            self.list_widget.addItem(item)
+            item.setSizeHint(QSize(0, self.ROW_HEIGHT))
+            self._install_item_widget(
+                item,
+                candidate.feature.title,
+                candidate.group,
+                candidate.feature.icon,
+                candidate.id in selected_ids,
+            )
+        self._filter_items(self.search_edit.text())
+
+    def _set_checked_ids(self, selected_ids: tuple[str, ...]) -> None:
+        selected = set(selected_ids)
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            checkbox = self._item_checkbox(item)
+            if checkbox is not None:
+                checkbox.setChecked(
+                    str(item.data(Qt.ItemDataRole.UserRole)) in selected
+                )
+        self.temp_quick_access_ids = self._checked_ids_from_widgets()
+
+    def _checked_ids_from_widgets(self) -> tuple[str, ...]:
+        selected: list[str] = []
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            checkbox = self._item_checkbox(item)
+            if checkbox is not None and checkbox.isChecked():
+                selected.append(str(item.data(Qt.ItemDataRole.UserRole)))
+        return tuple(selected)
+
+    def _sync_temp_from_checkboxes(self) -> None:
+        self.temp_quick_access_ids = self._checked_ids_from_widgets()
+
+    def _item_checkbox(self, item: QListWidgetItem) -> QCheckBox | None:
+        row_widget = self.list_widget.itemWidget(item)
+        if row_widget is None:
+            return None
+        return row_widget.findChild(QCheckBox)
+
+    def _install_item_widget(
+        self,
+        item: QListWidgetItem,
+        title: str,
+        group: str,
+        icon_name: str,
+        checked: bool,
+    ) -> None:
+        row_widget = QWidget()
+        row_widget.setObjectName("QuickAccessRow")
+        row_widget.setFixedHeight(self.ROW_HEIGHT)
+        row_layout = QGridLayout(row_widget)
+        row_layout.setContentsMargins(8, 5, 10, 5)
+        row_layout.setHorizontalSpacing(8)
+        row_layout.setVerticalSpacing(0)
+        row_layout.setColumnMinimumWidth(0, self.CHECKBOX_COLUMN_WIDTH)
+        row_layout.setColumnMinimumWidth(1, self.ICON_COLUMN_WIDTH)
+        row_layout.setColumnMinimumWidth(3, self.GROUP_COLUMN_WIDTH)
+        row_layout.setColumnStretch(0, 0)
+        row_layout.setColumnStretch(1, 0)
+        row_layout.setColumnStretch(2, 1)
+        row_layout.setColumnStretch(3, 0)
+
+        checkbox = QCheckBox()
+        checkbox.setChecked(checked)
+        checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        checkbox.setFixedSize(24, 24)
+
+        icon_label = QLabel()
+        pixmap = QPixmap(icon_path(icon_name))
+        icon_label.setPixmap(
+            pixmap.scaled(
+                18,
+                18,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        icon_label.setFixedSize(24, 24)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        text_label = QLabel(title)
+        text_label.setWordWrap(True)
+        text_label.setFixedHeight(34)
+        text_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        text_label.setObjectName("QuickAccessListText")
+
+        group_label = QLabel(group)
+        group_label.setObjectName("QuickAccessGroupBadge")
+        group_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        group_label.setFixedWidth(self.GROUP_COLUMN_WIDTH)
+        group_label.setFixedHeight(26)
+
+        row_layout.addWidget(
+            checkbox,
+            0,
+            0,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        row_layout.addWidget(
+            icon_label,
+            0,
+            1,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        row_layout.addWidget(text_label, 0, 2)
+        row_layout.addWidget(
+            group_label,
+            0,
+            3,
+            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.list_widget.setItemWidget(item, row_widget)
+
+    def _toggle_item_checkbox(self, item: QListWidgetItem) -> None:
+        checkbox = self._item_checkbox(item)
+        if checkbox is not None:
+            checkbox.setChecked(not checkbox.isChecked())
+            self._sync_temp_from_checkboxes()
+
+    def _move_current(self, direction: int) -> None:
+        row = self.list_widget.currentRow()
+        target = row + direction
+        if row < 0 or target < 0 or target >= self.list_widget.count():
+            return
+        current_item = self.list_widget.item(row)
+        checkbox = self._item_checkbox(current_item)
+        checked = checkbox.isChecked() if checkbox is not None else False
+        title = str(current_item.data(Qt.ItemDataRole.UserRole + 2))
+        group = str(current_item.data(Qt.ItemDataRole.UserRole + 1))
+        item = self.list_widget.takeItem(row)
+        self.list_widget.insertItem(target, item)
+        item.setSizeHint(QSize(0, self.ROW_HEIGHT))
+        candidate = next(
+            (
+                candidate
+                for candidate in self.candidates
+                if candidate.id == str(item.data(Qt.ItemDataRole.UserRole))
+            ),
+            None,
+        )
+        if candidate is not None:
+            self._install_item_widget(
+                item,
+                candidate.feature.title,
+                candidate.group,
+                candidate.feature.icon,
+                checked,
+            )
+        else:
+            self._install_item_widget(item, title, group, "file.png", checked)
+        self.list_widget.setCurrentRow(target)
+        self._sync_temp_from_checkboxes()
+
+    def _filter_items(self, text: str) -> None:
+        needle = text.strip().casefold()
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            searchable = (
+                str(item.data(Qt.ItemDataRole.UserRole + 2))
+                + " "
+                + str(item.data(Qt.ItemDataRole.UserRole + 1))
+            ).casefold()
+            item.setHidden(bool(needle) and needle not in searchable)
+
+
 class ClickableBrand(QFrame):
     clicked = Signal()
 
@@ -206,6 +768,7 @@ class MainWindow(QMainWindow):
         self.resize(1360, 820)
 
         self.nav_buttons: list[QPushButton] = []
+        self.settings_database = AppSettingsDatabase()
         self.excel_service = ExcelService()
         self.settlement_engine = SettlementEngine()
         self.settlement_engine.register("mau04", Mau04Processor())
@@ -230,8 +793,12 @@ class MainWindow(QMainWindow):
         self.quyet_toan_tin_dung_page: QWidget | None = None
         self.quyet_toan_ke_toan_page: QWidget | None = None
         self.quyet_toan_tong_hop_page: QWidget | None = None
+        self.tovayvon_page: QWidget | None = None
         self.author_info_dialog: AuthorInfoDialog | None = None
         self.settlement_guidance_dialog: SettlementGuidanceDialog | None = None
+        self.printer_settings_dialog: PrinterSettingsDialog | None = None
+        self.quick_access_container: QWidget | None = None
+        self.quick_access_layout: QVBoxLayout | None = None
         self._background_threads: list[object] = []
         self._background_processes: list[QProcess] = []
         self._nonblocking_messages: list[QMessageBox] = []
@@ -247,7 +814,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         status = QStatusBar()
-        status.showMessage("AgribankV3 v0.1.0  •  Prototype giao diện")
+        status.showMessage(APP_FOOTER_TEXT)
         self.setStatusBar(status)
         self.select_page(0)
         self.auto_connect_timer = QTimer(self)
@@ -339,11 +906,6 @@ class MainWindow(QMainWindow):
         self.author_info_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.author_info_button.clicked.connect(self.show_author_info)
         layout.addWidget(self.author_info_button)
-
-        self.version_label = QLabel("Phiên bản thử nghiệm 0.1.0")
-        self.version_label.setObjectName("BrandSubtitle")
-        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.version_label)
         return self.sidebar
 
     def _build_content(self) -> QWidget:
@@ -354,7 +916,8 @@ class MainWindow(QMainWindow):
 
         self.pages = QStackedWidget()
         self.pages.addWidget(self._build_dashboard())
-        for section, features in SECTIONS.items():
+        for section in NAVIGATION[1:]:
+            features = SECTIONS[section]
             if section == "Cài đặt":
                 self.settings_widget = SettingsWidget(self)
                 self.excel_service.set_addin_mode(
@@ -377,6 +940,12 @@ class MainWindow(QMainWindow):
                 )
                 self.settings_widget.show_excel_requested.connect(
                     self.show_or_connect_excel
+                )
+                self.settings_widget.printer_settings_requested.connect(
+                    self._show_printer_settings_dialog
+                )
+                self.settings_widget.quick_access_settings_requested.connect(
+                    self._show_quick_access_settings_dialog
                 )
                 self.settings_widget.addin_mode_changed.connect(
                     self._apply_addin_mode
@@ -454,6 +1023,26 @@ class MainWindow(QMainWindow):
             self.settlement_guidance_dialog.deleteLater()
             self.settlement_guidance_dialog = None
 
+    def _show_printer_settings_dialog(self) -> None:
+        if (
+            self.printer_settings_dialog is not None
+            and self.printer_settings_dialog.isVisible()
+        ):
+            self.printer_settings_dialog.raise_()
+            self.printer_settings_dialog.activateWindow()
+            return
+
+        dialog = PrinterSettingsDialog(self)
+        self.printer_settings_dialog = dialog
+        dialog.finished.connect(self._clear_printer_settings_dialog)
+        dialog.move(self.frameGeometry().center() - dialog.rect().center())
+        dialog.open()
+
+    def _clear_printer_settings_dialog(self) -> None:
+        if self.printer_settings_dialog is not None:
+            self.printer_settings_dialog.deleteLater()
+            self.printer_settings_dialog = None
+
     def _build_dashboard(self) -> QWidget:
         page = self._scroll_page()
         body = page.widget()
@@ -477,54 +1066,171 @@ class MainWindow(QMainWindow):
         welcome_layout.addLayout(text_layout, stretch=1)
         layout.addWidget(welcome)
 
-        metrics = QHBoxLayout()
-        for value, label in (
+        metrics = QGridLayout()
+        metrics.setHorizontalSpacing(12)
+        metrics.setVerticalSpacing(12)
+        metric_items = (
             ("217", "Ribbon callback"),
             ("8", "Nhóm chức năng"),
             ("53", "Biểu mẫu sẽ chuyển đổi"),
             ("13", "Add-in và workbook"),
-        ):
-            metrics.addWidget(self._metric_card(value, label))
+        )
+        for index, (value, label) in enumerate(metric_items):
+            metrics.addWidget(self._metric_card(value, label), index // 3, index % 3)
+        for column in range(3):
+            metrics.setColumnStretch(column, 1)
         layout.addLayout(metrics)
 
+        quick_header = QHBoxLayout()
         section_title = QLabel("Truy cập nhanh")
         section_title.setObjectName("PageTitle")
-        layout.addWidget(section_title)
+        settings_button = QPushButton("Cài đặt")
+        settings_button.setObjectName("QuickSettingsButton")
+        settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_button.setToolTip(
+            "Tùy chỉnh các chức năng hiển thị trong truy cập nhanh"
+        )
+        settings_button.clicked.connect(self._show_quick_access_settings_dialog)
+        quick_header.addWidget(section_title)
+        quick_header.addStretch()
+        quick_header.addWidget(settings_button)
+        layout.addLayout(quick_header)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
-        quick_features = [
-            SECTIONS["Chức năng"][0],
-            SECTIONS["Dữ liệu"][1],
-            SECTIONS["Tín dụng"][0],
-            SECTIONS["Quyết toán"][0],
-        ]
-        for index, feature in enumerate(quick_features):
-            card = FeatureCard(feature)
-            card.requested.connect(self.open_feature)
-            grid.addWidget(card, index // 2, index % 2)
-        layout.addLayout(grid)
+        self.quick_access_container = QWidget()
+        self.quick_access_layout = QVBoxLayout(self.quick_access_container)
+        self.quick_access_layout.setContentsMargins(0, 0, 0, 0)
+        self.quick_access_layout.setSpacing(12)
+        layout.addWidget(self.quick_access_container)
+        self._render_quick_access()
         layout.addStretch()
         return page
+
+    def _quick_access_valid_ids(self) -> tuple[str, ...]:
+        return tuple(item.id for item in QUICK_ACCESS_FEATURES)
+
+    def _quick_access_by_id(self) -> dict[str, QuickAccessFeature]:
+        return {item.id: item for item in QUICK_ACCESS_FEATURES}
+
+    def _load_quick_access_ids(self) -> tuple[str, ...]:
+        return self.settings_database.load_quick_access_items(
+            QUICK_ACCESS_DEFAULT_IDS,
+            self._quick_access_valid_ids(),
+        )
+
+    def _quick_access_features(self) -> tuple[Feature, ...]:
+        by_id = self._quick_access_by_id()
+        return tuple(
+            by_id[item_id].feature
+            for item_id in self._load_quick_access_ids()
+            if item_id in by_id
+        )
+
+    def _render_quick_access(self) -> None:
+        if self.quick_access_layout is None:
+            return
+        while self.quick_access_layout.count():
+            item = self.quick_access_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        features = self._quick_access_features()
+        if features:
+            quick_grid = ResponsiveFeatureGrid(features)
+            quick_grid.connect_requested(self.open_feature)
+            self.quick_access_layout.addWidget(quick_grid)
+            return
+
+        empty_card = QFrame()
+        empty_card.setObjectName("SettingsCard")
+        empty_layout = QVBoxLayout(empty_card)
+        empty_layout.setContentsMargins(18, 16, 18, 16)
+        empty_layout.setSpacing(8)
+        empty_title = QLabel("Chưa có chức năng truy cập nhanh.")
+        empty_title.setObjectName("SectionTitle")
+        empty_text = QLabel("Bấm Cài đặt để thêm chức năng thường dùng.")
+        empty_text.setObjectName("MutedText")
+        empty_button = QPushButton("Cài đặt truy cập nhanh")
+        empty_button.setObjectName("PrimaryButton")
+        empty_button.clicked.connect(self._show_quick_access_settings_dialog)
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_text)
+        empty_layout.addWidget(empty_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.quick_access_layout.addWidget(empty_card)
+
+    def _show_quick_access_settings_dialog(self) -> None:
+        dialog = QuickAccessSettingsDialog(
+            QUICK_ACCESS_FEATURES,
+            self._load_quick_access_ids(),
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = self.settings_database.save_quick_access_items(
+            dialog.selected_item_ids(),
+            self._quick_access_valid_ids(),
+            limit=QuickAccessSettingsDialog.MAX_ITEMS,
+        )
+        self._render_quick_access()
+        if not selected:
+            self.statusBar().showMessage("Đã bỏ trống Truy cập nhanh.", 4000)
+        else:
+            self.statusBar().showMessage("Đã lưu cài đặt Truy cập nhanh.", 4000)
 
     def _build_feature_page(self, title: str, features: list[Feature]) -> QWidget:
         page = self._scroll_page()
         body = page.widget()
         layout = body.layout()
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
-        for index, feature in enumerate(features):
-            card = FeatureCard(feature)
-            card.requested.connect(self.open_feature)
-            grid.addWidget(card, index // 3, index % 3)
-        for column in range(3):
-            grid.setColumnStretch(column, 1)
-        layout.addLayout(grid)
+        feature_groups = FEATURE_GROUPS.get(title)
+        if feature_groups:
+            for group in feature_groups:
+                group_title = QLabel(group.title)
+                group_title.setObjectName("SectionTitle")
+                layout.addWidget(group_title)
+                grid = ResponsiveFeatureGrid(group.features)
+                grid.connect_requested(self.open_feature)
+                layout.addWidget(grid)
+            layout.addStretch()
+            return page
+
+        grid = ResponsiveFeatureGrid(features)
+        grid.connect_requested(self.open_feature)
+        layout.addWidget(grid)
         layout.addStretch()
         return page
+
+    def _build_tovayvon_page(self) -> QWidget:
+        page = self._scroll_page()
+        body = page.widget()
+        layout = body.layout()
+
+        header = QHBoxLayout()
+        title = QLabel("Tổ vay vốn")
+        title.setObjectName("PageTitle")
+        back_button = QPushButton("Quay lại Tín dụng")
+        back_button.setObjectName("SecondaryButton")
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(lambda: self.select_page(NAVIGATION.index("Tín dụng")))
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(back_button)
+        layout.addLayout(header)
+
+        grid = ResponsiveFeatureGrid(TOVAYVON_FEATURES)
+        grid.connect_requested(self.open_feature)
+        layout.addWidget(grid)
+        layout.addStretch()
+        return page
+
+    def _show_tovayvon_page(self) -> None:
+        if self.tovayvon_page is not None:
+            self.pages.removeWidget(self.tovayvon_page)
+            self.tovayvon_page.deleteLater()
+        self.tovayvon_page = self._build_tovayvon_page()
+        self.pages.addWidget(self.tovayvon_page)
+        self.pages.setCurrentWidget(self.tovayvon_page)
+        self.nav_buttons[NAVIGATION.index("Tín dụng")].setChecked(True)
 
     def _build_quyet_toan_tin_dung_page(self) -> QWidget:
         page = self._scroll_page()
@@ -771,6 +1477,230 @@ class MainWindow(QMainWindow):
             title,
             f"{spec.title} đã có trong menu tổng hợp. Processor tổng hợp sẽ được chuyển từ VBA sang Python ở bước tiếp theo.",
         )
+
+    def _run_same_structure_merge_dialog(self) -> None:
+        dialog = SameStructureMergeDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        output_path = dialog.output_path()
+        if output_path is None:
+            return
+        if output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                "Nối file cùng cấu trúc",
+                f"File {output_path.name} đã tồn tại. Ghi đè file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        progress = self._show_busy_dialog(
+            "Đang nối các file cùng cấu trúc...\nVui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            if dialog.source_kind() == "csv":
+                result = merge_same_structure_csv_to_xlsx(
+                    dialog.source_paths,
+                    output_path,
+                    include_source_filename=dialog.include_source_filename(),
+                )
+            else:
+                result = merge_same_structure_excel_to_xlsx(
+                    dialog.source_paths,
+                    output_path,
+                    include_source_filename=dialog.include_source_filename(),
+                )
+        except (FileMergeError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+
+        if execution_error is not None:
+            QMessageBox.warning(
+                self,
+                "Không thể nối file cùng cấu trúc",
+                str(execution_error),
+            )
+            return
+        if result is None:
+            QMessageBox.warning(
+                self,
+                "Không thể nối file cùng cấu trúc",
+                "Không nhận được kết quả xử lý.",
+            )
+            return
+        self.statusBar().showMessage(
+            f"Đã nối {result.source_count} file, {result.row_count} dòng dữ liệu."
+        )
+        self._show_result_message(
+            "Hoàn thành nối file cùng cấu trúc",
+            (
+                f"Đã tạo file:\n{result.output_path}\n\n"
+                f"Số file nguồn: {result.source_count}\n"
+                f"Số dòng dữ liệu: {result.row_count}\n"
+                f"Số cột: {result.column_count}"
+            ),
+            result.output_path,
+        )
+
+    def _run_csv_to_excel_dialog(self) -> None:
+        dialog = CsvToExcelDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        conversions = dialog.batch_outputs()
+        if not conversions:
+            return
+        existing_outputs = [output for _, output in conversions if output.exists()]
+        if existing_outputs:
+            names = ", ".join(path.name for path in existing_outputs[:8])
+            if len(existing_outputs) > 8:
+                names += f", ... và {len(existing_outputs) - 8} file khác"
+            answer = QMessageBox.question(
+                self,
+                "Chuyển CSV sang Excel",
+                f"Có {len(existing_outputs)} file kết quả đã tồn tại:\n{names}\n\nGhi đè các file này?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        progress = self._show_busy_dialog(
+            "Đang chuyển CSV sang Excel...\nVui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        results = []
+        try:
+            for source_path, output_path in conversions:
+                results.append(
+                    convert_csv_to_excel(
+                        source_path,
+                        output_path,
+                        output_format=dialog.output_format(),
+                    )
+                )
+        except (ExcelToolError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(self, "Không thể chuyển CSV sang Excel", str(execution_error))
+            return
+        if not results:
+            return
+        self.statusBar().showMessage(f"Đã chuyển {len(results)} file CSV sang Excel")
+        preview = "\n".join(str(result.output_path) for result in results[:12])
+        if len(results) > 12:
+            preview += f"\n... và {len(results) - 12} file khác."
+        self._show_result_message(
+            "Hoàn thành chuyển CSV sang Excel",
+            (
+                f"Đã tạo {len(results)} file:\n{preview}\n\n"
+                f"Tổng số dòng: {sum(result.row_count for result in results)}"
+            ),
+            results[0].output_path,
+        )
+
+    def _run_split_sheets_dialog(self) -> None:
+        dialog = SplitSheetsDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dialog.source_path is None or dialog.output_directory is None:
+            return
+        progress = self._show_busy_dialog(
+            "Đang tách các sheet thành file riêng...\nVui lòng chờ trong giây lát!"
+        )
+        execution_error: Exception | None = None
+        result = None
+        try:
+            result = split_workbook_sheets_to_files(
+                dialog.source_path,
+                dialog.output_directory,
+                sheet_names=dialog.selected_sheet_names(),
+            )
+        except (ExcelToolError, OSError) as exc:
+            execution_error = exc
+        finally:
+            self._close_busy_dialog(progress)
+        if execution_error is not None:
+            QMessageBox.warning(self, "Không thể tách sheet", str(execution_error))
+            return
+        if result is None:
+            return
+        self.statusBar().showMessage(
+            f"Đã tách {len(result.output_paths)} sheet vào {result.output_directory}"
+        )
+        preview = "\n".join(str(path) for path in result.output_paths[:12])
+        if len(result.output_paths) > 12:
+            preview += f"\n... và {len(result.output_paths) - 12} file khác."
+        self._show_result_message(
+            "Hoàn thành tách sheet",
+            f"Đã tạo {len(result.output_paths)} file:\n{preview}",
+            result.output_directory,
+        )
+
+    def _run_word_folder_print_dialog(self) -> None:
+        dialog = WordFolderPrintDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        source_paths = dialog.word_files
+        if not source_paths:
+            return
+        progress = self._show_busy_dialog(
+            "Đang gửi các file Word tới máy in...\nVui lòng chờ trong giây lát!"
+        )
+
+        def run(progress_callback):
+            return print_word_files(source_paths, progress=progress_callback)
+
+        def on_progress(message: str) -> None:
+            self._update_busy_dialog(progress, message)
+            self.statusBar().showMessage(message)
+
+        def cleanup_thread(thread) -> None:
+            if thread in self._background_threads:
+                self._background_threads.remove(thread)
+
+        def on_finished(result) -> None:
+            self._close_busy_dialog(progress)
+            cleanup_thread(thread)
+            detail = (
+                f"Đã gửi in {result.printed_count}/{result.file_count} file Word."
+            )
+            if result.failed:
+                failed_lines = "\n".join(
+                    f"- {path.name}: {error}" for path, error in result.failed[:20]
+                )
+                detail += f"\n\nCác file lỗi:\n{failed_lines}"
+                if len(result.failed) > 20:
+                    detail += f"\n... và {len(result.failed) - 20} file lỗi khác."
+            self.statusBar().showMessage(detail.splitlines()[0])
+            self._show_result_message(
+                "Hoàn thành in file Word",
+                detail,
+                result.folder_path,
+            )
+
+        def on_failed(exc: Exception) -> None:
+            self._close_busy_dialog(progress)
+            cleanup_thread(thread)
+            QMessageBox.warning(
+                self,
+                "Không thể in file Word",
+                str(exc),
+            )
+
+        thread = run_in_thread(
+            self,
+            run,
+            on_finished,
+            on_failed,
+            on_progress,
+        )
+        self._background_threads.append(thread)
 
     def _run_consolidation_05_dialog(self) -> None:
         spec = SETTLEMENT_SPECS["consolidation.05"]
@@ -1158,6 +2088,7 @@ class MainWindow(QMainWindow):
     def _scroll_page() -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -1518,7 +2449,6 @@ class MainWindow(QMainWindow):
             self.sidebar.layout().setContentsMargins(16, 24, 16, 20)
             self.brand_title.show()
             self.brand_subtitle.show()
-            self.version_label.show()
             self.brand_button.setToolTip("Nhấn để thu gọn menu")
             self.sidebar_excel_button.setText(
                 "Hiện Excel" if self.excel_context else "Mở Excel"
@@ -1531,7 +2461,6 @@ class MainWindow(QMainWindow):
             self.sidebar.layout().setContentsMargins(8, 24, 8, 20)
             self.brand_title.hide()
             self.brand_subtitle.hide()
-            self.version_label.hide()
             self.brand_button.setToolTip("Nhấn để mở rộng menu")
             self.sidebar_excel_button.setText("XL")
             self.author_info_button.setText("i")
@@ -1539,6 +2468,10 @@ class MainWindow(QMainWindow):
                 button.setText("")
 
     def open_feature(self, title: str) -> None:
+        if title in NAVIGATION:
+            self.select_page(NAVIGATION.index(title))
+            return
+
         if title in {
             "Kết nối Excel",
             "Thông tin chi nhánh",
@@ -1551,6 +2484,22 @@ class MainWindow(QMainWindow):
 
         if title == "Kiểm tra nghiệp vụ":
             self.select_page(NAVIGATION.index("Trắc nghiệm"))
+            return
+
+        if title == "Tổ vay vốn":
+            self._show_tovayvon_page()
+            return
+
+        if title == AUTO_INTEREST_PLACEHOLDER_TITLE:
+            AutoInterestPlaceholderDialog(self).exec()
+            return
+
+        if title in CREDIT_GROUP_MANAGEMENT_ROUTE_TITLES:
+            CreditGroupManagementPlaceholderDialog(self).exec()
+            return
+
+        if title in CREDIT_TOVAYVON_PLACEHOLDER_TITLES:
+            CreditMigrationPlaceholderDialog(title, self).exec()
             return
 
         if title == "Quyết toán tín dụng":
@@ -1594,6 +2543,26 @@ class MainWindow(QMainWindow):
 
         if title.casefold().startswith("tạo mẫu biểu 30a/qt"):
             self._run_mau30_dialog("credit.30a")
+            return
+
+        if title in {"Ghép tệp Excel", "Nối file cùng cấu trúc"}:
+            self._run_same_structure_merge_dialog()
+            return
+
+        if title == "Tách sheet thành từng file":
+            self._run_split_sheets_dialog()
+            return
+
+        if title == "Chuyển CSV sang Excel":
+            self._run_csv_to_excel_dialog()
+            return
+
+        if title == "In tất cả file Word trong 1 folder":
+            self._run_word_folder_print_dialog()
+            return
+
+        if title == "Cài đặt máy in Word":
+            self._show_printer_settings_dialog()
             return
 
         if title == "Chuyển kiểu chữ":
@@ -2367,4 +3336,3 @@ class MainWindow(QMainWindow):
             self.excel_service.cleanup_session_addins()
         self.excel_service.disconnect()
         super().closeEvent(event)
-

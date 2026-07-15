@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -65,9 +65,7 @@ class AuthorInfoDialog(QDialog):
         self.setModal(True)
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setFixedSize(620, 570)
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-        self._drag_start: QPoint | None = None
         self._build_ui()
         self._apply_style()
 
@@ -280,24 +278,3 @@ class AuthorInfoDialog(QDialog):
             QPushButton#AuthorCloseButton:hover { background: #ad2c57; }
             """
         )
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and event.position().y() <= 100
-        ):
-            self._drag_start = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_start is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_start)
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self._drag_start = None
-        super().mouseReleaseEvent(event)
