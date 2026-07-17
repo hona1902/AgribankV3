@@ -58,6 +58,8 @@ DATA_TVV_SAMPLE_ROW: tuple[str | int, ...] = (
 
 
 COMMISSION_SAMPLE_ROW: tuple[int | float, ...] = (
+    3,
+    2,
     80,
     13,
     3.8,

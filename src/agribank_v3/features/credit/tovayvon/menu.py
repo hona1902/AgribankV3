@@ -20,13 +20,18 @@ TOVAYVON_FEATURES: tuple[Feature, ...] = (
         "file.png",
     ),
     Feature(
+        "Chỉnh sửa mẫu biểu Đề nghị thanh toán",
+        "Mở file mẫu DeNghiThanhToan.docx để chỉnh sửa biểu mẫu đề nghị thanh toán hoa hồng tổ vay vốn.",
+        "file.png",
+    ),
+    Feature(
         "Đối chiếu dư nợ theo tổ vay vốn",
         "Đối chiếu dư nợ, mã nhóm vay, số tiền lãi và thông tin khoản vay theo tổ.",
         "m09b.png",
     ),
     Feature(
         "Hướng dẫn tổ vay vốn",
-        "Mở tài liệu hướng dẫn tổ vay vốn nếu có trong bộ add-in cũ.",
+        "Hướng dẫn tạo bảng kê thu lãi, đề nghị thanh toán và đối chiếu dư nợ tổ vay vốn.",
         "file.png",
     ),
 )

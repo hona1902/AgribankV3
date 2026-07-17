@@ -14,6 +14,7 @@ from agribank_v3.features.credit.tovayvon.models import (
     DATA_TVV_HEADERS,
     CreditGroup,
     CreditGroupCommissionRate,
+    CreditGroupCommissionRule,
     CreditCommissionRuleSettings,
     now_text,
 )
@@ -84,6 +85,8 @@ class CreditGroupRepository:
                     CREATE TABLE IF NOT EXISTS credit_group_commission_rates (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         ma_to TEXT NOT NULL UNIQUE,
+                        base_no_secured_rate REAL DEFAULT 3,
+                        base_secured_rate REAL DEFAULT 2,
                         no_secured_to_truong REAL DEFAULT 80,
                         no_secured_cap_xa REAL DEFAULT 13,
                         no_secured_cap_huyen REAL DEFAULT 3.8,
@@ -101,6 +104,8 @@ class CreditGroupRepository:
 
                     CREATE TABLE IF NOT EXISTS credit_commission_rules (
                         id INTEGER PRIMARY KEY CHECK(id = 1),
+                        secured_base_rate REAL NOT NULL DEFAULT 2,
+                        no_secured_base_rate REAL NOT NULL DEFAULT 3,
                         interest_min_1 REAL NOT NULL DEFAULT 85,
                         interest_max_1 REAL NOT NULL DEFAULT 90,
                         interest_pay_1 REAL NOT NULL DEFAULT 50,
@@ -113,12 +118,74 @@ class CreditGroupRepository:
                         bad_debt_pay REAL NOT NULL DEFAULT 0,
                         updated_at TEXT NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS credit_group_commission_rules (
+                        ma_to TEXT PRIMARY KEY,
+                        use_custom_rule INTEGER NOT NULL DEFAULT 0 CHECK(use_custom_rule IN (0, 1)),
+                        interest_min_1 REAL NOT NULL DEFAULT 85,
+                        interest_max_1 REAL NOT NULL DEFAULT 90,
+                        interest_pay_1 REAL NOT NULL DEFAULT 50,
+                        interest_min_2 REAL NOT NULL DEFAULT 90,
+                        interest_max_2 REAL NOT NULL DEFAULT 95,
+                        interest_pay_2 REAL NOT NULL DEFAULT 90,
+                        interest_min_3 REAL NOT NULL DEFAULT 95,
+                        interest_pay_3 REAL NOT NULL DEFAULT 100,
+                        bad_debt_threshold REAL NOT NULL DEFAULT 2,
+                        bad_debt_pay REAL NOT NULL DEFAULT 0,
+                        created_at TEXT,
+                        updated_at TEXT,
+                        FOREIGN KEY(ma_to) REFERENCES credit_groups(ma_to)
+                    );
                     """
+                )
+                self._ensure_column(
+                    database,
+                    "credit_groups",
+                    "active",
+                    "ALTER TABLE credit_groups ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+                )
+                self._ensure_column(
+                    database,
+                    "credit_group_commission_rates",
+                    "base_no_secured_rate",
+                    "ALTER TABLE credit_group_commission_rates ADD COLUMN base_no_secured_rate REAL DEFAULT 3",
+                )
+                self._ensure_column(
+                    database,
+                    "credit_group_commission_rates",
+                    "base_secured_rate",
+                    "ALTER TABLE credit_group_commission_rates ADD COLUMN base_secured_rate REAL DEFAULT 2",
+                )
+                self._ensure_column(
+                    database,
+                    "credit_commission_rules",
+                    "secured_base_rate",
+                    "ALTER TABLE credit_commission_rules ADD COLUMN secured_base_rate REAL NOT NULL DEFAULT 2",
+                )
+                self._ensure_column(
+                    database,
+                    "credit_commission_rules",
+                    "no_secured_base_rate",
+                    "ALTER TABLE credit_commission_rules ADD COLUMN no_secured_base_rate REAL NOT NULL DEFAULT 3",
                 )
         except sqlite3.Error as exc:
             raise CreditGroupRepositoryError(
                 f"Không thể khởi tạo dữ liệu tổ vay vốn: {exc}"
             ) from exc
+
+    @staticmethod
+    def _ensure_column(
+        database: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        alter_sql: str,
+    ) -> None:
+        columns = {
+            str(row["name"])
+            for row in database.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in columns:
+            database.execute(alter_sql)
 
     def save_group(self, group: CreditGroup) -> None:
         ma_to = group.ma_to.strip()
@@ -158,12 +225,94 @@ class CreditGroupRepository:
         except sqlite3.Error as exc:
             raise CreditGroupRepositoryError(f"Không thể lưu tổ vay vốn: {exc}") from exc
 
-    def list_groups(self) -> list[CreditGroup]:
+    def list_groups(self, *, include_inactive: bool = False) -> list[CreditGroup]:
         with self._database() as database:
+            where_clause = "" if include_inactive else "WHERE active = 1"
             rows = database.execute(
-                "SELECT * FROM credit_groups ORDER BY stt, ma_to COLLATE NOCASE"
+                f"SELECT * FROM credit_groups {where_clause} ORDER BY stt, ma_to COLLATE NOCASE"
             ).fetchall()
         return [self._group_from_row(row) for row in rows]
+
+    def soft_deactivate_group(self, ma_to: str) -> None:
+        now = now_text()
+        try:
+            with self._database() as database:
+                row = database.execute(
+                    "SELECT ma_to FROM credit_groups WHERE ma_to = ?",
+                    (ma_to,),
+                ).fetchone()
+                if row is None:
+                    raise CreditGroupRepositoryError(
+                        f"Không tìm thấy tổ vay vốn có mã {ma_to}."
+                    )
+                database.execute(
+                    """
+                    UPDATE credit_groups
+                    SET active = 0, updated_at = ?
+                    WHERE ma_to = ?
+                    """,
+                    (now, ma_to),
+                )
+        except sqlite3.Error as exc:
+            raise CreditGroupRepositoryError(
+                f"Không thể ngừng sử dụng tổ vay vốn: {exc}"
+            ) from exc
+
+    def deactivate_group(self, ma_to: str) -> None:
+        self.soft_deactivate_group(ma_to)
+
+    def reactivate_group(self, ma_to: str) -> None:
+        now = now_text()
+        try:
+            with self._database() as database:
+                row = database.execute(
+                    "SELECT ma_to FROM credit_groups WHERE ma_to = ?",
+                    (ma_to,),
+                ).fetchone()
+                if row is None:
+                    raise CreditGroupRepositoryError(
+                        f"Không tìm thấy tổ vay vốn có mã {ma_to}."
+                    )
+                database.execute(
+                    """
+                    UPDATE credit_groups
+                    SET active = 1, updated_at = ?
+                    WHERE ma_to = ?
+                    """,
+                    (now, ma_to),
+                )
+        except sqlite3.Error as exc:
+            raise CreditGroupRepositoryError(
+                f"Không thể sử dụng lại tổ vay vốn: {exc}"
+            ) from exc
+
+    def delete_group_permanently(self, ma_to: str) -> None:
+        try:
+            with self._database() as database:
+                row = database.execute(
+                    "SELECT ma_to FROM credit_groups WHERE ma_to = ?",
+                    (ma_to,),
+                ).fetchone()
+                if row is None:
+                    raise CreditGroupRepositoryError(
+                        f"Không tìm thấy tổ vay vốn có mã {ma_to}."
+                    )
+                database.execute(
+                    "DELETE FROM credit_group_commission_rules WHERE ma_to = ?",
+                    (ma_to,),
+                )
+                database.execute(
+                    "DELETE FROM credit_group_commission_rates WHERE ma_to = ?",
+                    (ma_to,),
+                )
+                database.execute(
+                    "DELETE FROM credit_groups WHERE ma_to = ?",
+                    (ma_to,),
+                )
+        except sqlite3.Error as exc:
+            raise CreditGroupRepositoryError(
+                f"Không thể xóa tổ vay vốn: {exc}"
+            ) from exc
 
     def resequence_group_stt(self) -> None:
         now = now_text()
@@ -236,14 +385,17 @@ class CreditGroupRepository:
                 database.execute(
                     """
                     INSERT INTO credit_group_commission_rates(
-                        ma_to, no_secured_to_truong, no_secured_cap_xa,
+                        ma_to, base_no_secured_rate, base_secured_rate,
+                        no_secured_to_truong, no_secured_cap_xa,
                         no_secured_cap_huyen, no_secured_cap_tinh,
                         no_secured_cap_tw, secured_to_truong, secured_cap_xa,
                         secured_cap_huyen, secured_cap_tinh, secured_cap_tw,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(ma_to) DO UPDATE SET
+                        base_no_secured_rate = excluded.base_no_secured_rate,
+                        base_secured_rate = excluded.base_secured_rate,
                         no_secured_to_truong = excluded.no_secured_to_truong,
                         no_secured_cap_xa = excluded.no_secured_cap_xa,
                         no_secured_cap_huyen = excluded.no_secured_cap_huyen,
@@ -258,6 +410,8 @@ class CreditGroupRepository:
                     """,
                     (
                         rate.ma_to,
+                        rate.base_no_secured_rate,
+                        rate.base_secured_rate,
                         rate.no_secured_to_truong,
                         rate.no_secured_cap_xa,
                         rate.no_secured_cap_huyen,
@@ -323,6 +477,35 @@ class CreditGroupRepository:
                 return settings
         return self._commission_rule_settings_from_row(row)
 
+    def get_branch_report_name(self) -> str:
+        try:
+            with self._database() as database:
+                table = database.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'branch_profiles'
+                    """
+                ).fetchone()
+                if table is None:
+                    return ""
+                row = database.execute(
+                    """
+                    SELECT branch_name, reporting_branch_name
+                    FROM branch_profiles
+                    WHERE id = 1
+                    """
+                ).fetchone()
+        except sqlite3.Error as exc:
+            raise CreditGroupRepositoryError(
+                f"Không thể đọc tên chi nhánh: {exc}"
+            ) from exc
+        if row is None:
+            return ""
+        branch_name = str(row["branch_name"] or "").strip()
+        reporting_name = str(row["reporting_branch_name"] or "").strip()
+        return branch_name or reporting_name
+
     def save_commission_rule_settings(
         self,
         settings: CreditCommissionRuleSettings,
@@ -335,6 +518,88 @@ class CreditGroupRepository:
                 database,
                 replace(settings, updated_at=now_text()),
             )
+
+    def get_group_commission_rule(self, ma_to: str) -> CreditGroupCommissionRule:
+        with self._database() as database:
+            row = database.execute(
+                "SELECT * FROM credit_group_commission_rules WHERE ma_to = ?",
+                (ma_to,),
+            ).fetchone()
+        if row is None:
+            return CreditGroupCommissionRule.default_for_group(ma_to)
+        return self._group_commission_rule_from_row(row)
+
+    def save_group_commission_rule(self, rule: CreditGroupCommissionRule) -> None:
+        errors = rule.validate()
+        if errors:
+            raise CreditGroupRepositoryError("\n".join(errors))
+        if self.get_group(rule.ma_to) is None:
+            raise CreditGroupRepositoryError(
+                f"Không tìm thấy tổ vay vốn có mã {rule.ma_to}."
+            )
+        now = now_text()
+        existing = self.get_group_commission_rule(rule.ma_to)
+        created_at = existing.created_at or now
+        try:
+            with self._database() as database:
+                database.execute(
+                    """
+                    INSERT INTO credit_group_commission_rules(
+                        ma_to, use_custom_rule,
+                        interest_min_1, interest_max_1, interest_pay_1,
+                        interest_min_2, interest_max_2, interest_pay_2,
+                        interest_min_3, interest_pay_3,
+                        bad_debt_threshold, bad_debt_pay,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(ma_to) DO UPDATE SET
+                        use_custom_rule = excluded.use_custom_rule,
+                        interest_min_1 = excluded.interest_min_1,
+                        interest_max_1 = excluded.interest_max_1,
+                        interest_pay_1 = excluded.interest_pay_1,
+                        interest_min_2 = excluded.interest_min_2,
+                        interest_max_2 = excluded.interest_max_2,
+                        interest_pay_2 = excluded.interest_pay_2,
+                        interest_min_3 = excluded.interest_min_3,
+                        interest_pay_3 = excluded.interest_pay_3,
+                        bad_debt_threshold = excluded.bad_debt_threshold,
+                        bad_debt_pay = excluded.bad_debt_pay,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        rule.ma_to,
+                        1 if rule.use_custom_rule else 0,
+                        rule.interest_min_1,
+                        rule.interest_max_1,
+                        rule.interest_pay_1,
+                        rule.interest_min_2,
+                        rule.interest_max_2,
+                        rule.interest_pay_2,
+                        rule.interest_min_3,
+                        rule.interest_pay_3,
+                        rule.bad_debt_threshold,
+                        rule.bad_debt_pay,
+                        created_at,
+                        now,
+                    ),
+                )
+        except sqlite3.Error as exc:
+            raise CreditGroupRepositoryError(
+                f"Không thể lưu điều kiện chi theo tổ: {exc}"
+            ) from exc
+
+    def commission_rule_for_group(self, ma_to: str) -> tuple[CreditCommissionRuleSettings, bool]:
+        rule = self.get_group_commission_rule(ma_to)
+        if rule.use_custom_rule:
+            return rule.as_settings(), True
+        return self.get_commission_rule_settings(), False
+
+    def get_effective_commission_rule(
+        self,
+        ma_to: str,
+    ) -> tuple[CreditCommissionRuleSettings, bool]:
+        return self.commission_rule_for_group(ma_to)
 
     def import_data_tvv(
         self,
@@ -401,6 +666,8 @@ class CreditGroupRepository:
                 rate = self.get_or_create_commission_rate(group.ma_to)
                 row.extend(
                     (
+                        rate.base_no_secured_rate,
+                        rate.base_secured_rate,
                         rate.no_secured_to_truong,
                         rate.no_secured_cap_xa,
                         rate.no_secured_cap_huyen,
@@ -547,15 +814,18 @@ class CreditGroupRepository:
         database.execute(
             """
             INSERT INTO credit_group_commission_rates(
-                ma_to, no_secured_to_truong, no_secured_cap_xa,
+                ma_to, base_no_secured_rate, base_secured_rate,
+                no_secured_to_truong, no_secured_cap_xa,
                 no_secured_cap_huyen, no_secured_cap_tinh, no_secured_cap_tw,
                 secured_to_truong, secured_cap_xa, secured_cap_huyen,
                 secured_cap_tinh, secured_cap_tw, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ma_to,
+                rate.base_no_secured_rate,
+                rate.base_secured_rate,
                 rate.no_secured_to_truong,
                 rate.no_secured_cap_xa,
                 rate.no_secured_cap_huyen,
@@ -579,13 +849,16 @@ class CreditGroupRepository:
         database.execute(
             """
             INSERT INTO credit_commission_rules(
-                id, interest_min_1, interest_max_1, interest_pay_1,
+                id, secured_base_rate, no_secured_base_rate,
+                interest_min_1, interest_max_1, interest_pay_1,
                 interest_min_2, interest_max_2, interest_pay_2,
                 interest_min_3, interest_pay_3, bad_debt_threshold,
                 bad_debt_pay, updated_at
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                secured_base_rate = excluded.secured_base_rate,
+                no_secured_base_rate = excluded.no_secured_base_rate,
                 interest_min_1 = excluded.interest_min_1,
                 interest_max_1 = excluded.interest_max_1,
                 interest_pay_1 = excluded.interest_pay_1,
@@ -599,6 +872,8 @@ class CreditGroupRepository:
                 updated_at = excluded.updated_at
             """,
             (
+                settings.secured_base_rate,
+                settings.no_secured_base_rate,
                 settings.interest_min_1,
                 settings.interest_max_1,
                 settings.interest_pay_1,
@@ -648,20 +923,42 @@ class CreditGroupRepository:
         header_map: dict[str, int],
         ma_to: str,
     ) -> CreditGroupCommissionRate | None:
-        if not all(header in header_map for header in COMMISSION_EXPORT_HEADERS[:5]):
-            return None
-        values = [
-            cls._float_by_header(row, header_map, header)
-            for header in COMMISSION_EXPORT_HEADERS[:5]
-        ] + [
-            cls._float_by_header(row, header_map, header)
-            for header in COMMISSION_EXPORT_HEADERS[6:11]
-        ]
-        if all(value is None for value in values):
+        no_secured_headers = (
+            "HH_KhongBD_ToTruong",
+            "HH_KhongBD_CapXa",
+            "HH_KhongBD_CapHuyen",
+            "HH_KhongBD_CapTinh",
+            "HH_KhongBD_CapTW",
+        )
+        secured_headers = (
+            "HH_CoBDTS_ToTruong",
+            "HH_CoBDTS_CapXa",
+            "HH_CoBDTS_CapHuyen",
+            "HH_CoBDTS_CapTinh",
+            "HH_CoBDTS_CapTW",
+        )
+        if not all(header in header_map for header in no_secured_headers):
             return None
         default = CreditGroupCommissionRate.default_for_group(ma_to)
+        base_no_secured = cls._float_by_header(
+            row, header_map, "HH_TyLeChung_KhongTSBD"
+        )
+        base_secured = cls._float_by_header(
+            row, header_map, "HH_TyLeChung_CoTSBD"
+        )
+        values = [
+            cls._float_by_header(row, header_map, header)
+            for header in no_secured_headers
+        ] + [
+            cls._float_by_header(row, header_map, header)
+            for header in secured_headers
+        ]
+        if all(value is None for value in values) and base_no_secured is None and base_secured is None:
+            return None
         return CreditGroupCommissionRate(
             ma_to=ma_to,
+            base_no_secured_rate=base_no_secured if base_no_secured is not None else default.base_no_secured_rate,
+            base_secured_rate=base_secured if base_secured is not None else default.base_secured_rate,
             no_secured_to_truong=values[0] if values[0] is not None else default.no_secured_to_truong,
             no_secured_cap_xa=values[1] if values[1] is not None else default.no_secured_cap_xa,
             no_secured_cap_huyen=values[2] if values[2] is not None else default.no_secured_cap_huyen,
@@ -690,6 +987,8 @@ class CreditGroupRepository:
             return None
         default = CreditCommissionRuleSettings()
         return CreditCommissionRuleSettings(
+            secured_base_rate=default.secured_base_rate,
+            no_secured_base_rate=default.no_secured_base_rate,
             interest_min_1=values[0] if values[0] is not None else default.interest_min_1,
             interest_max_1=values[1] if values[1] is not None else default.interest_max_1,
             interest_pay_1=values[2] if values[2] is not None else default.interest_pay_1,
@@ -736,6 +1035,8 @@ class CreditGroupRepository:
     def _commission_from_row(row: sqlite3.Row) -> CreditGroupCommissionRate:
         return CreditGroupCommissionRate(
             ma_to=str(row["ma_to"] or ""),
+            base_no_secured_rate=float(row["base_no_secured_rate"] if row["base_no_secured_rate"] is not None else 3),
+            base_secured_rate=float(row["base_secured_rate"] if row["base_secured_rate"] is not None else 2),
             no_secured_to_truong=float(row["no_secured_to_truong"] or 0),
             no_secured_cap_xa=float(row["no_secured_cap_xa"] or 0),
             no_secured_cap_huyen=float(row["no_secured_cap_huyen"] or 0),
@@ -755,6 +1056,8 @@ class CreditGroupRepository:
         row: sqlite3.Row,
     ) -> CreditCommissionRuleSettings:
         return CreditCommissionRuleSettings(
+            secured_base_rate=float(row["secured_base_rate"] or 0),
+            no_secured_base_rate=float(row["no_secured_base_rate"] or 0),
             interest_min_1=float(row["interest_min_1"] or 0),
             interest_max_1=float(row["interest_max_1"] or 0),
             interest_pay_1=float(row["interest_pay_1"] or 0),
@@ -765,5 +1068,26 @@ class CreditGroupRepository:
             interest_pay_3=float(row["interest_pay_3"] or 0),
             bad_debt_threshold=float(row["bad_debt_threshold"] or 0),
             bad_debt_pay=float(row["bad_debt_pay"] or 0),
+            updated_at=str(row["updated_at"] or ""),
+        )
+
+    @staticmethod
+    def _group_commission_rule_from_row(
+        row: sqlite3.Row,
+    ) -> CreditGroupCommissionRule:
+        return CreditGroupCommissionRule(
+            ma_to=str(row["ma_to"] or ""),
+            use_custom_rule=bool(row["use_custom_rule"]),
+            interest_min_1=float(row["interest_min_1"] or 0),
+            interest_max_1=float(row["interest_max_1"] or 0),
+            interest_pay_1=float(row["interest_pay_1"] or 0),
+            interest_min_2=float(row["interest_min_2"] or 0),
+            interest_max_2=float(row["interest_max_2"] or 0),
+            interest_pay_2=float(row["interest_pay_2"] or 0),
+            interest_min_3=float(row["interest_min_3"] or 0),
+            interest_pay_3=float(row["interest_pay_3"] or 0),
+            bad_debt_threshold=float(row["bad_debt_threshold"] or 0),
+            bad_debt_pay=float(row["bad_debt_pay"] or 0),
+            created_at=str(row["created_at"] or ""),
             updated_at=str(row["updated_at"] or ""),
         )

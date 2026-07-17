@@ -32,6 +32,8 @@ DATA_TVV_HEADERS: tuple[str, ...] = (
 
 
 COMMISSION_EXPORT_HEADERS: tuple[str, ...] = (
+    "HH_TyLeChung_KhongTSBD",
+    "HH_TyLeChung_CoTSBD",
     "HH_KhongBD_ToTruong",
     "HH_KhongBD_CapXa",
     "HH_KhongBD_CapHuyen",
@@ -208,6 +210,8 @@ class CreditGroup:
 @dataclass(frozen=True, slots=True)
 class CreditGroupCommissionRate:
     ma_to: str
+    base_no_secured_rate: float = 3.0
+    base_secured_rate: float = 2.0
     no_secured_to_truong: float = 80.0
     no_secured_cap_xa: float = 13.0
     no_secured_cap_huyen: float = 3.8
@@ -249,6 +253,8 @@ class CreditGroupCommissionRate:
             errors.append("Mã tổ không được để trống.")
 
         labels = {
+            "base_no_secured_rate": "Tỷ lệ hoa hồng không TSBĐ",
+            "base_secured_rate": "Tỷ lệ hoa hồng có TSBĐ",
             "no_secured_to_truong": "Không BĐ - Tổ trưởng",
             "no_secured_cap_xa": "Không BĐ - Cấp xã",
             "no_secured_cap_huyen": "Không BĐ - Cấp huyện",
@@ -264,6 +270,8 @@ class CreditGroupCommissionRate:
             value = float(getattr(self, field))
             if value < 0:
                 errors.append(f"{label} không được âm.")
+            if field.startswith("base_") and value > 100:
+                errors.append(f"{label} phải từ 0 đến 100%.")
 
         if not 99.99 <= self.total_no_secured() <= 100.01:
             errors.append("Tổng Hoa hồng không BĐ phải bằng 100%.")
@@ -279,6 +287,8 @@ class CreditGroupCommissionRate:
 class CreditCommissionRuleSettings:
     """Global commission eligibility settings for the Tổ vay vốn module."""
 
+    secured_base_rate: float = 2.0
+    no_secured_base_rate: float = 3.0
     interest_min_1: float = 85.0
     interest_max_1: float = 90.0
     interest_pay_1: float = 50.0
@@ -293,6 +303,10 @@ class CreditCommissionRuleSettings:
 
     def validate(self) -> list[str]:
         errors: list[str] = []
+        if not 0 <= self.secured_base_rate <= 100:
+            errors.append("Tỷ lệ hoa hồng nền có BĐTS phải từ 0 đến 100%.")
+        if not 0 <= self.no_secured_base_rate <= 100:
+            errors.append("Tỷ lệ hoa hồng nền không BĐ phải từ 0 đến 100%.")
         ranges = (
             (self.interest_min_1, self.interest_max_1, self.interest_pay_1, "Mức 1"),
             (self.interest_min_2, self.interest_max_2, self.interest_pay_2, "Mức 2"),
@@ -324,3 +338,70 @@ class CreditCommissionRuleSettings:
         ):
             errors.append("Các khoảng thu lãi cần tăng dần và không chồng lấn.")
         return errors
+
+
+@dataclass(frozen=True, slots=True)
+class CreditGroupCommissionRule:
+    """Optional per-group commission eligibility override."""
+
+    ma_to: str
+    use_custom_rule: bool = False
+    interest_min_1: float = 85.0
+    interest_max_1: float = 90.0
+    interest_pay_1: float = 50.0
+    interest_min_2: float = 90.0
+    interest_max_2: float = 95.0
+    interest_pay_2: float = 90.0
+    interest_min_3: float = 95.0
+    interest_pay_3: float = 100.0
+    bad_debt_threshold: float = 2.0
+    bad_debt_pay: float = 0.0
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def default_for_group(cls, ma_to: str) -> "CreditGroupCommissionRule":
+        return cls(ma_to=ma_to)
+
+    def as_settings(self) -> CreditCommissionRuleSettings:
+        return CreditCommissionRuleSettings(
+            interest_min_1=self.interest_min_1,
+            interest_max_1=self.interest_max_1,
+            interest_pay_1=self.interest_pay_1,
+            interest_min_2=self.interest_min_2,
+            interest_max_2=self.interest_max_2,
+            interest_pay_2=self.interest_pay_2,
+            interest_min_3=self.interest_min_3,
+            interest_pay_3=self.interest_pay_3,
+            bad_debt_threshold=self.bad_debt_threshold,
+            bad_debt_pay=self.bad_debt_pay,
+            updated_at=self.updated_at,
+        )
+
+    @classmethod
+    def from_settings(
+        cls,
+        ma_to: str,
+        settings: CreditCommissionRuleSettings,
+        *,
+        use_custom_rule: bool = False,
+    ) -> "CreditGroupCommissionRule":
+        return cls(
+            ma_to=ma_to,
+            use_custom_rule=use_custom_rule,
+            interest_min_1=settings.interest_min_1,
+            interest_max_1=settings.interest_max_1,
+            interest_pay_1=settings.interest_pay_1,
+            interest_min_2=settings.interest_min_2,
+            interest_max_2=settings.interest_max_2,
+            interest_pay_2=settings.interest_pay_2,
+            interest_min_3=settings.interest_min_3,
+            interest_pay_3=settings.interest_pay_3,
+            bad_debt_threshold=settings.bad_debt_threshold,
+            bad_debt_pay=settings.bad_debt_pay,
+        )
+
+    def validate(self) -> list[str]:
+        if not self.ma_to.strip():
+            return ["Mã tổ không được để trống."]
+        return self.as_settings().validate()

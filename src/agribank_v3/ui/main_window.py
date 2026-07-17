@@ -97,6 +97,28 @@ from agribank_v3.features.credit.tovayvon.placeholder_windows import (
     CreditGroupManagementPlaceholderDialog,
     CreditMigrationPlaceholderDialog,
 )
+from agribank_v3.features.credit.tovayvon.interest_report_window import (
+    InterestReportWindow,
+)
+from agribank_v3.features.credit.tovayvon.debt_reconciliation import (
+    DEBT_RECONCILIATION_TITLE,
+)
+from agribank_v3.features.credit.tovayvon.debt_reconciliation_window import (
+    DebtReconciliationWindow,
+)
+from agribank_v3.features.credit.tovayvon.help_window import (
+    TOVAYVON_HELP_TITLE,
+    ToVayVonHelpWindow,
+)
+from agribank_v3.features.credit.tovayvon.payment_request import (
+    PAYMENT_REQUEST_TITLE,
+    PAYMENT_TEMPLATE_EDIT_TITLE,
+    PaymentRequestError,
+    open_payment_template_for_edit,
+)
+from agribank_v3.features.credit.tovayvon.payment_request_window import (
+    PaymentRequestWindow,
+)
 from agribank_v3.word_folder_print import print_word_files
 from agribank_v3.ui.dialogs.author_info import AuthorInfoDialog
 from agribank_v3.ui.dialogs.case_conversion import CaseConversionDialog
@@ -2496,6 +2518,29 @@ class MainWindow(QMainWindow):
 
         if title in CREDIT_GROUP_MANAGEMENT_ROUTE_TITLES:
             CreditGroupManagementPlaceholderDialog(self).exec()
+            return
+
+        if title == "Bảng kê thu lãi tổ vay vốn":
+            InterestReportWindow(self).exec()
+            return
+
+        if title == DEBT_RECONCILIATION_TITLE:
+            DebtReconciliationWindow(self).exec()
+            return
+
+        if title == PAYMENT_REQUEST_TITLE:
+            PaymentRequestWindow(self).exec()
+            return
+
+        if title == PAYMENT_TEMPLATE_EDIT_TITLE:
+            try:
+                open_payment_template_for_edit()
+            except (PaymentRequestError, OSError) as exc:
+                QMessageBox.warning(self, PAYMENT_TEMPLATE_EDIT_TITLE, str(exc))
+            return
+
+        if title == TOVAYVON_HELP_TITLE:
+            ToVayVonHelpWindow(self).exec()
             return
 
         if title in CREDIT_TOVAYVON_PLACEHOLDER_TITLES:
