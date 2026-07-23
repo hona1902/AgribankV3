@@ -1,0 +1,1435 @@
+{
+  "version": "0.1.3",
+  "package_mode": "app",
+  "created_at": "2026-07-23T10:04:41+07:00",
+  "files": {
+    "agribank_v3_build_info.json": {
+      "relative_path": "agribank_v3_build_info.json",
+      "size": 123,
+      "sha256": "ae88a137df064b88583a6edffd4e1b9b1ae2c49652bff4335e012387ad29bb81",
+      "modified_time": 1784775406.2610664
+    },
+    "AgribankV3.exe": {
+      "relative_path": "AgribankV3.exe",
+      "size": 3645487,
+      "sha256": "a9995c12c50794b4933498b78fa63d5dcb46286695913a9fae60b0143a1aa55b",
+      "modified_time": 1784775405.8195982
+    },
+    "_internal/_bz2.pyd": {
+      "relative_path": "_internal/_bz2.pyd",
+      "size": 86896,
+      "sha256": "65f610646d10d5babea080e060d244b546ec52c54012e5e937dc72dcc2e2e7bc",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_ctypes.pyd": {
+      "relative_path": "_internal/_ctypes.pyd",
+      "size": 127480,
+      "sha256": "0e56107a891100535f2da79d85a5ae65ff1227b4765bd108f8593ac1a1110d81",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_decimal.pyd": {
+      "relative_path": "_internal/_decimal.pyd",
+      "size": 262000,
+      "sha256": "aeacfead2befcc0768063a037bb64bd32109ae09cb144e5f571b04dd7965db9d",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_elementtree.pyd": {
+      "relative_path": "_internal/_elementtree.pyd",
+      "size": 135160,
+      "sha256": "5009a9a53c03ef8387443b5cf6ce08e5c3a79727466a0b931c5bbca915bf89ca",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_hashlib.pyd": {
+      "relative_path": "_internal/_hashlib.pyd",
+      "size": 68976,
+      "sha256": "03d233dbace599168eaffec823de6ed7beec8c2a4ebfe9b8a3d8e042a59af3ba",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_lzma.pyd": {
+      "relative_path": "_internal/_lzma.pyd",
+      "size": 161136,
+      "sha256": "e3deecc1f59a3b811c608861decd84de1e8df8bafd5e2b39188861318c5a38cf",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_socket.pyd": {
+      "relative_path": "_internal/_socket.pyd",
+      "size": 85496,
+      "sha256": "3efa4636cf9e350856f6927d67a4c2564bf9bd2758a00bbf17d3aece5b60016d",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_sqlite3.pyd": {
+      "relative_path": "_internal/_sqlite3.pyd",
+      "size": 126184,
+      "sha256": "64b51df2805c58b023a875e8ae3be7ac7f61ef664f32ca6c90f6315da47ef0bc",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_ssl.pyd": {
+      "relative_path": "_internal/_ssl.pyd",
+      "size": 179432,
+      "sha256": "0bc527d2dbc50009f43b2ed5d5982c4f63f4b647647ffa9eda612dcda80f6040",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_uuid.pyd": {
+      "relative_path": "_internal/_uuid.pyd",
+      "size": 27128,
+      "sha256": "acce4f281d7ffb2dec0997527faf25b1df62ad7bd3032c568ddcf65c90edc867",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/_wmi.pyd": {
+      "relative_path": "_internal/_wmi.pyd",
+      "size": 40304,
+      "sha256": "a980f1e7a29842bd946863fc2693fbeb555a9dc0f9e1630dfed9a2fcdef3ece2",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/libcrypto-3.dll": {
+      "relative_path": "_internal/libcrypto-3.dll",
+      "size": 5231472,
+      "sha256": "ccfffddcd3defb8d899026298af9af43bc186130f8483d77e97c93233d5f27d7",
+      "modified_time": 1784775406.0578892
+    },
+    "_internal/libffi-8.dll": {
+      "relative_path": "_internal/libffi-8.dll",
+      "size": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a",
+      "modified_time": 1784775406.0578892
+    },
+    "_internal/libssl-3.dll": {
+      "relative_path": "_internal/libssl-3.dll",
+      "size": 794992,
+      "sha256": "007142039f04d04e0ed607bda53de095e5bc6a8a10d26ecedde94ea7d2d7eefe",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/pyexpat.pyd": {
+      "relative_path": "_internal/pyexpat.pyd",
+      "size": 205304,
+      "sha256": "d615e193d1affcdbfe504e90d3621cbdcff94bf72b79d899126534507fd6d27a",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/python3.dll": {
+      "relative_path": "_internal/python3.dll",
+      "size": 70376,
+      "sha256": "fb975a606e7fbf74f64260e3f60c3490b4f74a183c0926fd6ed1ac4c52ac7b1c",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/python312.dll": {
+      "relative_path": "_internal/python312.dll",
+      "size": 6945272,
+      "sha256": "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/select.pyd": {
+      "relative_path": "_internal/select.pyd",
+      "size": 33136,
+      "sha256": "d4d7181b11db0bd22a6cd5cda6f8583d1f5c77615fd0a6ca33350619d6e0438a",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/sqlite3.dll": {
+      "relative_path": "_internal/sqlite3.dll",
+      "size": 1583608,
+      "sha256": "8daa45684bf6688fca28d956b2e8942f2fa98f656675ce68e6d61dd869848a7a",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/unicodedata.pyd": {
+      "relative_path": "_internal/unicodedata.pyd",
+      "size": 1140592,
+      "sha256": "208ee1cd3cbad0828433ca7246b05be2b1ff5569983d27d296c0b38888585488",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/VCRUNTIME140.dll": {
+      "relative_path": "_internal/VCRUNTIME140.dll",
+      "size": 120400,
+      "sha256": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/VCRUNTIME140_1.dll": {
+      "relative_path": "_internal/VCRUNTIME140_1.dll",
+      "size": 49776,
+      "sha256": "6a99bc0128e0c7d6cbbf615fcc26909565e17d4ca3451b97f8987f9c6acbc6c8",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/agribank_v3/resources/icons/1.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/1.png",
+      "size": 1138,
+      "sha256": "14fa43a904338f0e0a70bbca384d28675e8eb9989badad4e1d44f095af709355",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/agribank_v3/resources/icons/access.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/access.png",
+      "size": 1343,
+      "sha256": "42e5d7371af0bfb925559b3918458e8612937732698492457fbf2d9dfbf562e7",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/BamChuot.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/BamChuot.png",
+      "size": 2115,
+      "sha256": "06fa7a9913547470143389ca8caf63eaf656771ddd2ca10ca796cf401052c73e",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/button_data.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/button_data.svg",
+      "size": 352,
+      "sha256": "506d3e8b4eba9e1ca74a9030ddd5f258a9b40177f77c17b1fa2ea77b17dd2a8c",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/button_excel.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/button_excel.svg",
+      "size": 319,
+      "sha256": "a937faf10cd1a45ba1085e024a72c6434096f55041453ae7b52cddf1ca0d158a",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/button_sync.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/button_sync.svg",
+      "size": 384,
+      "sha256": "fb5aac387b29e98cc1b24173ac43cf149da1faac18d6e09f9aca38a409e77a61",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/caidat.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/caidat.png",
+      "size": 9920,
+      "sha256": "316d29ef899d9960663614fad87c745cc21e5739a42ed5efb9041c5dacc406bd",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/case.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/case.png",
+      "size": 1900,
+      "sha256": "6e0552a18867d39d5d9ab863bf9c6b5673c3e8efd39647b6591ee5ff3c5f6228",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/chchuoi.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/chchuoi.png",
+      "size": 1833,
+      "sha256": "a0edcdf8fa013c273dc54c69a6d5359eb139afc69fdb3fe1c61b49be93b79c80",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/chchuoidate.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/chchuoidate.png",
+      "size": 1150,
+      "sha256": "02e8319e4b82e4df4bbd3993aa181b1c4cc462d00e1fd8262287f11af3dba300",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/check_on.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/check_on.svg",
+      "size": 272,
+      "sha256": "d210d81b086f6159f264002f78cdac12d7b5013507551c138805427b699a99ee",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/ChiLuong.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/ChiLuong.png",
+      "size": 5905,
+      "sha256": "0d6f1636d46868d6273e42565a3888ce6df1c6349dbf23252150be41e3fd2320",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/chinhta.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/chinhta.png",
+      "size": 1829,
+      "sha256": "ee3925868eb69cf3277f1b8c2db92d1632fadd9caa7c197e53130a1011006aac",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/circle_off.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/circle_off.svg",
+      "size": 177,
+      "sha256": "0c89bf61fbd4f7e135f5f79c7f3eb7f562963791cc6c0691e2a014dd3e360c65",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/conver.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/conver.png",
+      "size": 1721,
+      "sha256": "a177775eee2a010fae97c84611aaaf21d47c72f18767656519f64f97c1150a4f",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/file.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/file.png",
+      "size": 679,
+      "sha256": "f9a53e6b3e46395eee83d236c4caafbced32a7e8793dcca337963518ace8d864",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/gopsheet.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/gopsheet.png",
+      "size": 330,
+      "sha256": "a8643d642f1c3749673bca2f746ac3cd8b45200dda2ad837eb537452ca002de1",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/inforcn.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/inforcn.png",
+      "size": 3333,
+      "sha256": "fe2c0761c71af87b78afb68f2c52d2182f542f7f9469635ab4ebcd2609254c6c",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/Logo-HNA.ico": {
+      "relative_path": "_internal/agribank_v3/resources/icons/Logo-HNA.ico",
+      "size": 235582,
+      "sha256": "ccee5869f242dc70ae474d65a7458951122bf1cdf14ae3a39256831d2502e12d",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/Logo-HNA.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/Logo-HNA.png",
+      "size": 102142,
+      "sha256": "27010213accc03893f8be2149a71a4882c7f57553cb524ce3a566197c23176f2",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/logoagri.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/logoagri.png",
+      "size": 1782,
+      "sha256": "e1c98805eef7a2ecd6c6719b837ce462816cf11abd2449525f2ae1881399cfad",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/m05.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m05.png",
+      "size": 2105,
+      "sha256": "6cb8294bd42e56bacad0a7640929c7aa65a320fd6b512dfccc80a64d17644f33",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/m06.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m06.png",
+      "size": 2111,
+      "sha256": "f38811c1e1d1e50437d6d4b1358486d00e90806db1d6c2729c4cf850adfb79af",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m09a.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m09a.png",
+      "size": 2121,
+      "sha256": "7973eff6cb31088b04770822a0f0d662e81c5c40c32f3e8d7777aabb4f3de7c5",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m09b.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m09b.png",
+      "size": 2115,
+      "sha256": "5647b0c2a6654d5e66b82292d8a793bdc5dfc8a40bdffe2e3492d78e4306289e",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m13.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m13.png",
+      "size": 2081,
+      "sha256": "95511e5617dc7c10d9cd4818f1ab9f650d506153920267f0f8329c9c7e85b2eb",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m14.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m14.png",
+      "size": 2081,
+      "sha256": "16356ab9e1f11952952ad6c5aba74a29daac7b24b5c13457e26a3cea4cda12f3",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m15A.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m15A.png",
+      "size": 2065,
+      "sha256": "d8ebd8366c7965c4940c11634e8e38570d6ed0d279827adb8ef5082e9e3fd716",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m15B.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m15B.png",
+      "size": 2057,
+      "sha256": "0de4a5bbf462ce99ace921c6ee8e59f8312e0717e9aa701bbb8a176cb41769e9",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m16.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m16.png",
+      "size": 2033,
+      "sha256": "32b26c85f272c1db856d104897e41f309fa439fe73b3b3f32b8b2be7b7b6096f",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m18.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m18.png",
+      "size": 2030,
+      "sha256": "1d3e03074964f34e84ac7cb4ab4ad9f777e3eff06ffdd502c14822bbf61cfbfb",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/m20A.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/m20A.png",
+      "size": 2067,
+      "sha256": "640b0589fc49f5b2f2033b14e8613f97a1446721fcbe3d1a906e7d5c18bb2e10",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/nv2.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/nv2.png",
+      "size": 664,
+      "sha256": "71cb415fce4c81ef0042dbbe10b10b2cf383993d55870b33740479a93a07d7f3",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/option_answers.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/option_answers.svg",
+      "size": 337,
+      "sha256": "b40943ad4ee73ee1e45b5edbe2197e583d53f160eef660193b878a24374d0d45",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/option_audience.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/option_audience.svg",
+      "size": 404,
+      "sha256": "0bfafe2704f907cee516e90596893a26b33a70de3fe8ffe7ef09216956686a4d",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/option_questions.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/option_questions.svg",
+      "size": 324,
+      "sha256": "8f3e4b22af59c515d0691568c9ec0b17ba52b2d5333b61ad5e6784d1b8a95873",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/option_time.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/option_time.svg",
+      "size": 345,
+      "sha256": "8dcf06005c384c7e5d244f026085d664c54fd52f00b705c3f01a9394be28b6bd",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/printer.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/printer.png",
+      "size": 8332,
+      "sha256": "0e25f393c6a43ebe5324ef79b6b32fc8543d83e7519d9a0555032888ff72d283",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/protectwb.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/protectwb.png",
+      "size": 320,
+      "sha256": "95b9f32cade86bd300e763642f3a925690ba9af653d22d416dea866375624712",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/qt.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/qt.png",
+      "size": 2544,
+      "sha256": "edde8fcc270a7cbd80d32a2e28f22da10705c28faf299cf460d35dd292b4f1e4",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/qtkt.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/qtkt.png",
+      "size": 2536,
+      "sha256": "03dbe01bc94eba9fc3d2723621cdc6db126ec8fafa8f71d8d773a933a3d401bc",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/qttd.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/qttd.png",
+      "size": 2540,
+      "sha256": "cc272e8586102fd92c0609e925512c769a64e46a5d82a6452bbb7f8020d90e86",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/radio_on.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/radio_on.svg",
+      "size": 174,
+      "sha256": "9a4f432f9623917274d07ab997dc78639f57d472442c528962e3c6dd0d76690c",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/section_clipboard.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/section_clipboard.svg",
+      "size": 454,
+      "sha256": "94d8bb9653685c4b573cb9d441b7d7b164fe581272a101c4830286e9757a4f58",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/section_list.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/section_list.svg",
+      "size": 387,
+      "sha256": "0931cb3bf59a7788ce48d800e76715c3473f515304efc9e75e8913352cf4c8c4",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/sort.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/sort.png",
+      "size": 1457,
+      "sha256": "6702a6dd072a4ac5cb32ba7b10ab1956578ce077c80452a7554b353b239b28cb",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/tovayvon.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/tovayvon.svg",
+      "size": 2247,
+      "sha256": "2696d520c29ea0f6801fe2c5c661c62e488fa8a59f55d882df84bc9a8676c989",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/tracnghiem.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/tracnghiem.png",
+      "size": 56460,
+      "sha256": "787afa11643c76947db794d2cb1cd12ab55834fd7d643cf646f7c0e30d46cd9a",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/tracnghiem.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/tracnghiem.svg",
+      "size": 5065,
+      "sha256": "c2a560b2d8fff94665104b79a54fa4a871c19f5aef6d18258ae3b0109a2ea707",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_04_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_04_QT_text.svg",
+      "size": 440,
+      "sha256": "78f03bbe5af852de502c90ca0e6c518ba9d1745625e462e40e72ab86a3c3ae72",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_05_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_05_QT_text.svg",
+      "size": 440,
+      "sha256": "44f9ef0cfa9b7cc4e7bc05037d70af80d812a08077f6d6c03044a9d2550c7fb9",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_06_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_06_QT_text.svg",
+      "size": 440,
+      "sha256": "a5f666b286d962f5db1f3993ccf42cf99f0d856709139dcaa7a1b51f09e0f17b",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_07a_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_07a_QT_text.svg",
+      "size": 441,
+      "sha256": "a8cd37e7e40ffb23ebee1d993c396bafbe79643d3afc07e3555d22a95bee07e9",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_08_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_08_QT_text.svg",
+      "size": 440,
+      "sha256": "d07658cd14e5a0309d560d6314810f4f19b604f58acd6a2ec657e9ff79fd94aa",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_09a_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_09a_QT_text.svg",
+      "size": 441,
+      "sha256": "d934d852fa6ff3d157a89c54ce49c16b6d3a304156847890a898a327609aff81",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_09b_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_09b_QT_text.svg",
+      "size": 441,
+      "sha256": "fb5af10f85e3a64d5f9d90b24d2a1616a529065f650ef7a7daf9508123a7a226",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_09c_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_09c_QT_text.svg",
+      "size": 441,
+      "sha256": "2b2bdc37f85bf1432ffb7ee6188255025cbfa8bf0364447231d7b053e36fb506",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_13_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_13_QT_text.svg",
+      "size": 440,
+      "sha256": "bb951a36923e8fa5baf1591594ca1af41a99d5bc5eaef95163261000ec8cf866",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_14_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_14_QT_text.svg",
+      "size": 440,
+      "sha256": "4e26c1adfb3c6de80529ed425a677a025fe63f86a15fd0d5ab3167f1b6887759",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_15a_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_15a_QT_text.svg",
+      "size": 441,
+      "sha256": "d9677e3ba6b1e8eb83036bf86309b324552e81eed03ffb686362d764548153b6",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_15b_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_15b_QT_text.svg",
+      "size": 441,
+      "sha256": "eb48c540d79466ddb3ec366fa66e6d974f0e2f14a57c1e91dfe4bfac360ef66d",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_16_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_16_QT_text.svg",
+      "size": 440,
+      "sha256": "1931e3f9699ed4cdfe1a3b42eb318c0aa61c689ff34ed75ee53d18a865a275df",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_18_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_18_QT_text.svg",
+      "size": 440,
+      "sha256": "f1bf86140cc74cf8204274776bf87b998900279c9b693efe8ac9eb005a8dfe2f",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_20a_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_20a_QT_text.svg",
+      "size": 441,
+      "sha256": "678d38a27c1a92aeedcafe55e43185f25efd55e42b042583632a087440e0105d",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_22_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_22_QT_text.svg",
+      "size": 440,
+      "sha256": "aa5a70bc15192fa0ed35b07e6c54400a0141c7980f01b13b5680928e51ceb049",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_23_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_23_QT_text.svg",
+      "size": 440,
+      "sha256": "e92ca37c57277ceda69c4c7054a467e9fce75c3413e2a39675b010b15d7f004e",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_24_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_24_QT_text.svg",
+      "size": 440,
+      "sha256": "b273f905b398f17c22948d948f64253de588cdd569a95bfde69a3149522ddad0",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_30_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_30_QT_text.svg",
+      "size": 440,
+      "sha256": "59c9cbfbc1b1197d74f8a904bd5f33143bcc220f173b5d355fa3df3f138444f9",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/Mau_30a_QT_text.svg": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/Mau_30a_QT_text.svg",
+      "size": 441,
+      "sha256": "2600da6642d5e3b52222cfe527ef52c33079710c4136755bf2af6065a7dca97e",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/qt.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/qt.png",
+      "size": 2544,
+      "sha256": "edde8fcc270a7cbd80d32a2e28f22da10705c28faf299cf460d35dd292b4f1e4",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/qtkt.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/qtkt.png",
+      "size": 2536,
+      "sha256": "03dbe01bc94eba9fc3d2723621cdc6db126ec8fafa8f71d8d773a933a3d401bc",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/icons/QT/qttd.png": {
+      "relative_path": "_internal/agribank_v3/resources/icons/QT/qttd.png",
+      "size": 2540,
+      "sha256": "cc272e8586102fd92c0609e925512c769a64e46a5d82a6452bbb7f8020d90e86",
+      "modified_time": 1784775406.0110123
+    },
+    "_internal/agribank_v3/resources/templates/AgribankV3-Mau-Cau-Hoi.xlsx": {
+      "relative_path": "_internal/agribank_v3/resources/templates/AgribankV3-Mau-Cau-Hoi.xlsx",
+      "size": 6172,
+      "sha256": "fbc6185f3290c91b50e66d020d451d3a600ce9a42680e12ff1058d960f97f1f8",
+      "modified_time": 1784775406.0266378
+    },
+    "_internal/PySide6/MSVCP140.dll": {
+      "relative_path": "_internal/PySide6/MSVCP140.dll",
+      "size": 549176,
+      "sha256": "708dd7bbc7bd23bce9e93f7837a70c2dd7ad55cff43801e92c0f7fcd7dda47cd",
+      "modified_time": 1784775405.8195982
+    },
+    "_internal/PySide6/MSVCP140_1.dll": {
+      "relative_path": "_internal/PySide6/MSVCP140_1.dll",
+      "size": 27448,
+      "sha256": "b2113956aa3fcb9decfe65be1ee7829f8e3ae0899633ae89fe04888ada201594",
+      "modified_time": 1784775405.8195982
+    },
+    "_internal/PySide6/MSVCP140_2.dll": {
+      "relative_path": "_internal/PySide6/MSVCP140_2.dll",
+      "size": 271672,
+      "sha256": "1b806b427ffb573deff8478cf6fe336465fe2c67e0919bb95f452b6f31d25736",
+      "modified_time": 1784775405.8195982
+    },
+    "_internal/PySide6/pyside6.abi3.dll": {
+      "relative_path": "_internal/PySide6/pyside6.abi3.dll",
+      "size": 248632,
+      "sha256": "d4072be872b31f3748de5e6c28cb2976dafbf063d3ccfa38e5dabda29babcdaf",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/Qt6Core.dll": {
+      "relative_path": "_internal/PySide6/Qt6Core.dll",
+      "size": 10480440,
+      "sha256": "65fe6224b6c47a15b058738031d31dce9928c4d7a58e1b8db6434f6f5cddd702",
+      "modified_time": 1784775405.8352244
+    },
+    "_internal/PySide6/Qt6Gui.dll": {
+      "relative_path": "_internal/PySide6/Qt6Gui.dll",
+      "size": 9589560,
+      "sha256": "cd071161ad325ff2de92b0e33d71334ef20712544796949623ce92dfb3957e90",
+      "modified_time": 1784775405.8352244
+    },
+    "_internal/PySide6/Qt6Network.dll": {
+      "relative_path": "_internal/PySide6/Qt6Network.dll",
+      "size": 1771320,
+      "sha256": "dfd0dd852274a5fe9b3c7d2dd9fffe7e2117d28c10fc862174d6675d42395177",
+      "modified_time": 1784775405.8508558
+    },
+    "_internal/PySide6/Qt6Svg.dll": {
+      "relative_path": "_internal/PySide6/Qt6Svg.dll",
+      "size": 642360,
+      "sha256": "a7352e8062d02e2108e37db4050fb3315d3c03c7d36acdc24b98b9a6c129c1de",
+      "modified_time": 1784775405.8664799
+    },
+    "_internal/PySide6/Qt6Widgets.dll": {
+      "relative_path": "_internal/PySide6/Qt6Widgets.dll",
+      "size": 6594360,
+      "sha256": "5a9f37dedd3dc5bcc1a4bb8ea919c49fc62df751a1450accc34379eb6710eab6",
+      "modified_time": 1784775405.8820987
+    },
+    "_internal/PySide6/QtCore.pyd": {
+      "relative_path": "_internal/PySide6/QtCore.pyd",
+      "size": 3330360,
+      "sha256": "be52341a5df1f76ecca2fb1e94eb429dfa46f0b659ed6536f25119b565b21ea8",
+      "modified_time": 1784775405.8820987
+    },
+    "_internal/PySide6/QtGui.pyd": {
+      "relative_path": "_internal/PySide6/QtGui.pyd",
+      "size": 3896632,
+      "sha256": "f0549716b10a8b4fbd5c6c041f36af215223809f919f4c4722d44cc199d5c593",
+      "modified_time": 1784775405.8977244
+    },
+    "_internal/PySide6/QtNetwork.pyd": {
+      "relative_path": "_internal/PySide6/QtNetwork.pyd",
+      "size": 1007416,
+      "sha256": "3953a86c9545ad8fa1cf1dec27085dd357838464cd6e2131c9963caad6234b67",
+      "modified_time": 1784775405.8977244
+    },
+    "_internal/PySide6/QtWidgets.pyd": {
+      "relative_path": "_internal/PySide6/QtWidgets.pyd",
+      "size": 4856120,
+      "sha256": "85cb6c2181b4b09887a7d8507dd950844d1b8f74a9c4002c7b71169f75bf6fda",
+      "modified_time": 1784775405.8977244
+    },
+    "_internal/PySide6/VCRUNTIME140.dll": {
+      "relative_path": "_internal/PySide6/VCRUNTIME140.dll",
+      "size": 116024,
+      "sha256": "c6e841078cd352299a58925991e2552f7251b046253ba895b3ad50cd5cd32ec6",
+      "modified_time": 1784775405.8977244
+    },
+    "_internal/PySide6/VCRUNTIME140_1.dll": {
+      "relative_path": "_internal/PySide6/VCRUNTIME140_1.dll",
+      "size": 41272,
+      "sha256": "b322e382ea249b50009f14a9a71ad16729eb6e4b58a8d3b3be6ac66ea6342a22",
+      "modified_time": 1784775405.8977244
+    },
+    "_internal/PySide6/plugins/generic/qtuiotouchplugin.dll": {
+      "relative_path": "_internal/PySide6/plugins/generic/qtuiotouchplugin.dll",
+      "size": 101176,
+      "sha256": "1ee2810eef83dbb2740d4f796f8149dc5752ffd3dd60e39796a9a4d6a6a0ae38",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/iconengines/qsvgicon.dll": {
+      "relative_path": "_internal/PySide6/plugins/iconengines/qsvgicon.dll",
+      "size": 72504,
+      "sha256": "dd60826f1959faa7ea137e00959717450da9f2e0c151054daeff1e9d1226fab2",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qgif.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qgif.dll",
+      "size": 47928,
+      "sha256": "8b8dea2abaed333f1fbbdf3c8867ceb6040722c88a1fb81ea451f8b8bc9e8ee0",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qicns.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qicns.dll",
+      "size": 55608,
+      "sha256": "6a5aed435989d54234c16581e66f6a59137bfccd180565a217a8676bcda6dc8d",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qico.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qico.dll",
+      "size": 45880,
+      "sha256": "f81378dd51392ff0d3ae094d5e59dfc4fa664a0ef4d756d6ed40584f90af2758",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qjpeg.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qjpeg.dll",
+      "size": 577848,
+      "sha256": "97af9ceaf3ebefefeb7aede27ae07b73ae1d2ed479427beebf61c58654361d43",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qpdf.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qpdf.dll",
+      "size": 42296,
+      "sha256": "273a1b6daaf3c0def92902044cf35d0ec65e56f904acb7fbf428d80dae2bb9d5",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qsvg.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qsvg.dll",
+      "size": 39224,
+      "sha256": "d4100055c3a4d6c1bca5e303e3d2049bde54d4e916442ee0a3e9b4dfa7d416fc",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qtga.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qtga.dll",
+      "size": 38200,
+      "sha256": "50f0e6ff9b7fca9386ccad52eb5e83466774e6282c9532b03b11e5a64951dffb",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qtiff.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qtiff.dll",
+      "size": 441656,
+      "sha256": "087a3425962e838c35c9073bdf8de13712466e9b9590717666af7839db068dba",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qwbmp.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qwbmp.dll",
+      "size": 36664,
+      "sha256": "28a6447d44169acbf2eab38c475dc0aa9e32abb3f29f72257726497353b9bf63",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/imageformats/qwebp.dll": {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qwebp.dll",
+      "size": 562488,
+      "sha256": "3e2bf546a3885cbe3e2b64058b1c58377d3c8822f51b37ba967f61e8054d7719",
+      "modified_time": 1784775405.931086
+    },
+    "_internal/PySide6/plugins/platforms/qwindows.dll": {
+      "relative_path": "_internal/PySide6/plugins/platforms/qwindows.dll",
+      "size": 1006904,
+      "sha256": "54d736de022f707e9f7f555e4c9f9e993253cd5b0ee2364e6a9458c180828c42",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/plugins/styles/qmodernwindowsstyle.dll": {
+      "relative_path": "_internal/PySide6/plugins/styles/qmodernwindowsstyle.dll",
+      "size": 230712,
+      "sha256": "9af96b09ebaf7ff13e22c70bf69b9c3f226f069375d1a9f9efd63e944e43f5fb",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_ar.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ar.qm",
+      "size": 104,
+      "sha256": "b11333c520ccd8e375cde20985df402d586a1a95e0796313bbeb9f717d4db22e",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_bg.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_bg.qm",
+      "size": 91,
+      "sha256": "1e22ee126ec9f76031d880285a907b3a0c4510392319ff700dcdee964abbb1ad",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_ca.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ca.qm",
+      "size": 91,
+      "sha256": "17ab2623c7f6e8def44b3dbcb517544185817d65f1298ddb10ef71136f232bdc",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_cs.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_cs.qm",
+      "size": 95,
+      "sha256": "c585918fb1d4821a054ea40bdcf279f275ca76c88a5793f433dac6a611ac7e8f",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_da.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_da.qm",
+      "size": 91,
+      "sha256": "f6773c672acb73fdef6e092060d69d1e5dfee840012bac912d1e92de28714386",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_de.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_de.qm",
+      "size": 91,
+      "sha256": "0401c316aa3b50a172eb44a4ff1ec384924073beec7c928ef888ec48e4612688",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_en.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_en.qm",
+      "size": 33,
+      "sha256": "494ac9a2b2cb2fdeced353f4a9f898ed8dcf616e9bc667438c62681e3f7f79cf",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_es.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_es.qm",
+      "size": 91,
+      "sha256": "648ed4519bc45d7a4779479a7626ea16cf9aa23e93a0b178546cc47bea0591ab",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_fa.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_fa.qm",
+      "size": 84,
+      "sha256": "3f4c989c6b2990d80cc6299408214b31698923b52f154483b3371875de91f88e",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_fi.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_fi.qm",
+      "size": 91,
+      "sha256": "342d01c7eeb234e431d0506821c4cd03c0433115d8d63fee3357be2331858879",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_fr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_fr.qm",
+      "size": 91,
+      "sha256": "c896a38892a92346b033793d56440993236b23e47e06f3974afdb0552f628387",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_gd.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_gd.qm",
+      "size": 70,
+      "sha256": "49df855a004a17950338af3146466f6df4d5852410bd0b58ea80e0d0203a9d24",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_gl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_gl.qm",
+      "size": 323590,
+      "sha256": "204a01ac7deb6b5bae193afecbd1e50d18c73bf7d94badeb2bbfdf6123c4ed93",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_he.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_he.qm",
+      "size": 57,
+      "sha256": "36f01fff2f25e116d4b7af78097b7e49520fd5b7fb6fb120e40be228c05c045f",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_help_ar.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ar.qm",
+      "size": 8743,
+      "sha256": "222088c9752d1cc3bab985ef2dc77e5ae78578dce18a61ec15b39f02e588163d",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_help_bg.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_bg.qm",
+      "size": 10599,
+      "sha256": "cbcdd1e0bbae332d80ddb0a286056f17c824fa28d353d7fdf12fc97d9f6fe054",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_help_ca.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ca.qm",
+      "size": 7426,
+      "sha256": "8c98b5ee246e18397d0de7bd76b2891773a975553ec5dcdce42f8a696e5b34de",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_help_cs.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_cs.qm",
+      "size": 15297,
+      "sha256": "4ac56fc63e400943bab13f1d4c418502138908e1d488c24aee6131d3d17552aa",
+      "modified_time": 1784775405.9467585
+    },
+    "_internal/PySide6/translations/qt_help_da.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_da.qm",
+      "size": 4795,
+      "sha256": "6bb092552a398687119f6d52145f04bf8373977446d8f00c0dcbd56b96829f0f",
+      "modified_time": 1784775405.9623792
+    },
+    "_internal/PySide6/translations/qt_help_de.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_de.qm",
+      "size": 7569,
+      "sha256": "037bc99abf98571ae9375c2513536c15b571d66406c36c1de447b547ff539c07",
+      "modified_time": 1784775405.9623792
+    },
+    "_internal/PySide6/translations/qt_help_en.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_en.qm",
+      "size": 33,
+      "sha256": "494ac9a2b2cb2fdeced353f4a9f898ed8dcf616e9bc667438c62681e3f7f79cf",
+      "modified_time": 1784775405.9623792
+    },
+    "_internal/PySide6/translations/qt_help_es.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_es.qm",
+      "size": 10704,
+      "sha256": "fd16b279f8cf69077f75e94d90c9c07a2afff3948a579e3789f5ffb5e5f4202d",
+      "modified_time": 1784775405.9637098
+    },
+    "_internal/PySide6/translations/qt_help_fr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_fr.qm",
+      "size": 3573,
+      "sha256": "875ee2dcdc64e3dea888d84048e382d3921a175f12847de2e6b1cb12ad9add50",
+      "modified_time": 1784775405.9637098
+    },
+    "_internal/PySide6/translations/qt_help_gl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_gl.qm",
+      "size": 10891,
+      "sha256": "7399a248609974773f60866c87b78ea7dfbc4f750313d692f7886cd763883c9f",
+      "modified_time": 1784775405.9647188
+    },
+    "_internal/PySide6/translations/qt_help_hr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_hr.qm",
+      "size": 5170,
+      "sha256": "8c8cc3c5b1ab2b074f82937001b896603420ef75592b3b78172177360dd7ea61",
+      "modified_time": 1784775405.9647188
+    },
+    "_internal/PySide6/translations/qt_help_hu.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_hu.qm",
+      "size": 7255,
+      "sha256": "7be32e015119c969453abb6e8f3fb377963a69fafb10c27b796737b5eb283eaf",
+      "modified_time": 1784775405.9647188
+    },
+    "_internal/PySide6/translations/qt_help_it.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_it.qm",
+      "size": 10612,
+      "sha256": "316fe8d0815e2b4b396895beb38ef1a40431915b5e054df80f4c0cd556f26e4b",
+      "modified_time": 1784775405.9657161
+    },
+    "_internal/PySide6/translations/qt_help_ja.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ja.qm",
+      "size": 7917,
+      "sha256": "ae603b2c0d434d40cde433ffcba65f9ee27978a9e19316007be7fe782a5b8b47",
+      "modified_time": 1784775405.9657161
+    },
+    "_internal/PySide6/translations/qt_help_ka.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ka.qm",
+      "size": 7091,
+      "sha256": "159c74f94b384b5ee6afdf38b6cfc4806bc99ecf73be02d4a7021d4ceba7ec7e",
+      "modified_time": 1784775405.9657161
+    },
+    "_internal/PySide6/translations/qt_help_ko.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ko.qm",
+      "size": 5708,
+      "sha256": "f11c64694e8e34e1d2c46c1a1d15d6ba9f2db7b61de4fdf54eca5ab977c3e052",
+      "modified_time": 1784775405.966717
+    },
+    "_internal/PySide6/translations/qt_help_nl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_nl.qm",
+      "size": 5087,
+      "sha256": "44a8a0daf775d14352180052d13f623814d7bdf98e2c5c80144b7bf74214e3b0",
+      "modified_time": 1784775405.966717
+    },
+    "_internal/PySide6/translations/qt_help_nn.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_nn.qm",
+      "size": 6934,
+      "sha256": "4c8a7213942078e4f72f5babd26c41b77ace70189714a58b5504a7d5ad0193dc",
+      "modified_time": 1784775405.966717
+    },
+    "_internal/PySide6/translations/qt_help_pl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_pl.qm",
+      "size": 9673,
+      "sha256": "cc6cb4d8c54086224672f2e49e623c8cb7c0c1cd65b8d5ecd42fc9ba3a6065bd",
+      "modified_time": 1784775405.966717
+    },
+    "_internal/PySide6/translations/qt_help_pt_BR.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_pt_BR.qm",
+      "size": 16030,
+      "sha256": "b4015c5d519b4fe93c00bf734d1742e4f0094d89862664d548eb64a46a2feae7",
+      "modified_time": 1784775405.9677184
+    },
+    "_internal/PySide6/translations/qt_help_ru.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_ru.qm",
+      "size": 7288,
+      "sha256": "557b644e6da5f1ec720ef93965617087e4d1f40b2494cc5aa524cf3796108de7",
+      "modified_time": 1784775405.9677184
+    },
+    "_internal/PySide6/translations/qt_help_sk.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_sk.qm",
+      "size": 10388,
+      "sha256": "f41e33e1d790bd0d3eb180f1f875bc191fe74773628f25c2cad95e1402e66867",
+      "modified_time": 1784775405.9677184
+    },
+    "_internal/PySide6/translations/qt_help_sl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_sl.qm",
+      "size": 10363,
+      "sha256": "2ec955e662407ebcd8dcdae5aaa21e4108e0b5b0aee0e9db712c27072943535f",
+      "modified_time": 1784775405.9687188
+    },
+    "_internal/PySide6/translations/qt_help_sv.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_sv.qm",
+      "size": 6934,
+      "sha256": "95bdb03dbaa6dbdfda46c249e9ccce9a353f71ddb8b112961e8b005b2c60b13c",
+      "modified_time": 1784775405.9687188
+    },
+    "_internal/PySide6/translations/qt_help_tr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_tr.qm",
+      "size": 6723,
+      "sha256": "81da2f88cd624097581f2d29b10311796bcd9ab289e65883346d276110542d28",
+      "modified_time": 1784775405.9687188
+    },
+    "_internal/PySide6/translations/qt_help_uk.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_uk.qm",
+      "size": 9750,
+      "sha256": "497cfc473684692ee44d7a3795e8fb2270c57069fd9eb98a615dd29ab9be8a7c",
+      "modified_time": 1784775405.9697187
+    },
+    "_internal/PySide6/translations/qt_help_zh_CN.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_zh_CN.qm",
+      "size": 5115,
+      "sha256": "e256d1f6034a5a5521c62f129f91731216e474f71e1d9caea3d3dcb11b670deb",
+      "modified_time": 1784775405.9697187
+    },
+    "_internal/PySide6/translations/qt_help_zh_TW.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_help_zh_TW.qm",
+      "size": 5160,
+      "sha256": "40112812abb43853d678cc6d97729f21f21b3a7321c827fc9d18f6c936447d1e",
+      "modified_time": 1784775405.9697187
+    },
+    "_internal/PySide6/translations/qt_hr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_hr.qm",
+      "size": 102,
+      "sha256": "fc9e4146f33be3d09b234be01e56235d3037d8d82d64f0700b4d4a6e253a61a7",
+      "modified_time": 1784775405.9707172
+    },
+    "_internal/PySide6/translations/qt_hu.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_hu.qm",
+      "size": 84,
+      "sha256": "c2fa649f167cdb801d1cc0cb69c1d93594fd5bf8c0b7e79b969935da5c3e19aa",
+      "modified_time": 1784775405.9707172
+    },
+    "_internal/PySide6/translations/qt_it.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_it.qm",
+      "size": 91,
+      "sha256": "9e7a18bc20ebeec54baaaf41c918a74534511271f796dffffd0f9b9ec31c68d3",
+      "modified_time": 1784775405.9707172
+    },
+    "_internal/PySide6/translations/qt_ja.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ja.qm",
+      "size": 84,
+      "sha256": "0f5fe50452947d1ee9755249d860354bff6977279b4c496a5bc77e5b89dd745e",
+      "modified_time": 1784775405.9707172
+    },
+    "_internal/PySide6/translations/qt_ka.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ka.qm",
+      "size": 94,
+      "sha256": "00b67c6dfc255079b5b98a5640f82519c96b2520a028682fba4078b39d743eaa",
+      "modified_time": 1784775405.9717178
+    },
+    "_internal/PySide6/translations/qt_ko.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ko.qm",
+      "size": 84,
+      "sha256": "1d254b535e1cb35cbcad8210b15b89f4488159826bf35b4504696263dd102fa3",
+      "modified_time": 1784775405.9717178
+    },
+    "_internal/PySide6/translations/qt_lg.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_lg.qm",
+      "size": 57,
+      "sha256": "6ba668501f4c040c66da1bdc022362da3c8cf663da6aa484cbdb599028da98ed",
+      "modified_time": 1784775405.9717178
+    },
+    "_internal/PySide6/translations/qt_lt.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_lt.qm",
+      "size": 165383,
+      "sha256": "47eb5f97467df769261421d54a5bea1131c9fb9b6388791d38bb6574335b64bf",
+      "modified_time": 1784775405.9727175
+    },
+    "_internal/PySide6/translations/qt_lv.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_lv.qm",
+      "size": 63,
+      "sha256": "addeca285282338294f24ca50d37d08a5f68d3785d0a94af86dd4ec8f2a3b449",
+      "modified_time": 1784775405.9727175
+    },
+    "_internal/PySide6/translations/qt_nl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_nl.qm",
+      "size": 91,
+      "sha256": "39e870cbd25c0f97fa9b1828d5ea1ed9849857a2e26c5321b3f13c76be8f0548",
+      "modified_time": 1784775405.9737175
+    },
+    "_internal/PySide6/translations/qt_nn.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_nn.qm",
+      "size": 91,
+      "sha256": "4e544e23f75eafe1553dc896973db23b5795cd243786d5c653cc0f36a46ca74f",
+      "modified_time": 1784775405.9737175
+    },
+    "_internal/PySide6/translations/qt_pl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_pl.qm",
+      "size": 99,
+      "sha256": "e6890afa0caf0f6db0248e4c94f6016b8ec8bc266f1e0e9b8f01e8ea912cf968",
+      "modified_time": 1784775405.9737175
+    },
+    "_internal/PySide6/translations/qt_pt_BR.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_pt_BR.qm",
+      "size": 106,
+      "sha256": "0e24c58e35271853f8cdfb3f0f7b0741b5a9a588e43cdec62ae85a3842771e0a",
+      "modified_time": 1784775405.974718
+    },
+    "_internal/PySide6/translations/qt_pt_PT.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_pt_PT.qm",
+      "size": 70334,
+      "sha256": "2c1e7bbf5168a64b43752dd4c547601c0bde6d610f8671fa3e3af38597e84783",
+      "modified_time": 1784775405.974718
+    },
+    "_internal/PySide6/translations/qt_ru.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_ru.qm",
+      "size": 102,
+      "sha256": "1b388e2d6d1bd405603e794e498c6d7ec5f5a5ad819243546f6399181da36758",
+      "modified_time": 1784775405.9757175
+    },
+    "_internal/PySide6/translations/qt_sk.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_sk.qm",
+      "size": 95,
+      "sha256": "840c3b01c89df976fc1d2e5bfc6fc84b65666b8a3ceb4cbf5aa0c22af3d2a383",
+      "modified_time": 1784775405.9757175
+    },
+    "_internal/PySide6/translations/qt_sl.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_sl.qm",
+      "size": 228428,
+      "sha256": "c44e0313a9414cc0e490b65b0c036fa11bca959353b228886547bc2c8492034f",
+      "modified_time": 1784775405.9767175
+    },
+    "_internal/PySide6/translations/qt_sv.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_sv.qm",
+      "size": 91,
+      "sha256": "daaae448e0814b469ac3d7a91096fde15491600a6b8bc6c01508425fb5e8b3ec",
+      "modified_time": 1784775405.9767175
+    },
+    "_internal/PySide6/translations/qt_tr.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_tr.qm",
+      "size": 84,
+      "sha256": "59e8a0c411be3b0802a68561b090f182099d6b75c4fe46f398e55f11528e11b9",
+      "modified_time": 1784775405.9777148
+    },
+    "_internal/PySide6/translations/qt_uk.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_uk.qm",
+      "size": 102,
+      "sha256": "053ec1f677c4dba48c6a97eb28f4fc78c1511324d1843d7f4cec2c7c00a66145",
+      "modified_time": 1784775405.9777148
+    },
+    "_internal/PySide6/translations/qt_zh_CN.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_zh_CN.qm",
+      "size": 99,
+      "sha256": "c0e29d32c9540a7e78643b74214e633c56f6ab11f018e516629f2c11b1fb09fc",
+      "modified_time": 1784775405.9777148
+    },
+    "_internal/PySide6/translations/qt_zh_TW.qm": {
+      "relative_path": "_internal/PySide6/translations/qt_zh_TW.qm",
+      "size": 99,
+      "sha256": "24e226954491689549a1a1990db3b8cb78888008d8163b2fd2442b772b6d1b5f",
+      "modified_time": 1784775405.9787152
+    },
+    "_internal/PySide6/translations/qtbase_ar.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ar.qm",
+      "size": 160017,
+      "sha256": "e03fe68d83201543698fd7fe267dd5dfc5bfd195147e74ff2f19ac3491401263",
+      "modified_time": 1784775405.9787152
+    },
+    "_internal/PySide6/translations/qtbase_bg.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_bg.qm",
+      "size": 165337,
+      "sha256": "e448ac9e3f16c29eb27af3012efe21052daa78fabfb34cd6dff2f69ee3bd3cdb",
+      "modified_time": 1784775405.979716
+    },
+    "_internal/PySide6/translations/qtbase_ca.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ca.qm",
+      "size": 209899,
+      "sha256": "005b0aa0c9a5b930dfdd870661958a8069bbec862d75f98bce20bf7401bea13d",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_cs.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_cs.qm",
+      "size": 174701,
+      "sha256": "03028b42df5479270371e4c3bdc7df2f56cbbe6dda956a2864ac6f6415861fe8",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_da.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_da.qm",
+      "size": 181387,
+      "sha256": "7d1e5ca3310b54d104c19bf2abd402b38e584e87039a70e153c4a9af74b25c22",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_de.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_de.qm",
+      "size": 223282,
+      "sha256": "ed828a83dfaa51944f166c842155b48ab3bd7cb2c46dcd96269eb5d48af4f63f",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_en.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_en.qm",
+      "size": 33,
+      "sha256": "494ac9a2b2cb2fdeced353f4a9f898ed8dcf616e9bc667438c62681e3f7f79cf",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_es.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_es.qm",
+      "size": 165170,
+      "sha256": "4ffda56ba3bb5414ab0482d1dde64a6f226e3488f6b7f3f11a150e01f53fa4c8",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_fa.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_fa.qm",
+      "size": 148156,
+      "sha256": "f78e59b5bdd586181a999034ba418868ed17fe9c05707fb65e523f70e92253d2",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_fi.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_fi.qm",
+      "size": 179941,
+      "sha256": "e47fe13713e184d07fa4495dde0c589b0e8f562e91574a3558a9363443a4fa72",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_fr.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_fr.qm",
+      "size": 159463,
+      "sha256": "314243a55c32679ad473fdfe48dc7d66e973ad0fc8bf2164480c58dddb50c1a7",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_gd.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_gd.qm",
+      "size": 189580,
+      "sha256": "63b439dd44139aa3aed54c2ebe03fa9bc77f22c14ed8fba8eff2608445bb233d",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_he.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_he.qm",
+      "size": 138690,
+      "sha256": "e1ebca16afe8994356f81ca007fbdb9ddf865842010fe908923d873b687cad3f",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_hr.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_hr.qm",
+      "size": 149711,
+      "sha256": "bb9eec9a9a652c1340dc75eb2e749be50df00f885b3d6900dfc76799c45b244d",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_hu.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_hu.qm",
+      "size": 205885,
+      "sha256": "98463295539d769c8645a0b7fb95ad38454cfd0b14f36af485513f036ddbbbc6",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_it.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_it.qm",
+      "size": 161166,
+      "sha256": "7808ed542a7833c4bd94ec8bdfbbca00bb4f2fe15979b9121ce3249323687300",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_ja.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ja.qm",
+      "size": 129913,
+      "sha256": "2b9581c69b975f59be505b127cd3c19d403ef3d12e0e8386fb97238223e9c1df",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_ka.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ka.qm",
+      "size": 201105,
+      "sha256": "e55e4b72fa620bebee5297ca59dfe2f49894a1e544f2b7485b1cfd8829289d6f",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_ko.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ko.qm",
+      "size": 156799,
+      "sha256": "0179ed1b136e1cb3f583351eaa2c545ba3d83a6ee3f82c32505926a1a5f5f183",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_lg.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_lg.qm",
+      "size": 315764,
+      "sha256": "31c0cc4ce13b1d74fe0c19ed0b47638fb31e20c93ee08092533e884007aebfb5",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_lv.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_lv.qm",
+      "size": 153608,
+      "sha256": "846e047573ae40c83671c3ba7f73e27efc24b98c82701da0df9973e574178bb2",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_nl.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_nl.qm",
+      "size": 202861,
+      "sha256": "f61513bcdbb6ad800585f9437a95d018aab17fa12ee414aa31462ff279d8240e",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_nn.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_nn.qm",
+      "size": 196411,
+      "sha256": "f9f2fb7c60e7fcb38bbd3c1314ef122145594265e20b0659ff00004baab13ac7",
+      "modified_time": 1784775405.9803717
+    },
+    "_internal/PySide6/translations/qtbase_pl.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_pl.qm",
+      "size": 162962,
+      "sha256": "3cf6b5c14d5eb0cf81e9af2066e66b3aa579a6b9b3c323ed670761f6254a8c54",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_pt_BR.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_pt_BR.qm",
+      "size": 290955,
+      "sha256": "3475d61604b938d459949801a906dbd34a8ca824ade94120015d676e208da859",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_ru.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_ru.qm",
+      "size": 203767,
+      "sha256": "3da6605668f9178d11a838c4515478084dcfb4f9cf22f99d7a92b492db9c224b",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_sk.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_sk.qm",
+      "size": 125763,
+      "sha256": "d586ae2c314074cf398417fdecb40709d5478dfeb0a67c2fe60d509ee9b59ed7",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_sv.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_sv.qm",
+      "size": 249963,
+      "sha256": "5a2178dd2c03cc4516697f1fb0049649c9ed53f5cde6b937786733dae06aeda8",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_tr.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_tr.qm",
+      "size": 248720,
+      "sha256": "353fdfd7165659a49212e7a25bf91c0a71588e52c836f7496640f26782414634",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_uk.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_uk.qm",
+      "size": 158274,
+      "sha256": "51b8ff55b37dc5907d637a8ddda12fbe816852b0244c74eb4f0fb84867a786e0",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_zh_CN.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_zh_CN.qm",
+      "size": 147222,
+      "sha256": "0481a9b92a6f0578400e960a7d5ee70217a6a450eaf7f98b7d32b8dbd0d58616",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/PySide6/translations/qtbase_zh_TW.qm": {
+      "relative_path": "_internal/PySide6/translations/qtbase_zh_TW.qm",
+      "size": 126185,
+      "sha256": "21012b2b427f8d09d31ce9cae582ca27955b478ca3dc2ec18a3068d808638c6a",
+      "modified_time": 1784775405.995379
+    },
+    "_internal/pythonwin/win32ui.pyd": {
+      "relative_path": "_internal/pythonwin/win32ui.pyd",
+      "size": 1027584,
+      "sha256": "1fc9f8875056b175077ed04e7d93599f58b3cff80bd2077f5f8c8aaa144ab833",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/pywin32_system32/pythoncom312.dll": {
+      "relative_path": "_internal/pywin32_system32/pythoncom312.dll",
+      "size": 690688,
+      "sha256": "18e5d69b62110f48da01842f9ddfd99d06cc561f0866371714ec6534fcb4e5ec",
+      "modified_time": 1784775406.0735154
+    },
+    "_internal/pywin32_system32/pywintypes312.dll": {
+      "relative_path": "_internal/pywin32_system32/pywintypes312.dll",
+      "size": 136192,
+      "sha256": "9bd7f8c39a84d7b1ea43bfcd33c04631c60f4ff28167e82bb21987cc1c353766",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/shiboken6/MSVCP140.dll": {
+      "relative_path": "_internal/shiboken6/MSVCP140.dll",
+      "size": 549176,
+      "sha256": "005f2324c7ff79bbe9a44992b0708abb4c871bd24bcc7a34aca5eab4439c1f4a",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/shiboken6/Shiboken.pyd": {
+      "relative_path": "_internal/shiboken6/Shiboken.pyd",
+      "size": 33080,
+      "sha256": "0e2c5318c5ac60a016a12230bbb1f6a9d990c45cbf4a7c4af24aefb5ab7dc40a",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/shiboken6/shiboken6.abi3.dll": {
+      "relative_path": "_internal/shiboken6/shiboken6.abi3.dll",
+      "size": 384824,
+      "sha256": "47f4f9b44c95037565dd14f4be04f350f20c53c05483b750e0be867c39a7441e",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/shiboken6/VCRUNTIME140.dll": {
+      "relative_path": "_internal/shiboken6/VCRUNTIME140.dll",
+      "size": 116024,
+      "sha256": "8d9c679c825c5fff298d66c41af30f35c289fc101868dfc9635547bada0daba6",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/shiboken6/VCRUNTIME140_1.dll": {
+      "relative_path": "_internal/shiboken6/VCRUNTIME140_1.dll",
+      "size": 41272,
+      "sha256": "e4d7ea5f4f4ff6d0c208e693853617cdef0ad71cfe5dd5c3ae16c8a6b64c18ea",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/win32/_win32sysloader.pyd": {
+      "relative_path": "_internal/win32/_win32sysloader.pyd",
+      "size": 15872,
+      "sha256": "db277aae2b8417dbd01435a8691cc74707f6699ae3199e1b205f609cefa5ad24",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/win32/win32api.pyd": {
+      "relative_path": "_internal/win32/win32api.pyd",
+      "size": 138752,
+      "sha256": "8e09d7aa57dc33b663afd219fab21b6a70e9d98cc74a044df4d6cd94799d98c2",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/win32/win32event.pyd": {
+      "relative_path": "_internal/win32/win32event.pyd",
+      "size": 30208,
+      "sha256": "a6b896456443447a663fe25783dfa95929dc8ade8d7970fd78d3b4e65100371e",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/win32/win32gui.pyd": {
+      "relative_path": "_internal/win32/win32gui.pyd",
+      "size": 223232,
+      "sha256": "f468a03be44633fdeabc08b4a9f8b135f9e31d74b935f85631c23c7fbb9367fa",
+      "modified_time": 1784775406.0891395
+    },
+    "_internal/win32/win32print.pyd": {
+      "relative_path": "_internal/win32/win32print.pyd",
+      "size": 75264,
+      "sha256": "b676c96d81e2c5cd5d8e1dd3e7b3c018b2397e32b2e4b2237dd4ca7399e8d1d2",
+      "modified_time": 1784775406.1047635
+    },
+    "_internal/win32/win32trace.pyd": {
+      "relative_path": "_internal/win32/win32trace.pyd",
+      "size": 25088,
+      "sha256": "3dd640518a4fb1084cfc38a0e312b87ff1b0b0a74535e320bb9936441b9ed8ca",
+      "modified_time": 1784775406.1047635
+    },
+    "tools/addins/AgribankV2.xlam": {
+      "relative_path": "tools/addins/AgribankV2.xlam",
+      "size": 1213446,
+      "sha256": "9e1d7a85fc2a38c7acf20721d3c0f0f4034c7e6eaaf4bdeaa7bc0852a75e310c",
+      "modified_time": 1782978099.5805726
+    },
+    "tools/addins/Tool/Agribank_QuyetToan.xlam": {
+      "relative_path": "tools/addins/Tool/Agribank_QuyetToan.xlam",
+      "size": 850125,
+      "sha256": "70743c7fbb48b93b289d3fbd7f1b2592494f79ed8ebab9a6f02875ad0628cdd9",
+      "modified_time": 1766823349.0
+    }
+  }
+}

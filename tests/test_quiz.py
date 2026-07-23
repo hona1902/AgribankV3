@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import tempfile
 import unittest
 from contextlib import closing
 from openpyxl import Workbook, load_workbook
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from agribank_v3.quiz import (
     Question,
@@ -321,6 +323,42 @@ class QuizDatabaseTests(unittest.TestCase):
             self.assertEqual(attempt["correct_answers"], 1)
             self.assertEqual(answer["selected_answer"], "A")
             self.assertEqual(answer["checked_before_finish"], 1)
+
+
+class QuizWidgetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_data_management_button_opens_data_management_tab(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = QuizDatabase(
+                sqlite_path=Path(directory) / "quiz.db",
+                access_path=Path(directory) / "missing.mdb",
+            )
+            database.save_business_topic("TEST", "Kiểm thử")
+            database.save_question(
+                question_id=None,
+                topic_code="TEST",
+                text="Câu hỏi kiểm thử",
+                options={"A": "Đúng", "B": "Sai"},
+                correct_answer="A",
+            )
+            widget = QuizWidget(database=database)
+            self.addCleanup(widget.deleteLater)
+
+            buttons = [
+                button
+                for button in widget.findChildren(QPushButton)
+                if button.text() == "Quản lý dữ liệu"
+            ]
+            self.assertTrue(buttons)
+            buttons[0].click()
+
+            self.assertEqual(widget.pages.currentIndex(), widget.data_management_tab_index)
+            self.assertEqual(widget.pages.currentWidget(), widget.data_admin_tabs.parentWidget())
+            self.assertEqual(widget.pages.tabText(widget.pages.currentIndex()), "Quản Lý Dữ Liệu")
 
 
 if __name__ == "__main__":

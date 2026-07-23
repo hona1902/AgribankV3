@@ -70,7 +70,7 @@ class AppSettingsDatabase:
     """Owns durable application settings stored outside Excel workbooks."""
 
     COMPONENT = "app_settings"
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
     DEFAULT_DATABASE_NAME = "DuLieuV3.db"
     QUIZ_DATABASE_NAME = "quiz.db"
     BACKUP_FORMAT = "agribank-v3-database-bundle"
@@ -192,6 +192,18 @@ class AppSettingsDatabase:
                             CHECK (enabled IN (0, 1)),
                         updated_at TEXT NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS app_schema_migrations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        version TEXT NOT NULL,
+                        migration_name TEXT,
+                        applied_at TEXT NOT NULL,
+                        checksum TEXT,
+                        success INTEGER DEFAULT 1 CHECK(success IN (0, 1))
+                    );
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_app_schema_migrations_version
+                        ON app_schema_migrations(version)
+                        WHERE success = 1;
                     """
                 )
                 database.execute(

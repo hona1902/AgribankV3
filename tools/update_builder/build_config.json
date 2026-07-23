@@ -1,0 +1,14 @@
+{
+  "source_path": "D:\\Soft VBA\\THAOTAC-EXCEL\\src\\5491-AgribankV2\\AgribankV2-PyThon",
+  "update_path": "X:\\public\\5491\\06- PHONG KHKD\\NAM\\AgribankV3\\Update",
+  "new_version": "0.1.2",
+  "release_date": "2026-07-20",
+  "required_app_restart": true,
+  "notes": [
+    "Sửa lỗi giao diện",
+    "Cập nhật xử lý báo cáo"
+  ],
+  "migrations": [],
+  "auto_update_source_version": false,
+  "verbose": false
+}

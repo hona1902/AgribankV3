@@ -149,7 +149,6 @@ FEATURE_CARD_GAP = 12
 NAVIGATION = [
     "Tổng quan",
     "Chức năng",
-    "Dữ liệu",
     "Tín dụng",
     "Kế toán",
     "Quyết toán",
@@ -159,7 +158,6 @@ NAVIGATION = [
 NAVIGATION_ICONS = (
     "Logo-HNA.png",
     "case.png",
-    "access.png",
     "m09a.png",
     "qtkt.png",
     "qt.png",

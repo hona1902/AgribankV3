@@ -317,13 +317,28 @@ class QuizWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.pages = QTabWidget()
         self.pages.setDocumentMode(True)
-        self.pages.addTab(self._build_setup_page(), "Cài đặt đề cương")
-        self.pages.addTab(self._build_quiz_page(), "Trả Lời Câu Hỏi")
-        self.pages.addTab(self._build_result_page(), "Kết Quả Trả Lời")
-        self.pages.addTab(self._build_answer_lookup_page(), "Tra Cứu Đáp Án")
-        self.pages.addTab(self._build_data_management_page(), "Quản Lý Dữ Liệu")
-        self.pages.setTabEnabled(1, False)
-        self.pages.setTabEnabled(2, False)
+        self.setup_tab_index = self.pages.addTab(
+            self._build_setup_page(),
+            "Cài đặt đề cương",
+        )
+        self.quiz_tab_index = self.pages.addTab(
+            self._build_quiz_page(),
+            "Trả Lời Câu Hỏi",
+        )
+        self.result_tab_index = self.pages.addTab(
+            self._build_result_page(),
+            "Kết Quả Trả Lời",
+        )
+        self.answer_lookup_tab_index = self.pages.addTab(
+            self._build_answer_lookup_page(),
+            "Tra Cứu Đáp Án",
+        )
+        self.data_management_tab_index = self.pages.addTab(
+            self._build_data_management_page(),
+            "Quản Lý Dữ Liệu",
+        )
+        self.pages.setTabEnabled(self.quiz_tab_index, False)
+        self.pages.setTabEnabled(self.result_tab_index, False)
         layout.addWidget(self.pages)
 
         self.timer = QTimer(self)
@@ -539,7 +554,9 @@ class QuizWidget(QWidget):
         about_button = QPushButton("Quản lý dữ liệu")
         about_button.setObjectName("SecondaryButton")
         self._set_button_icon(about_button, "button_data.svg")
-        about_button.clicked.connect(lambda: self.pages.setCurrentIndex(3))
+        about_button.clicked.connect(
+            lambda: self.pages.setCurrentIndex(self.data_management_tab_index)
+        )
         actions.addWidget(about_button)
 
         export_button = QPushButton("Xuất Sang Excel")
@@ -2192,8 +2209,8 @@ class QuizWidget(QWidget):
             if time_limit
             else 0
         )
-        self.pages.setTabEnabled(1, True)
-        self.pages.setCurrentIndex(1)
+        self.pages.setTabEnabled(self.quiz_tab_index, True)
+        self.pages.setCurrentIndex(self.quiz_tab_index)
         self.timer.start()
         self.load_question()
 
@@ -2418,7 +2435,7 @@ class QuizWidget(QWidget):
             self.finish_quiz()
 
     def finish_quiz(self) -> None:
-        if self.session is None or self.pages.currentIndex() == 2:
+        if self.session is None or self.pages.currentIndex() == self.result_tab_index:
             return
         self.timer.stop()
         result = self.session.finish()
@@ -2449,8 +2466,8 @@ class QuizWidget(QWidget):
                         else Qt.GlobalColor.darkRed
                     )
                 self.review_table.setItem(row, column, item)
-        self.pages.setTabEnabled(2, True)
-        self.pages.setCurrentIndex(2)
+        self.pages.setTabEnabled(self.result_tab_index, True)
+        self.pages.setCurrentIndex(self.result_tab_index)
 
     def open_result_question(self, row: int, _column: int) -> None:
         if self.session is None or not (0 <= row < len(self.session.questions)):
@@ -2595,12 +2612,12 @@ class QuizWidget(QWidget):
     def reset_to_setup(self) -> None:
         self.timer.stop()
         self.session = None
-        self.pages.setTabEnabled(1, False)
-        self.pages.setTabEnabled(2, False)
-        self.pages.setCurrentIndex(0)
+        self.pages.setTabEnabled(self.quiz_tab_index, False)
+        self.pages.setTabEnabled(self.result_tab_index, False)
+        self.pages.setCurrentIndex(self.setup_tab_index)
 
     def request_close(self) -> None:
-        if self.pages.currentIndex() == 1 and self.session is not None:
+        if self.pages.currentIndex() == self.quiz_tab_index and self.session is not None:
             if (
                 QMessageBox.question(
                     self,

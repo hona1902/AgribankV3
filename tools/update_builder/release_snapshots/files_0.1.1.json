@@ -1,0 +1,1045 @@
+{
+  "version": "0.1.1",
+  "package_mode": "runtime",
+  "created_at": "2026-07-20T14:04:51+07:00",
+  "files": {
+    "src/agribank_v3/__init__.py": {
+      "relative_path": "src/agribank_v3/__init__.py",
+      "size": 64,
+      "sha256": "e6b5957662fd589c50265f52f331d75ffbcd0941c9f6d9efff8587597cbf6b0e",
+      "modified_time": 1784277021.7360182
+    },
+    "src/agribank_v3/__init__.py.bak": {
+      "relative_path": "src/agribank_v3/__init__.py.bak",
+      "size": 61,
+      "sha256": "018b61c688cd03b78142579998d8f27bc293a8d1941b8030eeef4d3c478d95bf",
+      "modified_time": 1784276206.035816
+    },
+    "src/agribank_v3/__main__.py": {
+      "relative_path": "src/agribank_v3/__main__.py",
+      "size": 91,
+      "sha256": "9cda746331eba4e26ac3e4633f8d2c69745ee0305e943dc4470d404653d9f16a",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/app.py": {
+      "relative_path": "src/agribank_v3/app.py",
+      "size": 1134,
+      "sha256": "4ed1aeee2aad2435e41a454360a217512446f34eb34cd8363b8a40c41568d92a",
+      "modified_time": 1783045079.4122767
+    },
+    "src/agribank_v3/excel_tools.py": {
+      "relative_path": "src/agribank_v3/excel_tools.py",
+      "size": 11485,
+      "sha256": "3fed27872bd4ba288acdde055260c04319611284c03973269b14ce931b710acd",
+      "modified_time": 1783937609.5026412
+    },
+    "src/agribank_v3/file_merge.py": {
+      "relative_path": "src/agribank_v3/file_merge.py",
+      "size": 10822,
+      "sha256": "553fd62cfd8082ededf6440a9eee5c7ae4990c11de9bafc4eba9fb5e013a0a44",
+      "modified_time": 1783927926.364916
+    },
+    "src/agribank_v3/printer_manager.py": {
+      "relative_path": "src/agribank_v3/printer_manager.py",
+      "size": 10034,
+      "sha256": "ea3e87fd467f6ce759381cc88083da9207592effca94a765463f732abb661ba9",
+      "modified_time": 1783930062.418491
+    },
+    "src/agribank_v3/runtime_paths.py": {
+      "relative_path": "src/agribank_v3/runtime_paths.py",
+      "size": 459,
+      "sha256": "d053d79275f5e1bcb124998cc7749adda938df8cc1106f0cea14c8d0741bdd13",
+      "modified_time": 1783066273.7848759
+    },
+    "src/agribank_v3/settings.py": {
+      "relative_path": "src/agribank_v3/settings.py",
+      "size": 35961,
+      "sha256": "312780761b8dad3f6205a9553f98f83faa169d8964d14294342558914ce879c7",
+      "modified_time": 1784260611.042517
+    },
+    "src/agribank_v3/word_folder_print.py": {
+      "relative_path": "src/agribank_v3/word_folder_print.py",
+      "size": 2952,
+      "sha256": "3dff3ef11ccba5eade2fe7df4adb2a7be674b482bbc7b0fc896412e834fadf51",
+      "modified_time": 1783928994.772376
+    },
+    "src/agribank_v3/excel/__init__.py": {
+      "relative_path": "src/agribank_v3/excel/__init__.py",
+      "size": 722,
+      "sha256": "3189415dd096ac0c129b87d36d7cebcfeaddf6160e4c9a3c981dffc25b1162b9",
+      "modified_time": 1783053340.9613519
+    },
+    "src/agribank_v3/excel/compatibility.py": {
+      "relative_path": "src/agribank_v3/excel/compatibility.py",
+      "size": 3957,
+      "sha256": "698a1a42368435009fe1def1cd0aedc462e975df4186890dbfeb5f72cb888133",
+      "modified_time": 1782974992.6240573
+    },
+    "src/agribank_v3/excel/launcher.py": {
+      "relative_path": "src/agribank_v3/excel/launcher.py",
+      "size": 6526,
+      "sha256": "df3ae01a40d9b10d5b10a50fbcf800e408081f6b2b9457e693da71b594fa72d2",
+      "modified_time": 1783062166.0692701
+    },
+    "src/agribank_v3/excel/service.py": {
+      "relative_path": "src/agribank_v3/excel/service.py",
+      "size": 43728,
+      "sha256": "df576c86e46a2649eb185873428f9306fae88d2cf5a1d4f403c37b1f0b6df178",
+      "modified_time": 1783562264.4591196
+    },
+    "src/agribank_v3/features/__init__.py": {
+      "relative_path": "src/agribank_v3/features/__init__.py",
+      "size": 51,
+      "sha256": "3aabec6c366525ce8a50a4a5ca680dbc523e418d16cab5b2bb02e0ad20b5ad1d",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/features/catalog.py": {
+      "relative_path": "src/agribank_v3/features/catalog.py",
+      "size": 15545,
+      "sha256": "22271d76dd4bc300d4f9c1541c5f245d671d70a13d7e2d90be9e810aa3e5d0e2",
+      "modified_time": 1784027466.0191314
+    },
+    "src/agribank_v3/features/credit/__init__.py": {
+      "relative_path": "src/agribank_v3/features/credit/__init__.py",
+      "size": 63,
+      "sha256": "87a2ed3c99f9f17ac5c4ae0a1b54a67ebdfa61271661237ab895f35f1bb7e445",
+      "modified_time": 1783998201.805448
+    },
+    "src/agribank_v3/features/credit/auto_interest/__init__.py": {
+      "relative_path": "src/agribank_v3/features/credit/auto_interest/__init__.py",
+      "size": 85,
+      "sha256": "f6ebc6965c1137ea497e43c0509e0b8fdec7711e940f8f50f6f0f70ae8525ddc",
+      "modified_time": 1783998669.7814772
+    },
+    "src/agribank_v3/features/credit/auto_interest/placeholder_windows.py": {
+      "relative_path": "src/agribank_v3/features/credit/auto_interest/placeholder_windows.py",
+      "size": 1407,
+      "sha256": "8959ae702c135a3cf112d71844f082a9e050fbfc4ab4a148802326a8177e27bf",
+      "modified_time": 1783998669.7824867
+    },
+    "src/agribank_v3/features/credit/tovayvon/__init__.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/__init__.py",
+      "size": 73,
+      "sha256": "4cbecda2f127d76e0cb42f47c36fe59e9a3249e5b529e51489832fd03e06656b",
+      "modified_time": 1783998201.805448
+    },
+    "src/agribank_v3/features/credit/tovayvon/checkable_combo_box.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/checkable_combo_box.py",
+      "size": 6681,
+      "sha256": "3281cc29ee5af0f80f143967eb2ff2ad7f0c8bf94da6dcfcc536ca98866d9af9",
+      "modified_time": 1784191402.0666072
+    },
+    "src/agribank_v3/features/credit/tovayvon/debt_reconciliation.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/debt_reconciliation.py",
+      "size": 35119,
+      "sha256": "05354684ca045802eabd32484724b36cf6512ca1837f11b9502383e130d7a4a9",
+      "modified_time": 1784193476.6047766
+    },
+    "src/agribank_v3/features/credit/tovayvon/debt_reconciliation_window.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/debt_reconciliation_window.py",
+      "size": 13609,
+      "sha256": "614a11d27c5beed9a792378525670330a70bbc0107d1a401356b7b69828e9496",
+      "modified_time": 1784192028.8536975
+    },
+    "src/agribank_v3/features/credit/tovayvon/excel_templates.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/excel_templates.py",
+      "size": 5344,
+      "sha256": "10e47fa233460f54aae9639e6e110c835ab7b5ea4255955796d451b0f8dc39bf",
+      "modified_time": 1784197848.205917
+    },
+    "src/agribank_v3/features/credit/tovayvon/help_window.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/help_window.py",
+      "size": 16328,
+      "sha256": "4d17efcdf1c1333504c67285b71a69fed5562da77bf56966c790a614cc55fe61",
+      "modified_time": 1784195603.4331472
+    },
+    "src/agribank_v3/features/credit/tovayvon/interest_report.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/interest_report.py",
+      "size": 58211,
+      "sha256": "6dfdce047fbbc849cf061a184c86a316902c2e0c5e21e32bfa71b493b6d2bbdd",
+      "modified_time": 1784259192.392726
+    },
+    "src/agribank_v3/features/credit/tovayvon/interest_report_window.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/interest_report_window.py",
+      "size": 16863,
+      "sha256": "17fc8d8dc31c2ecd6cbbb254f9708a494a1847b7396a0b56c6b37b52a720038b",
+      "modified_time": 1784258346.739565
+    },
+    "src/agribank_v3/features/credit/tovayvon/menu.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/menu.py",
+      "size": 1343,
+      "sha256": "1f7b45076b93f9afdbd7e0ab098930647e436fb28a82d903bf7eace212bdd194",
+      "modified_time": 1784195610.7244658
+    },
+    "src/agribank_v3/features/credit/tovayvon/models.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/models.py",
+      "size": 13318,
+      "sha256": "858dda53c968964f099a7be35f0d03959b1cafd87be84375efa2848e758ab83b",
+      "modified_time": 1784197119.9921305
+    },
+    "src/agribank_v3/features/credit/tovayvon/payment_request.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/payment_request.py",
+      "size": 26162,
+      "sha256": "2db0b8bd87d3a0313f8f8163b9a549debae6ea8f3ba81133c8e792eda4494ff8",
+      "modified_time": 1784259483.0984695
+    },
+    "src/agribank_v3/features/credit/tovayvon/payment_request_window.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/payment_request_window.py",
+      "size": 14418,
+      "sha256": "4d44c9c4141d38c402221ed970b2c297fcaead7d9cac6cbbcd0df4995c11a919",
+      "modified_time": 1784259355.5348053
+    },
+    "src/agribank_v3/features/credit/tovayvon/placeholder_windows.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/placeholder_windows.py",
+      "size": 93411,
+      "sha256": "cc6cb690b4b9bf0662c4629e65753399f9dca7f71ea04ed00de0beb7ac1c2cfb",
+      "modified_time": 1784257636.256476
+    },
+    "src/agribank_v3/features/credit/tovayvon/repository.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/repository.py",
+      "size": 47854,
+      "sha256": "c21fdd6652df854e63faeb46697f5ef96958f9412494db5542880fc1be70624a",
+      "modified_time": 1784257424.2974436
+    },
+    "src/agribank_v3/features/credit/tovayvon/word_template.py": {
+      "relative_path": "src/agribank_v3/features/credit/tovayvon/word_template.py",
+      "size": 6441,
+      "sha256": "63fe3bf4d3bc0f200548495c045fd1868f98df0d715d5220c0c8aa68865faa3d",
+      "modified_time": 1784188612.0969424
+    },
+    "src/agribank_v3/quiz/__init__.py": {
+      "relative_path": "src/agribank_v3/quiz/__init__.py",
+      "size": 600,
+      "sha256": "faeed08413b51a0244cf80ef0687c79ef21ee46c159c95605fd81034bf0f4057",
+      "modified_time": 1783039596.2908516
+    },
+    "src/agribank_v3/quiz/database.py": {
+      "relative_path": "src/agribank_v3/quiz/database.py",
+      "size": 49653,
+      "sha256": "dd091c4b5937363fdc74e24b5fda7ddfacbc03686ba89eadd2c17f39d2d1b691",
+      "modified_time": 1783066273.7848759
+    },
+    "src/agribank_v3/quiz/excel_exporter.py": {
+      "relative_path": "src/agribank_v3/quiz/excel_exporter.py",
+      "size": 6444,
+      "sha256": "78b1118c2363ab07a55e73b87a6da72037fd3192610a6806f8de3aacafde5660",
+      "modified_time": 1783040003.7079859
+    },
+    "src/agribank_v3/quiz/excel_importer.py": {
+      "relative_path": "src/agribank_v3/quiz/excel_importer.py",
+      "size": 4528,
+      "sha256": "668e97688ade3fc9f4eef6284aef98c10bb79741129969bb769fd88110250458",
+      "modified_time": 1782981847.5639372
+    },
+    "src/agribank_v3/quiz/models.py": {
+      "relative_path": "src/agribank_v3/quiz/models.py",
+      "size": 611,
+      "sha256": "14c2f7a372abef84ed1359852f443c6df73c34887c3ef4ff3a6cde718128ca13",
+      "modified_time": 1782981695.1947875
+    },
+    "src/agribank_v3/quiz/session.py": {
+      "relative_path": "src/agribank_v3/quiz/session.py",
+      "size": 2717,
+      "sha256": "18543032a7251fc3cbcdbab55b5a76e4d9b4387835dd1af2da5b89a3d3ea9636",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/resources/icons/1.png": {
+      "relative_path": "src/agribank_v3/resources/icons/1.png",
+      "size": 1138,
+      "sha256": "14fa43a904338f0e0a70bbca384d28675e8eb9989badad4e1d44f095af709355",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/access.png": {
+      "relative_path": "src/agribank_v3/resources/icons/access.png",
+      "size": 1343,
+      "sha256": "42e5d7371af0bfb925559b3918458e8612937732698492457fbf2d9dfbf562e7",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/BamChuot.png": {
+      "relative_path": "src/agribank_v3/resources/icons/BamChuot.png",
+      "size": 2115,
+      "sha256": "06fa7a9913547470143389ca8caf63eaf656771ddd2ca10ca796cf401052c73e",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/button_data.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/button_data.svg",
+      "size": 352,
+      "sha256": "506d3e8b4eba9e1ca74a9030ddd5f258a9b40177f77c17b1fa2ea77b17dd2a8c",
+      "modified_time": 1783044583.8019214
+    },
+    "src/agribank_v3/resources/icons/button_excel.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/button_excel.svg",
+      "size": 319,
+      "sha256": "a937faf10cd1a45ba1085e024a72c6434096f55041453ae7b52cddf1ca0d158a",
+      "modified_time": 1783044583.8051128
+    },
+    "src/agribank_v3/resources/icons/button_sync.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/button_sync.svg",
+      "size": 384,
+      "sha256": "fb5aac387b29e98cc1b24173ac43cf149da1faac18d6e09f9aca38a409e77a61",
+      "modified_time": 1783044583.8051128
+    },
+    "src/agribank_v3/resources/icons/caidat.png": {
+      "relative_path": "src/agribank_v3/resources/icons/caidat.png",
+      "size": 9920,
+      "sha256": "316d29ef899d9960663614fad87c745cc21e5739a42ed5efb9041c5dacc406bd",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/case.png": {
+      "relative_path": "src/agribank_v3/resources/icons/case.png",
+      "size": 1900,
+      "sha256": "6e0552a18867d39d5d9ab863bf9c6b5673c3e8efd39647b6591ee5ff3c5f6228",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/chchuoi.png": {
+      "relative_path": "src/agribank_v3/resources/icons/chchuoi.png",
+      "size": 1833,
+      "sha256": "a0edcdf8fa013c273dc54c69a6d5359eb139afc69fdb3fe1c61b49be93b79c80",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/chchuoidate.png": {
+      "relative_path": "src/agribank_v3/resources/icons/chchuoidate.png",
+      "size": 1150,
+      "sha256": "02e8319e4b82e4df4bbd3993aa181b1c4cc462d00e1fd8262287f11af3dba300",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/check_on.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/check_on.svg",
+      "size": 272,
+      "sha256": "d210d81b086f6159f264002f78cdac12d7b5013507551c138805427b699a99ee",
+      "modified_time": 1782986791.8915484
+    },
+    "src/agribank_v3/resources/icons/ChiLuong.png": {
+      "relative_path": "src/agribank_v3/resources/icons/ChiLuong.png",
+      "size": 5905,
+      "sha256": "0d6f1636d46868d6273e42565a3888ce6df1c6349dbf23252150be41e3fd2320",
+      "modified_time": 1782964039.581105
+    },
+    "src/agribank_v3/resources/icons/chinhta.png": {
+      "relative_path": "src/agribank_v3/resources/icons/chinhta.png",
+      "size": 1829,
+      "sha256": "ee3925868eb69cf3277f1b8c2db92d1632fadd9caa7c197e53130a1011006aac",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/circle_off.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/circle_off.svg",
+      "size": 177,
+      "sha256": "0c89bf61fbd4f7e135f5f79c7f3eb7f562963791cc6c0691e2a014dd3e360c65",
+      "modified_time": 1782986791.89054
+    },
+    "src/agribank_v3/resources/icons/conver.png": {
+      "relative_path": "src/agribank_v3/resources/icons/conver.png",
+      "size": 1721,
+      "sha256": "a177775eee2a010fae97c84611aaaf21d47c72f18767656519f64f97c1150a4f",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/file.png": {
+      "relative_path": "src/agribank_v3/resources/icons/file.png",
+      "size": 679,
+      "sha256": "f9a53e6b3e46395eee83d236c4caafbced32a7e8793dcca337963518ace8d864",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/gopsheet.png": {
+      "relative_path": "src/agribank_v3/resources/icons/gopsheet.png",
+      "size": 330,
+      "sha256": "a8643d642f1c3749673bca2f746ac3cd8b45200dda2ad837eb537452ca002de1",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/inforcn.png": {
+      "relative_path": "src/agribank_v3/resources/icons/inforcn.png",
+      "size": 3333,
+      "sha256": "fe2c0761c71af87b78afb68f2c52d2182f542f7f9469635ab4ebcd2609254c6c",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/Logo-HNA.ico": {
+      "relative_path": "src/agribank_v3/resources/icons/Logo-HNA.ico",
+      "size": 235582,
+      "sha256": "ccee5869f242dc70ae474d65a7458951122bf1cdf14ae3a39256831d2502e12d",
+      "modified_time": 1773144612.8522122
+    },
+    "src/agribank_v3/resources/icons/Logo-HNA.png": {
+      "relative_path": "src/agribank_v3/resources/icons/Logo-HNA.png",
+      "size": 102142,
+      "sha256": "27010213accc03893f8be2149a71a4882c7f57553cb524ce3a566197c23176f2",
+      "modified_time": 1763452735.2198236
+    },
+    "src/agribank_v3/resources/icons/logoagri.png": {
+      "relative_path": "src/agribank_v3/resources/icons/logoagri.png",
+      "size": 1782,
+      "sha256": "e1c98805eef7a2ecd6c6719b837ce462816cf11abd2449525f2ae1881399cfad",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m05.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m05.png",
+      "size": 2105,
+      "sha256": "6cb8294bd42e56bacad0a7640929c7aa65a320fd6b512dfccc80a64d17644f33",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m06.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m06.png",
+      "size": 2111,
+      "sha256": "f38811c1e1d1e50437d6d4b1358486d00e90806db1d6c2729c4cf850adfb79af",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m09a.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m09a.png",
+      "size": 2121,
+      "sha256": "7973eff6cb31088b04770822a0f0d662e81c5c40c32f3e8d7777aabb4f3de7c5",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m09b.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m09b.png",
+      "size": 2115,
+      "sha256": "5647b0c2a6654d5e66b82292d8a793bdc5dfc8a40bdffe2e3492d78e4306289e",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m13.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m13.png",
+      "size": 2081,
+      "sha256": "95511e5617dc7c10d9cd4818f1ab9f650d506153920267f0f8329c9c7e85b2eb",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m14.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m14.png",
+      "size": 2081,
+      "sha256": "16356ab9e1f11952952ad6c5aba74a29daac7b24b5c13457e26a3cea4cda12f3",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m15A.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m15A.png",
+      "size": 2065,
+      "sha256": "d8ebd8366c7965c4940c11634e8e38570d6ed0d279827adb8ef5082e9e3fd716",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m15B.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m15B.png",
+      "size": 2057,
+      "sha256": "0de4a5bbf462ce99ace921c6ee8e59f8312e0717e9aa701bbb8a176cb41769e9",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m16.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m16.png",
+      "size": 2033,
+      "sha256": "32b26c85f272c1db856d104897e41f309fa439fe73b3b3f32b8b2be7b7b6096f",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m18.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m18.png",
+      "size": 2030,
+      "sha256": "1d3e03074964f34e84ac7cb4ab4ad9f777e3eff06ffdd502c14822bbf61cfbfb",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/m20A.png": {
+      "relative_path": "src/agribank_v3/resources/icons/m20A.png",
+      "size": 2067,
+      "sha256": "640b0589fc49f5b2f2033b14e8613f97a1446721fcbe3d1a906e7d5c18bb2e10",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/nv2.png": {
+      "relative_path": "src/agribank_v3/resources/icons/nv2.png",
+      "size": 664,
+      "sha256": "71cb415fce4c81ef0042dbbe10b10b2cf383993d55870b33740479a93a07d7f3",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/option_answers.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/option_answers.svg",
+      "size": 337,
+      "sha256": "b40943ad4ee73ee1e45b5edbe2197e583d53f160eef660193b878a24374d0d45",
+      "modified_time": 1783043418.8774216
+    },
+    "src/agribank_v3/resources/icons/option_audience.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/option_audience.svg",
+      "size": 404,
+      "sha256": "0bfafe2704f907cee516e90596893a26b33a70de3fe8ffe7ef09216956686a4d",
+      "modified_time": 1783043418.8774216
+    },
+    "src/agribank_v3/resources/icons/option_questions.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/option_questions.svg",
+      "size": 324,
+      "sha256": "8f3e4b22af59c515d0691568c9ec0b17ba52b2d5333b61ad5e6784d1b8a95873",
+      "modified_time": 1783043418.8774216
+    },
+    "src/agribank_v3/resources/icons/option_time.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/option_time.svg",
+      "size": 345,
+      "sha256": "8dcf06005c384c7e5d244f026085d664c54fd52f00b705c3f01a9394be28b6bd",
+      "modified_time": 1783043418.8774216
+    },
+    "src/agribank_v3/resources/icons/printer.png": {
+      "relative_path": "src/agribank_v3/resources/icons/printer.png",
+      "size": 8332,
+      "sha256": "0e25f393c6a43ebe5324ef79b6b32fc8543d83e7519d9a0555032888ff72d283",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/protectwb.png": {
+      "relative_path": "src/agribank_v3/resources/icons/protectwb.png",
+      "size": 320,
+      "sha256": "95b9f32cade86bd300e763642f3a925690ba9af653d22d416dea866375624712",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/qt.png": {
+      "relative_path": "src/agribank_v3/resources/icons/qt.png",
+      "size": 2544,
+      "sha256": "edde8fcc270a7cbd80d32a2e28f22da10705c28faf299cf460d35dd292b4f1e4",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/qtkt.png": {
+      "relative_path": "src/agribank_v3/resources/icons/qtkt.png",
+      "size": 2536,
+      "sha256": "03dbe01bc94eba9fc3d2723621cdc6db126ec8fafa8f71d8d773a933a3d401bc",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/qttd.png": {
+      "relative_path": "src/agribank_v3/resources/icons/qttd.png",
+      "size": 2540,
+      "sha256": "cc272e8586102fd92c0609e925512c769a64e46a5d82a6452bbb7f8020d90e86",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/radio_on.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/radio_on.svg",
+      "size": 174,
+      "sha256": "9a4f432f9623917274d07ab997dc78639f57d472442c528962e3c6dd0d76690c",
+      "modified_time": 1782986791.8915484
+    },
+    "src/agribank_v3/resources/icons/section_clipboard.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/section_clipboard.svg",
+      "size": 454,
+      "sha256": "94d8bb9653685c4b573cb9d441b7d7b164fe581272a101c4830286e9757a4f58",
+      "modified_time": 1782987429.0004551
+    },
+    "src/agribank_v3/resources/icons/section_list.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/section_list.svg",
+      "size": 387,
+      "sha256": "0931cb3bf59a7788ce48d800e76715c3473f515304efc9e75e8913352cf4c8c4",
+      "modified_time": 1782987429.0004551
+    },
+    "src/agribank_v3/resources/icons/sort.png": {
+      "relative_path": "src/agribank_v3/resources/icons/sort.png",
+      "size": 1457,
+      "sha256": "6702a6dd072a4ac5cb32ba7b10ab1956578ce077c80452a7554b353b239b28cb",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/tovayvon.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/tovayvon.svg",
+      "size": 2247,
+      "sha256": "2696d520c29ea0f6801fe2c5c661c62e488fa8a59f55d882df84bc9a8676c989",
+      "modified_time": 1784027384.7087483
+    },
+    "src/agribank_v3/resources/icons/tracnghiem.png": {
+      "relative_path": "src/agribank_v3/resources/icons/tracnghiem.png",
+      "size": 56460,
+      "sha256": "787afa11643c76947db794d2cb1cd12ab55834fd7d643cf646f7c0e30d46cd9a",
+      "modified_time": 1783927625.9999518
+    },
+    "src/agribank_v3/resources/icons/tracnghiem.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/tracnghiem.svg",
+      "size": 5065,
+      "sha256": "c2a560b2d8fff94665104b79a54fa4a871c19f5aef6d18258ae3b0109a2ea707",
+      "modified_time": 1783938573.6518729
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_04_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_04_QT_text.svg",
+      "size": 440,
+      "sha256": "78f03bbe5af852de502c90ca0e6c518ba9d1745625e462e40e72ab86a3c3ae72",
+      "modified_time": 1783123642.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_05_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_05_QT_text.svg",
+      "size": 440,
+      "sha256": "44f9ef0cfa9b7cc4e7bc05037d70af80d812a08077f6d6c03044a9d2550c7fb9",
+      "modified_time": 1783123642.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_06_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_06_QT_text.svg",
+      "size": 440,
+      "sha256": "a5f666b286d962f5db1f3993ccf42cf99f0d856709139dcaa7a1b51f09e0f17b",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_07a_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_07a_QT_text.svg",
+      "size": 441,
+      "sha256": "a8cd37e7e40ffb23ebee1d993c396bafbe79643d3afc07e3555d22a95bee07e9",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_08_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_08_QT_text.svg",
+      "size": 440,
+      "sha256": "d07658cd14e5a0309d560d6314810f4f19b604f58acd6a2ec657e9ff79fd94aa",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_09a_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_09a_QT_text.svg",
+      "size": 441,
+      "sha256": "d934d852fa6ff3d157a89c54ce49c16b6d3a304156847890a898a327609aff81",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_09b_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_09b_QT_text.svg",
+      "size": 441,
+      "sha256": "fb5af10f85e3a64d5f9d90b24d2a1616a529065f650ef7a7daf9508123a7a226",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_09c_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_09c_QT_text.svg",
+      "size": 441,
+      "sha256": "2b2bdc37f85bf1432ffb7ee6188255025cbfa8bf0364447231d7b053e36fb506",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_13_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_13_QT_text.svg",
+      "size": 440,
+      "sha256": "bb951a36923e8fa5baf1591594ca1af41a99d5bc5eaef95163261000ec8cf866",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_14_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_14_QT_text.svg",
+      "size": 440,
+      "sha256": "4e26c1adfb3c6de80529ed425a677a025fe63f86a15fd0d5ab3167f1b6887759",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_15a_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_15a_QT_text.svg",
+      "size": 441,
+      "sha256": "d9677e3ba6b1e8eb83036bf86309b324552e81eed03ffb686362d764548153b6",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_15b_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_15b_QT_text.svg",
+      "size": 441,
+      "sha256": "eb48c540d79466ddb3ec366fa66e6d974f0e2f14a57c1e91dfe4bfac360ef66d",
+      "modified_time": 1783123644.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_16_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_16_QT_text.svg",
+      "size": 440,
+      "sha256": "1931e3f9699ed4cdfe1a3b42eb318c0aa61c689ff34ed75ee53d18a865a275df",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_18_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_18_QT_text.svg",
+      "size": 440,
+      "sha256": "f1bf86140cc74cf8204274776bf87b998900279c9b693efe8ac9eb005a8dfe2f",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_20a_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_20a_QT_text.svg",
+      "size": 441,
+      "sha256": "678d38a27c1a92aeedcafe55e43185f25efd55e42b042583632a087440e0105d",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_22_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_22_QT_text.svg",
+      "size": 440,
+      "sha256": "aa5a70bc15192fa0ed35b07e6c54400a0141c7980f01b13b5680928e51ceb049",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_23_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_23_QT_text.svg",
+      "size": 440,
+      "sha256": "e92ca37c57277ceda69c4c7054a467e9fce75c3413e2a39675b010b15d7f004e",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_24_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_24_QT_text.svg",
+      "size": 440,
+      "sha256": "b273f905b398f17c22948d948f64253de588cdd569a95bfde69a3149522ddad0",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_30_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_30_QT_text.svg",
+      "size": 440,
+      "sha256": "59c9cbfbc1b1197d74f8a904bd5f33143bcc220f173b5d355fa3df3f138444f9",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/Mau_30a_QT_text.svg": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/Mau_30a_QT_text.svg",
+      "size": 441,
+      "sha256": "2600da6642d5e3b52222cfe527ef52c33079710c4136755bf2af6065a7dca97e",
+      "modified_time": 1783123646.0
+    },
+    "src/agribank_v3/resources/icons/QT/qt.png": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/qt.png",
+      "size": 2544,
+      "sha256": "edde8fcc270a7cbd80d32a2e28f22da10705c28faf299cf460d35dd292b4f1e4",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/QT/qtkt.png": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/qtkt.png",
+      "size": 2536,
+      "sha256": "03dbe01bc94eba9fc3d2723621cdc6db126ec8fafa8f71d8d773a933a3d401bc",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/icons/QT/qttd.png": {
+      "relative_path": "src/agribank_v3/resources/icons/QT/qttd.png",
+      "size": 2540,
+      "sha256": "cc272e8586102fd92c0609e925512c769a64e46a5d82a6452bbb7f8020d90e86",
+      "modified_time": 1782964039.5967388
+    },
+    "src/agribank_v3/resources/templates/AgribankV3-Mau-Cau-Hoi.xlsx": {
+      "relative_path": "src/agribank_v3/resources/templates/AgribankV3-Mau-Cau-Hoi.xlsx",
+      "size": 6172,
+      "sha256": "fbc6185f3290c91b50e66d020d451d3a600ce9a42680e12ff1058d960f97f1f8",
+      "modified_time": 1782982050.4873023
+    },
+    "src/agribank_v3/settlement/__init__.py": {
+      "relative_path": "src/agribank_v3/settlement/__init__.py",
+      "size": 824,
+      "sha256": "8d1d8d873499ac281dfe05f1a6b32a285902e55b8f89e309bd5fcef1ea0003c6",
+      "modified_time": 1783069448.3443584
+    },
+    "src/agribank_v3/settlement/consolidation1314_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation1314_worker.py",
+      "size": 3422,
+      "sha256": "41c0deed3b8ee868e06bbf256903129b11a0988483a04e9fd4644e318c8c27f2",
+      "modified_time": 1783645628.547171
+    },
+    "src/agribank_v3/settlement/consolidation13_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation13_worker.py",
+      "size": 2879,
+      "sha256": "2bfbdccc7fc3ce53259ab687fa8b94206390d664c21fe96f05ffe14dbfd678d0",
+      "modified_time": 1783593784.475436
+    },
+    "src/agribank_v3/settlement/consolidation15a_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation15a_worker.py",
+      "size": 9365,
+      "sha256": "8af6d2a67d6380bea63691d75c7e78e5171dbe094c6cf12b585e68cfe5b01736",
+      "modified_time": 1783821813.7317107
+    },
+    "src/agribank_v3/settlement/consolidation15b_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation15b_worker.py",
+      "size": 8972,
+      "sha256": "e92caa38e9956155c5b1210d1e880f6538e86ace604e915736e01a805f42ff9d",
+      "modified_time": 1783822175.652974
+    },
+    "src/agribank_v3/settlement/consolidation16_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation16_worker.py",
+      "size": 7153,
+      "sha256": "b42d979c1c9de611105dcefbbe6c7bf327b0fd79dd0f64c3f3ce012cd17bedd5",
+      "modified_time": 1783822517.9684412
+    },
+    "src/agribank_v3/settlement/consolidation18_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/consolidation18_worker.py",
+      "size": 7058,
+      "sha256": "0bcaecde62aa3010ae62f81ed14b4a50d28a4a7c53989cdb5afae111079719b5",
+      "modified_time": 1783822957.34395
+    },
+    "src/agribank_v3/settlement/engine.py": {
+      "relative_path": "src/agribank_v3/settlement/engine.py",
+      "size": 2510,
+      "sha256": "4b508715864d2b3f8325aac9fe475f809111fec2ba49436f2e0581fc87cb4a0c",
+      "modified_time": 1783069449.892102
+    },
+    "src/agribank_v3/settlement/mau30_worker.py": {
+      "relative_path": "src/agribank_v3/settlement/mau30_worker.py",
+      "size": 2129,
+      "sha256": "c7f3e8bc72a80be59a5cc8905540f1db1ce2e5e1f5a6dbe10fe3c94964bbbb95",
+      "modified_time": 1783827674.8310964
+    },
+    "src/agribank_v3/settlement/models.py": {
+      "relative_path": "src/agribank_v3/settlement/models.py",
+      "size": 1908,
+      "sha256": "dd3d962cf46cd69f215d478996c1f772bdaa1b604e2b9303c1d178ca8f0342df",
+      "modified_time": 1783310435.9833233
+    },
+    "src/agribank_v3/settlement/registry.py": {
+      "relative_path": "src/agribank_v3/settlement/registry.py",
+      "size": 6401,
+      "sha256": "23cd4ed843fb3c18a5e3aa2009cdc49e23df23c504a631329b196dfa68517e52",
+      "modified_time": 1783503609.5422196
+    },
+    "src/agribank_v3/settlement/transforms.py": {
+      "relative_path": "src/agribank_v3/settlement/transforms.py",
+      "size": 3623,
+      "sha256": "9095a26830a2f42c8fc9b19fe5b81cf4111aa3930ad66f175d2cd827f81677ce",
+      "modified_time": 1783069525.752045
+    },
+    "src/agribank_v3/settlement/processors/__init__.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/__init__.py",
+      "size": 1196,
+      "sha256": "e0fd29c26e59c7dc08ce0348fdad0c1fb7e5228895ef1b973e663b1669cc9b01",
+      "modified_time": 1783508417.4087815
+    },
+    "src/agribank_v3/settlement/processors/formatting.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/formatting.py",
+      "size": 2074,
+      "sha256": "35dea4fe30fb1a5a8a815be0e7e4a10edec08f6fe44b6e258da305204cf8374c",
+      "modified_time": 1783138478.7398508
+    },
+    "src/agribank_v3/settlement/processors/mau04.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau04.py",
+      "size": 20482,
+      "sha256": "b536238bf6eefafc42603d6b1293cf7aae0dadf99702bb423696e2c0443aa7ef",
+      "modified_time": 1783494971.1477826
+    },
+    "src/agribank_v3/settlement/processors/mau05.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau05.py",
+      "size": 27279,
+      "sha256": "650b26fae4f413fc724131fde60e1e8f59904b14ac8b2d4c632d8c3a5416d1c6",
+      "modified_time": 1783579171.1872773
+    },
+    "src/agribank_v3/settlement/processors/mau06.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau06.py",
+      "size": 11693,
+      "sha256": "28a27812bcc73ff4b24346a995cc94a23757ca559c748b17baf6cfd363736740",
+      "modified_time": 1783826382.0111105
+    },
+    "src/agribank_v3/settlement/processors/mau07_08.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau07_08.py",
+      "size": 26004,
+      "sha256": "c56d2219249047021764c06d0138277ef0271355d7ef794a574d5d55ff718ec7",
+      "modified_time": 1783499405.015701
+    },
+    "src/agribank_v3/settlement/processors/mau09.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau09.py",
+      "size": 22081,
+      "sha256": "14c4f4554cf222a7e4793961854cb9a63228265e4ab83fc9fe316f8166b4477f",
+      "modified_time": 1783503145.3156574
+    },
+    "src/agribank_v3/settlement/processors/mau13_14.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau13_14.py",
+      "size": 70498,
+      "sha256": "5078df941ac2a454ae68a60c72493cfd31e75b94996791cc661f7ed2656733d5",
+      "modified_time": 1783821172.684898
+    },
+    "src/agribank_v3/settlement/processors/mau15_16.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau15_16.py",
+      "size": 39083,
+      "sha256": "196353b7a1a8afe8d8adfc9a7b2730f7b2c9a46aaf435c33dd369969e27cc2bd",
+      "modified_time": 1783821651.8959892
+    },
+    "src/agribank_v3/settlement/processors/mau18.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau18.py",
+      "size": 23425,
+      "sha256": "d6b0cd6b9f65223d4433fd14f8fb646fa4909017b1caac2ea8192a1d67534630",
+      "modified_time": 1783311107.238989
+    },
+    "src/agribank_v3/settlement/processors/mau20a.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau20a.py",
+      "size": 22276,
+      "sha256": "d8b991ba110a9c76ecc14a5cce1bc9e20875d38b6d794cea6f52d536533ae334",
+      "modified_time": 1783311134.4131255
+    },
+    "src/agribank_v3/settlement/processors/mau22.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau22.py",
+      "size": 18795,
+      "sha256": "62a7a9ddb7b4cf372a36b0a51ac3473a57f576f0e05d145b2b4a6859e9f20a4a",
+      "modified_time": 1783511279.7589653
+    },
+    "src/agribank_v3/settlement/processors/mau23.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau23.py",
+      "size": 19088,
+      "sha256": "25f2a6c486eb308b7910ae5799d2aeab1ce8e12111a817756350bda8420a5aba",
+      "modified_time": 1783510131.231957
+    },
+    "src/agribank_v3/settlement/processors/mau24.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau24.py",
+      "size": 23556,
+      "sha256": "ed6feeaddf3361b59e4933f6b947bda70c2ecceb21d6ad8c889bc82218615a21",
+      "modified_time": 1783310464.5358655
+    },
+    "src/agribank_v3/settlement/processors/mau30.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/mau30.py",
+      "size": 31067,
+      "sha256": "9a970bec79081af60cad0582f5e3fd5ec593bb86b16bed84401dac1b6ec79412",
+      "modified_time": 1783905853.7512279
+    },
+    "src/agribank_v3/settlement/processors/summary05.py": {
+      "relative_path": "src/agribank_v3/settlement/processors/summary05.py",
+      "size": 6596,
+      "sha256": "d0b8ea405d1aa2552398535a60fd163a6ef65a5a6f15b5de63753cc433cfc455",
+      "modified_time": 1783565906.620987
+    },
+    "src/agribank_v3/ui/__init__.py": {
+      "relative_path": "src/agribank_v3/ui/__init__.py",
+      "size": 25,
+      "sha256": "dd69c005b87a8f028f926982084b139f57847ebbfa926a860ae12f9c9108906f",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/ui/icons.py": {
+      "relative_path": "src/agribank_v3/ui/icons.py",
+      "size": 331,
+      "sha256": "badad19119f043a5bf66d29708dc505b37f2bce852d6557db45da71dccf77c6a",
+      "modified_time": 1783148459.9677823
+    },
+    "src/agribank_v3/ui/main_window.py": {
+      "relative_path": "src/agribank_v3/ui/main_window.py",
+      "size": 131369,
+      "sha256": "ee0bfc1396c979292604e267c85b103284f2386f539c5080e31a317370a81edc",
+      "modified_time": 1784276206.0348158
+    },
+    "src/agribank_v3/ui/settings.py": {
+      "relative_path": "src/agribank_v3/ui/settings.py",
+      "size": 36855,
+      "sha256": "cf02dd05223daa45ee71088f55fe862599329561150b4e33c97a0b292763d94f",
+      "modified_time": 1784519005.6579401
+    },
+    "src/agribank_v3/ui/styles.py": {
+      "relative_path": "src/agribank_v3/ui/styles.py",
+      "size": 12616,
+      "sha256": "240a98f50d5bcaffb0146e039f464d6d27480bb11b474d9bd8a2d9ad579aeff9",
+      "modified_time": 1783993930.9699178
+    },
+    "src/agribank_v3/ui/workers.py": {
+      "relative_path": "src/agribank_v3/ui/workers.py",
+      "size": 2736,
+      "sha256": "44f67c396dc9a3eccf25bef750af373d271ddb86ac6974ca2b39e37d0d48092b",
+      "modified_time": 1783587285.02631
+    },
+    "src/agribank_v3/ui/dialogs/__init__.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/__init__.py",
+      "size": 27,
+      "sha256": "107311864115295f3daaf908a4a1966fa57deb1fff07b670a0159f5beb3cc83c",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/ui/dialogs/author_info.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/author_info.py",
+      "size": 10524,
+      "sha256": "d5da45fbac4c80491310299f1f5b05aee2dfe183171907266f7d80f6db61266c",
+      "modified_time": 1783926208.163726
+    },
+    "src/agribank_v3/ui/dialogs/case_conversion.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/case_conversion.py",
+      "size": 4903,
+      "sha256": "d27991b967399548b03c35a6ecf53dfae736868f9ad38978a972ce48e4904ba2",
+      "modified_time": 1783051030.151713
+    },
+    "src/agribank_v3/ui/dialogs/consolidation_csv.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/consolidation_csv.py",
+      "size": 9001,
+      "sha256": "afc8b71a23f583273570c334583a6f7b716e764033d46ddb0e1a7b52cf61a591",
+      "modified_time": 1783580240.7150319
+    },
+    "src/agribank_v3/ui/dialogs/excel_file_tools.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/excel_file_tools.py",
+      "size": 15671,
+      "sha256": "885b088ecc8ecf3dfd1774f99cdc7f71e1cbc96ae68bc67dc049f47ff57005c9",
+      "modified_time": 1783938088.6618638
+    },
+    "src/agribank_v3/ui/dialogs/excel_launcher.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/excel_launcher.py",
+      "size": 9263,
+      "sha256": "2f3a9bcdc91c7133c3c3ad932e04ad7cd0680828fffe5156fe1eb2be64f4a17f",
+      "modified_time": 1783063031.4820817
+    },
+    "src/agribank_v3/ui/dialogs/printer_settings.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/printer_settings.py",
+      "size": 16830,
+      "sha256": "a7ceb601f6daca5cc8127cae85b685934755b5c1a0ebf0800514418e98995fb9",
+      "modified_time": 1783930575.213008
+    },
+    "src/agribank_v3/ui/dialogs/quiz.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/quiz.py",
+      "size": 108144,
+      "sha256": "d3a99a07423bda08964c1a78f241521ea3dde1dce00acced893b4661d7a8958b",
+      "modified_time": 1783065228.3608406
+    },
+    "src/agribank_v3/ui/dialogs/same_structure_merge.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/same_structure_merge.py",
+      "size": 10585,
+      "sha256": "0e00ef894246edfe3419668555f4799126900f0b840d6a9d74bb4be10d80b1ef",
+      "modified_time": 1783928649.3641572
+    },
+    "src/agribank_v3/ui/dialogs/settlement_guidance.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_guidance.py",
+      "size": 9928,
+      "sha256": "0b486d91e106c475f97b46504c8ae593241ecab819480296bfc26b0de49eec2a",
+      "modified_time": 1783926220.3538284
+    },
+    "src/agribank_v3/ui/dialogs/settlement_mau05.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_mau05.py",
+      "size": 8615,
+      "sha256": "6c46ec3e2a575270435e184a08d7caf010a84116b7623e24809cc4a7ba7bb1b0",
+      "modified_time": 1783310969.9452589
+    },
+    "src/agribank_v3/ui/dialogs/settlement_mau06.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_mau06.py",
+      "size": 5549,
+      "sha256": "c612a6441295e0230ca6b3166621d87c76ceeab6075248f7c37c29bd0bb1d53a",
+      "modified_time": 1783826382.0111105
+    },
+    "src/agribank_v3/ui/dialogs/settlement_mau1516.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_mau1516.py",
+      "size": 11003,
+      "sha256": "9b3afaf19f56f2da5374cac78ef9995f6b94acbc4ac738cbc4b5391b020b7782",
+      "modified_time": 1783501787.1819882
+    },
+    "src/agribank_v3/ui/dialogs/settlement_mau30.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_mau30.py",
+      "size": 9269,
+      "sha256": "17678934dc3b1511bc5d2cfd3c1fff734b239baa76a36f963c9776be57907d57",
+      "modified_time": 1783826958.21069
+    },
+    "src/agribank_v3/ui/dialogs/settlement_multi_source.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_multi_source.py",
+      "size": 7696,
+      "sha256": "6637e777adf4ac9bc31f507811ddbdbefb6ecd152eabda41c4e370cba53c8c00",
+      "modified_time": 1783509798.0740364
+    },
+    "src/agribank_v3/ui/dialogs/settlement_period.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_period.py",
+      "size": 468,
+      "sha256": "0d2b7884ce2f38a04e5795f5d183bea71bd821924060452c918ac101fb79b79d",
+      "modified_time": 1783310948.3409076
+    },
+    "src/agribank_v3/ui/dialogs/settlement_simple_source.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/settlement_simple_source.py",
+      "size": 5878,
+      "sha256": "07765b59b1ea5df62cebee3d971207182bda8d28b501ad1675be19e9cbe9df77",
+      "modified_time": 1783503426.859602
+    },
+    "src/agribank_v3/ui/dialogs/word_folder_print.py": {
+      "relative_path": "src/agribank_v3/ui/dialogs/word_folder_print.py",
+      "size": 4292,
+      "sha256": "934d87d54e4ce7434ab518b7cb7a87a263e674618cd3a9c21e21b47e0a13720a",
+      "modified_time": 1783929723.5149457
+    },
+    "src/agribank_v3/ui/widgets/__init__.py": {
+      "relative_path": "src/agribank_v3/ui/widgets/__init__.py",
+      "size": 27,
+      "sha256": "eba056030b4c4bc0b14b7efd46d4004cc30e4387d028951ab3bd56c188dbaed2",
+      "modified_time": 1783050251.5759761
+    },
+    "src/agribank_v3/update/__init__.py": {
+      "relative_path": "src/agribank_v3/update/__init__.py",
+      "size": 44,
+      "sha256": "30553015f1c8be5dbf60e49c7f52394833eb34731986258b73eaf15005030aff",
+      "modified_time": 1784260600.754609
+    },
+    "src/agribank_v3/update/db_migrations.py": {
+      "relative_path": "src/agribank_v3/update/db_migrations.py",
+      "size": 6615,
+      "sha256": "868b4c85dec76c121ca44e16f1ad1913ce9280f0d765f03739ac0ccd8b1cdf25",
+      "modified_time": 1784271040.6922183
+    },
+    "src/agribank_v3/update/update_manager.py": {
+      "relative_path": "src/agribank_v3/update/update_manager.py",
+      "size": 23944,
+      "sha256": "32bbc26c67fd912a4043c54b17a13c074ef81fbe248326312443a043407dfdaf",
+      "modified_time": 1784530897.936606
+    },
+    "src/agribank_v3/update/update_manifest.py": {
+      "relative_path": "src/agribank_v3/update/update_manifest.py",
+      "size": 3543,
+      "sha256": "d80a470e9e73f23a52821179793b430b3fad2c101d76ff041014325c7c3a869c",
+      "modified_time": 1784518656.7486343
+    },
+    "pyproject.toml": {
+      "relative_path": "pyproject.toml",
+      "size": 672,
+      "sha256": "d4ba8e39342588050598ff6efb93b5a568f7d05395b5432936f3f0ab5af4a067",
+      "modified_time": 1784277021.737018
+    },
+    "run.ps1": {
+      "relative_path": "run.ps1",
+      "size": 473,
+      "sha256": "afc9f4dcf0a2bf72400b650defb807e8ed71716f3765a2aded134aedf4f652c8",
+      "modified_time": 1782980946.4315267
+    },
+    "README.md": {
+      "relative_path": "README.md",
+      "size": 5777,
+      "sha256": "01f6732100339b313e96ade14f12fc003d1c3d0d69699827ff3995e26e21e04d",
+      "modified_time": 1783065722.625851
+    }
+  }
+}

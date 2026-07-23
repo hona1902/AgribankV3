@@ -133,7 +133,7 @@ class PaymentEligibilitySummary:
 
 def default_payment_template_path(root: Path | None = None) -> Path:
     base = Path(root) if root is not None else application_root()
-    return base / "DuLieuTEST" / "TOVAYVON" / "DeNghiThanhToan.docx"
+    return base / "templates" / "tovayvon" / "DeNghiThanhToan.docx"
 
 
 def default_payment_output_folder(root: Path | None = None) -> Path:
@@ -146,7 +146,7 @@ def open_payment_template_for_edit(template_path: Path | None = None) -> None:
     if not path.is_file():
         raise PaymentRequestError(
             "Không tìm thấy file mẫu DeNghiThanhToan.docx. "
-            "Vui lòng kiểm tra thư mục DuLieuTEST\\TOVAYVON."
+            "Vui lòng kiểm tra thư mục templates\\tovayvon."
         )
     _open_path(path)
 

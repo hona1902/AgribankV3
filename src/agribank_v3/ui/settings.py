@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QProcess, Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QCheckBox,
     QFormLayout,
@@ -17,17 +19,51 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QTextEdit,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from agribank_v3.update.update_manager import (
+    DEFAULT_UPDATE_PATH,
+    UpdateApplyResult,
+    UpdateCheckResult,
+    UpdateError,
+    apply_update,
+    check_for_update,
+    get_current_version,
+    get_database_schema_version,
+    load_update_settings,
+    save_update_settings,
+)
 from agribank_v3.settings import (
     AddinMode,
     AppSettingsDatabase,
     BranchProfile,
     SettingsDatabaseError,
 )
+
+
+def _start_detached_updater_script(script_path: Path) -> bool:
+    script = Path(script_path)
+    if sys.platform.startswith("win"):
+        try:
+            launcher = script.with_name("run-update-hidden.vbs")
+            escaped_script = str(script).replace('"', '""')
+            launcher.write_text(
+                'Set shell = CreateObject("WScript.Shell")\n'
+                f'shell.Run Chr(34) & "{escaped_script}" & Chr(34), 0, False\n',
+                encoding="utf-8",
+            )
+        except OSError:
+            return False
+        return QProcess.startDetached(
+            "wscript.exe",
+            [str(launcher)],
+            str(script.parent),
+        )
+    return QProcess.startDetached(str(script))
 
 
 FIELD_DEFINITIONS = (
@@ -60,6 +96,8 @@ class SettingsWidget(QWidget):
         self.setObjectName("SettingsPage")
         self.database = AppSettingsDatabase()
         self.fields: dict[str, QLineEdit] = {}
+        self.update_check_result: UpdateCheckResult | None = None
+        self.last_update_result: UpdateApplyResult | None = None
         self.addin_mode = self.database.load_addin_mode()
         self.addin_checkboxes: dict[str, QCheckBox] = {}
         addin_names = tuple(path.name for path in self._addin_files())
@@ -85,6 +123,7 @@ class SettingsWidget(QWidget):
         self.tabs.addTab(self._build_branch_tab(), "Thông tin chi nhánh")
         self.tabs.addTab(self._build_database_tab(), "Cơ sở dữ liệu")
         self.tabs.addTab(self._build_printer_tab(), "Máy in")
+        self.tabs.addTab(self._build_update_tab(), "Cập nhật")
         self.tabs.addTab(self._build_customization_tab(), "Tùy chỉnh")
         layout.addWidget(self.tabs, stretch=1)
         self.load_profile()
@@ -410,6 +449,76 @@ class SettingsWidget(QWidget):
         layout.addStretch()
         return page
 
+    def _build_update_tab(self) -> QWidget:
+        page, layout = self._scroll_tab()
+        settings = load_update_settings(self.database)
+
+        group = QGroupBox("Cập nhật phiên bản")
+        group_layout = QVBoxLayout(group)
+        form = QFormLayout()
+        self.current_version_label = QLabel(f"Phiên bản hiện tại: {get_current_version()}")
+        self.schema_version_label = QLabel(
+            f"Phiên bản database/schema: {get_database_schema_version(self.database)}"
+        )
+        self.update_path_edit = QLineEdit(str(settings.update_path))
+        self.update_path_edit.setClearButtonEnabled(True)
+        self.update_path_edit.setPlaceholderText(DEFAULT_UPDATE_PATH)
+        self.update_path_edit.setMinimumWidth(420)
+        path_buttons = QHBoxLayout()
+        choose_button = QPushButton("Chọn thư mục")
+        choose_button.clicked.connect(self.choose_update_directory)
+        check_button = QPushButton("Kiểm tra cập nhật")
+        check_button.setObjectName("PrimaryButton")
+        check_button.clicked.connect(self.check_update_now)
+        path_buttons.addWidget(self.update_path_edit, stretch=1)
+        path_buttons.addWidget(choose_button)
+        path_buttons.addWidget(check_button)
+        form.addRow("Phiên bản ứng dụng", self.current_version_label)
+        form.addRow("Database/schema", self.schema_version_label)
+        form.addRow("Đường dẫn kiểm tra", path_buttons)
+
+        self.update_status_label = QLabel("Chưa kiểm tra")
+        self.update_status_label.setObjectName("SectionTitle")
+        self.update_status_label.setWordWrap(True)
+        self.update_latest_label = QLabel()
+        self.update_latest_label.setObjectName("MutedText")
+        self.update_latest_label.setWordWrap(True)
+        self.update_notes_text = QTextEdit()
+        self.update_notes_text.setReadOnly(True)
+        self.update_notes_text.setMinimumHeight(120)
+        self.update_notes_text.setPlaceholderText("Nội dung cập nhật sẽ hiển thị sau khi kiểm tra.")
+        self.update_now_button = QPushButton("Cập nhật ngay")
+        self.update_now_button.setObjectName("PrimaryButton")
+        self.update_now_button.setVisible(False)
+        self.update_now_button.clicked.connect(self.apply_checked_update)
+        self.open_update_backup_button = QPushButton("Mở thư mục backup")
+        self.open_update_backup_button.setVisible(False)
+        self.open_update_backup_button.clicked.connect(self.open_update_backup_folder)
+
+        result_actions = QHBoxLayout()
+        result_actions.addWidget(self.update_now_button)
+        result_actions.addWidget(self.open_update_backup_button)
+        result_actions.addStretch()
+
+        group_layout.addLayout(form)
+        group_layout.addWidget(self.update_status_label)
+        group_layout.addWidget(self.update_latest_label)
+        group_layout.addWidget(self.update_notes_text)
+        group_layout.addLayout(result_actions)
+
+        note = QLabel(
+            "Bản cập nhật được đọc từ thư mục nội bộ do người dùng chọn. Khi áp "
+            "dụng cập nhật, app luôn sao lưu database trước, bỏ qua các file "
+            "database trong gói zip và chỉ chạy migration chưa áp dụng."
+        )
+        note.setObjectName("MutedText")
+        note.setWordWrap(True)
+
+        layout.addWidget(group)
+        layout.addWidget(note)
+        layout.addStretch()
+        return page
+
     @staticmethod
     def _scroll_tab() -> tuple[QScrollArea, QVBoxLayout]:
         scroll = QScrollArea()
@@ -527,6 +636,155 @@ class SettingsWidget(QWidget):
         )
         self.backup_file_label.setText(safety_backup.name)
 
+    def choose_update_directory(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Chọn thư mục chứa bản cập nhật AgribankV3",
+            self.update_path_edit.text().strip() or DEFAULT_UPDATE_PATH,
+        )
+        if not selected:
+            return
+        self.update_path_edit.setText(selected)
+        try:
+            save_update_settings(selected, self.database)
+        except SettingsDatabaseError as exc:
+            self._show_error(str(exc))
+
+    def check_update_now(self) -> None:
+        update_path = self.update_path_edit.text().strip() or DEFAULT_UPDATE_PATH
+        self.update_status_label.setText("Đang kiểm tra...")
+        self.update_latest_label.clear()
+        self.update_notes_text.clear()
+        self.update_now_button.setVisible(False)
+        QApplication.processEvents()
+        try:
+            save_update_settings(update_path, self.database)
+            result = check_for_update(
+                update_path=update_path,
+                settings_database=self.database,
+            )
+        except SettingsDatabaseError as exc:
+            self._show_error(str(exc))
+            return
+        self.update_check_result = result
+        self._render_update_check_result(result)
+
+    def apply_checked_update(self) -> None:
+        result = self.update_check_result
+        if result is None or not result.update_available:
+            self.update_status_label.setText("Vui lòng kiểm tra cập nhật trước.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Xác nhận cập nhật",
+            (
+                "Bạn có muốn cập nhật AgribankV3 lên phiên bản "
+                f"{result.latest_version} không? App sẽ sao lưu dữ liệu trước "
+                "khi cập nhật. Sau khi hoàn thành, ứng dụng sẽ tự mở lại."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.update_status_label.setText("Đang sao lưu dữ liệu và cập nhật...")
+        QApplication.processEvents()
+        try:
+            applied = apply_update(
+                update_path=self.update_path_edit.text().strip() or DEFAULT_UPDATE_PATH,
+                settings_database=self.database,
+            )
+        except (UpdateError, SettingsDatabaseError) as exc:
+            self.update_status_label.setText("Cập nhật không thành công")
+            QMessageBox.warning(self, "Cập nhật phiên bản", str(exc))
+            return
+        self.last_update_result = applied
+        if applied.updater_script is not None:
+            self.update_status_label.setText(
+                "Đã chuẩn bị cập nhật. Ứng dụng sẽ đóng để thay file và tự mở lại."
+            )
+        else:
+            self.update_status_label.setText(
+                "Cập nhật thành công. Vui lòng khởi động lại ứng dụng."
+            )
+        if applied.updater_script is not None:
+            self.update_latest_label.setText(
+                f"Đã chuẩn bị cập nhật từ {applied.old_version} lên {applied.new_version}. "
+                f"Backup: {applied.backup_path}. Log: {applied.log_path}"
+            )
+        else:
+            self.update_latest_label.setText(
+                f"Đã cập nhật từ {applied.old_version} lên {applied.new_version}. "
+                f"Backup: {applied.backup_path}. Log: {applied.log_path}"
+            )
+        self.open_update_backup_button.setVisible(True)
+        self.schema_version_label.setText(
+            f"Phiên bản database/schema: {get_database_schema_version(self.database)}"
+        )
+        if applied.updater_script is not None:
+            QMessageBox.information(
+                self,
+                "Cập nhật phiên bản",
+                (
+                    "Đã chuẩn bị bản cập nhật. Ứng dụng sẽ đóng để thay file.\n\n"
+                    "AgribankV3 sẽ tự mở lại sau vài giây.\n\n"
+                    f"Dữ liệu đã được sao lưu tại:\n{applied.backup_path}"
+                ),
+            )
+            if not _start_detached_updater_script(applied.updater_script):
+                self.update_status_label.setText("Không chạy được script thay file cập nhật")
+                QMessageBox.warning(
+                    self,
+                    "Cập nhật phiên bản",
+                    (
+                        "Không chạy được script thay file cập nhật.\n\n"
+                        f"Script: {applied.updater_script}\n"
+                        "Vui lòng gửi file log trong thư mục logs để kiểm tra."
+                    ),
+                )
+                return
+            QApplication.quit()
+            return
+        QMessageBox.information(
+            self,
+            "Cập nhật phiên bản",
+            (
+                "Cập nhật thành công. Vui lòng khởi động lại ứng dụng.\n\n"
+                f"Dữ liệu đã được sao lưu tại:\n{applied.backup_path}"
+            ),
+        )
+
+    def _render_update_check_result(self, result: UpdateCheckResult) -> None:
+        if result.status == "missing_update_directory":
+            self.update_status_label.setText("Không tìm thấy thư mục cập nhật")
+            self.update_latest_label.setText(result.message)
+            return
+        if result.status == "manifest_error":
+            self.update_status_label.setText("Lỗi đọc thông tin cập nhật")
+            self.update_latest_label.setText(result.message)
+            return
+        if result.status == "up_to_date":
+            self.update_status_label.setText("Đang dùng phiên bản mới nhất")
+            self.update_latest_label.setText(
+                f"Phiên bản mới nhất trong manifest: {result.latest_version}"
+            )
+            return
+        if result.status == "update_available" and result.manifest is not None:
+            manifest = result.manifest
+            self.update_status_label.setText("Có bản cập nhật mới")
+            self.update_latest_label.setText(
+                f"Phiên bản mới: {manifest.latest_version}"
+                + (f" • Ngày phát hành: {manifest.release_date}" if manifest.release_date else "")
+            )
+            self.update_notes_text.setPlainText(
+                "\n".join(f"- {note}" for note in manifest.notes)
+                if manifest.notes
+                else "Manifest không có release notes."
+            )
+            self.update_now_button.setVisible(True)
+            return
+        self.update_status_label.setText(result.message or "Chưa kiểm tra")
+
     def open_backup_folder(self) -> None:
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
@@ -534,6 +792,17 @@ class SettingsWidget(QWidget):
         QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(self.database.backup_directory))
         )
+
+    def open_update_backup_folder(self) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        backup_path = (
+            self.last_update_result.backup_path
+            if self.last_update_result is not None
+            else self.database.backup_directory / "update"
+        )
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(backup_path)))
 
     def open_addin_folder(self) -> None:
         from PySide6.QtCore import QUrl
@@ -629,8 +898,10 @@ class SettingsWidget(QWidget):
             "Cơ sở dữ liệu": 2,
             "Sao lưu dữ liệu": 2,
             "Cài đặt máy in": 3,
-            "Truy cập nhanh": 4,
-            "Cài đặt truy cập nhanh": 4,
+            "Cập nhật": 4,
+            "Cập nhật phiên bản": 4,
+            "Truy cập nhanh": 5,
+            "Cài đặt truy cập nhanh": 5,
         }.get(title, 0)
         self.tabs.setCurrentIndex(index)
 
