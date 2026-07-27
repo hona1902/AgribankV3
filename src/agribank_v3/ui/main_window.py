@@ -86,9 +86,17 @@ from agribank_v3.excel_tools import (
     convert_csv_to_excel,
     split_workbook_sheets_to_files,
 )
+from agribank_v3.features.credit.auto_interest.menu import (
+    AUTO_INTEREST_FEATURES,
+    AUTO_INTEREST_TITLE,
+    CREATE_INTEREST_FILE_TITLE,
+    CREATE_REPORT_FILE_TITLE,
+    REPORT_FOLDER_SETTINGS_TITLE,
+)
 from agribank_v3.features.credit.auto_interest.placeholder_windows import (
-    AUTO_INTEREST_PLACEHOLDER_TITLE,
-    AutoInterestPlaceholderDialog,
+    AutoInterestFolderSettingsWindow,
+    CreateAutoInterestFileWindow,
+    CreateAutoInterestReportWindow,
 )
 from agribank_v3.features.credit.tovayvon.menu import TOVAYVON_FEATURES
 from agribank_v3.features.credit.tovayvon.placeholder_windows import (
@@ -814,6 +822,7 @@ class MainWindow(QMainWindow):
         self.quyet_toan_ke_toan_page: QWidget | None = None
         self.quyet_toan_tong_hop_page: QWidget | None = None
         self.tovayvon_page: QWidget | None = None
+        self.auto_interest_page: QWidget | None = None
         self.author_info_dialog: AuthorInfoDialog | None = None
         self.settlement_guidance_dialog: SettlementGuidanceDialog | None = None
         self.printer_settings_dialog: PrinterSettingsDialog | None = None
@@ -1250,6 +1259,38 @@ class MainWindow(QMainWindow):
         self.tovayvon_page = self._build_tovayvon_page()
         self.pages.addWidget(self.tovayvon_page)
         self.pages.setCurrentWidget(self.tovayvon_page)
+        self.nav_buttons[NAVIGATION.index("Tín dụng")].setChecked(True)
+
+    def _build_auto_interest_page(self) -> QWidget:
+        page = self._scroll_page()
+        body = page.widget()
+        layout = body.layout()
+
+        header = QHBoxLayout()
+        title = QLabel(AUTO_INTEREST_TITLE)
+        title.setObjectName("PageTitle")
+        back_button = QPushButton("Quay lại Tín dụng")
+        back_button.setObjectName("SecondaryButton")
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(lambda: self.select_page(NAVIGATION.index("Tín dụng")))
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(back_button)
+        layout.addLayout(header)
+
+        grid = ResponsiveFeatureGrid(AUTO_INTEREST_FEATURES)
+        grid.connect_requested(self.open_feature)
+        layout.addWidget(grid)
+        layout.addStretch()
+        return page
+
+    def _show_auto_interest_page(self) -> None:
+        if self.auto_interest_page is not None:
+            self.pages.removeWidget(self.auto_interest_page)
+            self.auto_interest_page.deleteLater()
+        self.auto_interest_page = self._build_auto_interest_page()
+        self.pages.addWidget(self.auto_interest_page)
+        self.pages.setCurrentWidget(self.auto_interest_page)
         self.nav_buttons[NAVIGATION.index("Tín dụng")].setChecked(True)
 
     def _build_quyet_toan_tin_dung_page(self) -> QWidget:
@@ -2510,8 +2551,20 @@ class MainWindow(QMainWindow):
             self._show_tovayvon_page()
             return
 
-        if title == AUTO_INTEREST_PLACEHOLDER_TITLE:
-            AutoInterestPlaceholderDialog(self).exec()
+        if title == AUTO_INTEREST_TITLE:
+            self._show_auto_interest_page()
+            return
+
+        if title == CREATE_INTEREST_FILE_TITLE:
+            CreateAutoInterestFileWindow(self).exec()
+            return
+
+        if title == REPORT_FOLDER_SETTINGS_TITLE:
+            AutoInterestFolderSettingsWindow(self).exec()
+            return
+
+        if title == CREATE_REPORT_FILE_TITLE:
+            CreateAutoInterestReportWindow(self).exec()
             return
 
         if title in CREDIT_GROUP_MANAGEMENT_ROUTE_TITLES:

@@ -1,1 +1,1 @@
-"""Thu lãi bán tự động migration placeholders and future business modules."""
+"""Thu lãi bán tự động migration screens and business modules."""
