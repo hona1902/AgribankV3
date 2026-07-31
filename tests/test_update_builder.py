@@ -79,6 +79,16 @@ class UpdateBuilderTests(unittest.TestCase):
         self.assertNotIn("data/DuLieuV3.db", names)
         self.assertNotIn("data/quiz.db", names)
 
+    def test_update_package_does_not_overwrite_du_lieu_v3(self) -> None:
+        output_zip = self.root / "AgribankV3_0.1.2.zip"
+
+        create_update_zip(self.source, output_zip)
+
+        with zipfile.ZipFile(output_zip) as archive:
+            names = set(archive.namelist())
+
+        self.assertNotIn("data/DuLieuV3.db", names)
+
     def test_create_zip_excludes_logs_backups_temp(self) -> None:
         output_zip = self.root / "AgribankV3_0.1.2.zip"
 

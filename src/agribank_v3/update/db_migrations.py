@@ -89,6 +89,7 @@ def default_python_migrations() -> dict[str, PythonMigration]:
     return {
         "0.1.1": migrate_0_1_1,
         "0.1.2": migrate_0_1_2,
+        "0.1.6": migrate_0_1_6,
     }
 
 
@@ -116,6 +117,191 @@ def migrate_0_1_2(connection: sqlite3.Connection) -> None:
             value TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
+        """
+    )
+
+
+def migrate_0_1_6(connection: sqlite3.Connection) -> None:
+    ensure_schema_migrations_table(connection)
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS summary_import_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_type TEXT NOT NULL,
+            period TEXT NOT NULL DEFAULT '',
+            source_path TEXT NOT NULL DEFAULT '',
+            file_name TEXT NOT NULL DEFAULT '',
+            imported_by TEXT NOT NULL DEFAULT '',
+            row_count INTEGER NOT NULL DEFAULT 0,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            version INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'success',
+            message TEXT NOT NULL DEFAULT '',
+            source_hash TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_import_history_type_period
+            ON summary_import_history(data_type, period, created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_import_history_source_hash
+            ON summary_import_history(data_type, period, source_hash)
+            WHERE source_hash <> '' AND status = 'success';
+
+        CREATE TABLE IF NOT EXISTS nim_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            data_type TEXT NOT NULL,
+            period TEXT NOT NULL,
+            branch_code TEXT NOT NULL DEFAULT '',
+            branch_name TEXT NOT NULL DEFAULT '',
+            trctcd TEXT NOT NULL DEFAULT '',
+            transaction_office TEXT NOT NULL DEFAULT '',
+            customer_type TEXT NOT NULL DEFAULT '',
+            officer TEXT NOT NULL DEFAULT '',
+            balance REAL NOT NULL DEFAULT 0,
+            interest_rate REAL NOT NULL DEFAULT 0,
+            ftp_rate REAL NOT NULL DEFAULT 0,
+            adjustment_rate REAL NOT NULL DEFAULT 0,
+            numerator_before REAL NOT NULL DEFAULT 0,
+            numerator_after REAL NOT NULL DEFAULT 0,
+            average_rate_numerator REAL NOT NULL DEFAULT 0,
+            source_file TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES summary_import_history(id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_nim_details_lookup
+            ON nim_details(data_type, period, branch_name, transaction_office, customer_type, officer);
+        CREATE INDEX IF NOT EXISTS idx_nim_details_batch
+            ON nim_details(batch_id);
+
+        CREATE TABLE IF NOT EXISTS nim_period_summary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            data_type TEXT NOT NULL,
+            period TEXT NOT NULL,
+            branch_code TEXT NOT NULL DEFAULT '',
+            branch_name TEXT NOT NULL DEFAULT '',
+            trctcd TEXT NOT NULL DEFAULT '',
+            transaction_office TEXT NOT NULL DEFAULT '',
+            customer_type TEXT NOT NULL DEFAULT '',
+            officer_code TEXT NOT NULL DEFAULT '',
+            officer_name TEXT NOT NULL DEFAULT '',
+            balance REAL NOT NULL DEFAULT 0,
+            interest_rate_numerator REAL NOT NULL DEFAULT 0,
+            numerator_before REAL NOT NULL DEFAULT 0,
+            numerator_after REAL NOT NULL DEFAULT 0,
+            source_row_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES summary_import_history(id)
+                ON DELETE CASCADE,
+            UNIQUE(
+                batch_id,
+                data_type,
+                period,
+                branch_code,
+                trctcd,
+                customer_type,
+                officer_code,
+                officer_name
+            )
+        );
+        CREATE INDEX IF NOT EXISTS idx_nim_period_summary_type_period
+            ON nim_period_summary(data_type, period);
+        CREATE INDEX IF NOT EXISTS idx_nim_period_summary_type_period_branch
+            ON nim_period_summary(data_type, period, branch_code);
+        CREATE INDEX IF NOT EXISTS idx_nim_period_summary_type_period_officer
+            ON nim_period_summary(data_type, period, officer_code);
+        CREATE INDEX IF NOT EXISTS idx_nim_period_summary_type_period_pgd_type
+            ON nim_period_summary(data_type, period, branch_code, trctcd, customer_type);
+
+        CREATE TABLE IF NOT EXISTS loan_compare_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            customer_code TEXT NOT NULL,
+            customer_name TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            officer TEXT NOT NULL DEFAULT '',
+            previous_balance REAL NOT NULL DEFAULT 0,
+            current_balance REAL NOT NULL DEFAULT 0,
+            difference REAL NOT NULL DEFAULT 0,
+            category TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES summary_import_history(id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_loan_compare_details_batch
+            ON loan_compare_details(batch_id, category, officer, customer_code);
+
+        CREATE TABLE IF NOT EXISTS credit_limit_details (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            customer_code TEXT NOT NULL DEFAULT '',
+            customer_name TEXT NOT NULL DEFAULT '',
+            contract_number TEXT NOT NULL DEFAULT '',
+            approved_date TEXT,
+            approved_amount REAL NOT NULL DEFAULT 0,
+            outstanding_balance REAL NOT NULL DEFAULT 0,
+            expiry_date TEXT,
+            address TEXT NOT NULL DEFAULT '',
+            officer TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            days_to_expiry INTEGER,
+            status TEXT NOT NULL DEFAULT '',
+            reference_date TEXT NOT NULL DEFAULT '',
+            warn_days INTEGER NOT NULL DEFAULT 30,
+            min_limit REAL NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(batch_id) REFERENCES summary_import_history(id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_credit_limit_details_batch
+            ON credit_limit_details(batch_id, status, officer, expiry_date);
+        CREATE INDEX IF NOT EXISTS idx_credit_limit_details_expiry
+            ON credit_limit_details(expiry_date, officer);
+
+        CREATE TABLE IF NOT EXISTS summary_action_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_type TEXT NOT NULL DEFAULT '',
+            action TEXT NOT NULL,
+            target_id TEXT NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_action_log_created
+            ON summary_action_log(data_type, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS summary_query_cache (
+            cache_key TEXT PRIMARY KEY,
+            data_type TEXT NOT NULL DEFAULT '',
+            payload TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_query_cache_type
+            ON summary_query_cache(data_type, expires_at);
+
+        CREATE TABLE IF NOT EXISTS summary_sync_state (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            device_id TEXT NOT NULL DEFAULT '',
+            last_sync_at TEXT NOT NULL DEFAULT '',
+            sync_enabled INTEGER NOT NULL DEFAULT 0 CHECK(sync_enabled IN (0, 1)),
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS summary_sync_outbox (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_type TEXT NOT NULL DEFAULT '',
+            entity_table TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            payload TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            synced_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_summary_sync_outbox_pending
+            ON summary_sync_outbox(synced_at, created_at);
         """
     )
 

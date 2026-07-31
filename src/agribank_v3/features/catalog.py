@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agribank_v3.features.credit.summary.models import (
+    CREDIT_LIMIT_TITLE,
+    LOAN_COMPARE_TITLE,
+    NIM_DN_TITLE,
+    NIM_NV_TITLE,
+)
+from agribank_v3.features.credit.summary.customer.routes import (
+    CUSTOMER_DATA_DESCRIPTION,
+    CUSTOMER_DATA_TITLE,
+)
+from agribank_v3.features.settings.unit_directory import UNIT_SETTINGS_TITLE
+
 
 @dataclass(frozen=True, slots=True)
 class Feature:
@@ -27,6 +39,11 @@ SECTIONS: dict[str, list[Feature]] = {
     "Cài đặt": [
         Feature("Kết nối Excel", "Kết nối tới phiên Excel đang hoạt động.", "caidat.png"),
         Feature("Thông tin chi nhánh", "Thiết lập chi nhánh và thông tin ứng dụng.", "inforcn.png"),
+        Feature(
+            UNIT_SETTINGS_TITLE,
+            "Thiết lập chi nhánh sử dụng ứng dụng và danh mục Hội sở/Phòng giao dịch.",
+            "inforcn.png",
+        ),
         Feature("Cơ sở dữ liệu", "Kiểm tra dữ liệu Access và cấu hình lưu trữ.", "access.png"),
         Feature("Sao lưu dữ liệu", "Sao lưu và phục hồi dữ liệu nghiệp vụ.", "file.png"),
     ],
@@ -57,6 +74,31 @@ SECTIONS: dict[str, list[Feature]] = {
             "Thu lãi bán tự động",
             "Tạo file thu lãi bán tự động, báo cáo thu nợ và thiết lập liên quan.",
             "m09a.png",
+        ),
+        Feature(
+            NIM_DN_TITLE,
+            "Import NIM dư nợ và xuất báo cáo đối chiếu theo VBA.",
+            "qttd.png",
+        ),
+        Feature(
+            CUSTOMER_DATA_TITLE,
+            CUSTOMER_DATA_DESCRIPTION,
+            "nv2.png",
+        ),
+        Feature(
+            NIM_NV_TITLE,
+            "Import NIM nguồn vốn và xuất báo cáo đối chiếu theo VBA.",
+            "qttd.png",
+        ),
+        Feature(
+            LOAN_COMPARE_TITLE,
+            "Đối chiếu biến động dư nợ khách hàng giữa hai kỳ và lưu lịch sử.",
+            "m09b.png",
+        ),
+        Feature(
+            CREDIT_LIMIT_TITLE,
+            "Theo dõi hợp đồng hạn mức tín dụng đã hết hạn hoặc sắp hết hạn.",
+            "m15A.png",
         ),
         Feature("Danh sách đến hạn", "Tạo danh sách khoản vay đến hạn.", "m09b.png"),
         Feature("Quản lý CBTD", "Quản lý danh sách cán bộ tín dụng.", "nv2.png"),
@@ -147,8 +189,8 @@ QUICK_ACCESS_FEATURES: tuple[QuickAccessFeature, ...] = (
     QuickAccessFeature("export_report", "Dữ liệu", SECTIONS["Dữ liệu"][3]),
     QuickAccessFeature("interest_schedule", "Tín dụng", SECTIONS["Tín dụng"][1]),
     QuickAccessFeature("due_list", "Tín dụng", SECTIONS["Tín dụng"][2]),
-    QuickAccessFeature("credit_officer", "Tín dụng", SECTIONS["Tín dụng"][3]),
-    QuickAccessFeature("credit_statement", "Tín dụng", SECTIONS["Tín dụng"][4]),
+    QuickAccessFeature("credit_officer", "Tín dụng", SECTIONS["Tín dụng"][4]),
+    QuickAccessFeature("credit_statement", "Tín dụng", SECTIONS["Tín dụng"][5]),
     QuickAccessFeature("accounting_report", "Kế toán", SECTIONS["Kế toán"][0]),
     QuickAccessFeature("salary_file", "Kế toán", SECTIONS["Kế toán"][1]),
     QuickAccessFeature("accounting_reconcile", "Kế toán", SECTIONS["Kế toán"][2]),

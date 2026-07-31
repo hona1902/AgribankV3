@@ -478,6 +478,49 @@ QLabel#MetricValue {
     font-size: 26px;
     font-weight: 750;
 }
+QFrame#CompactKpiCard,
+QFrame#CompactKpiCardSecondary {
+    background: #ffffff;
+    border: 1px solid #e2e7ec;
+    border-radius: 7px;
+}
+QFrame#CompactKpiCardSecondary {
+    background: #fbfcfd;
+}
+QLabel#CompactKpiLabel {
+    color: #67727d;
+    font-size: 10px;
+    font-weight: 600;
+}
+QLabel#CompactKpiValue {
+    color: #831f41;
+    font-size: 17px;
+    font-weight: 750;
+}
+QLabel#CompactKpiValueSecondary {
+    color: #4f5c68;
+    font-size: 14px;
+    font-weight: 700;
+}
+QPushButton#KpiToggleButton {
+    color: #831f41;
+    background: transparent;
+    border: 1px solid #e2e7ec;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-weight: 600;
+    min-height: 24px;
+}
+QWidget#CustomerCompactToolbar QPushButton#SecondaryButton,
+QWidget#CustomerCompactToolbar QPushButton#PrimaryButton,
+QWidget#CustomerCompactToolbar QPushButton#DangerButton {
+    padding: 4px 11px;
+    min-height: 24px;
+}
+QWidget#CustomerCompactToolbar QComboBox#AgribankComboBox {
+    padding: 4px 8px;
+    min-height: 20px;
+}
 QLabel#QuizQuestion {
     color: #0f172a;
     font-size: 17px;
@@ -515,17 +558,18 @@ QPushButton#PrimaryButton {
     background: #931f49;
     border: none;
     border-radius: 7px;
-    padding: 10px 18px;
+    padding: 6px 18px;
     font-weight: 600;
-    min-height: 18px;
+    min-height: 24px;
 }
 QPushButton#DangerButton {
     color: #9b1c1c;
     background: #fff0f0;
     border: 1px solid #efc8c8;
     border-radius: 7px;
-    padding: 9px 15px;
+    padding: 6px 15px;
     font-weight: 600;
+    min-height: 24px;
 }
 QPushButton#DangerButton:hover {
     color: #ffffff;
@@ -545,8 +589,9 @@ QPushButton#SecondaryButton {
     background: white;
     border: 1px solid #d9dfe5;
     border-radius: 7px;
-    padding: 9px 14px;
+    padding: 6px 14px;
     font-weight: 600;
+    min-height: 24px;
 }
 QPushButton#SecondaryButton:hover {
     background: #fff4f7;

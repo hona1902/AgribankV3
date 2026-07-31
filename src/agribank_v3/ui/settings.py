@@ -37,6 +37,7 @@ from agribank_v3.update.update_manager import (
     load_update_settings,
     save_update_settings,
 )
+from agribank_v3.features.settings.unit_directory import UNIT_SETTINGS_TITLE
 from agribank_v3.settings import (
     AddinMode,
     AppSettingsDatabase,
@@ -88,6 +89,7 @@ class SettingsWidget(QWidget):
     show_excel_requested = Signal()
     printer_settings_requested = Signal()
     quick_access_settings_requested = Signal()
+    unit_settings_requested = Signal()
     addin_mode_changed = Signal(str)
     addin_enabled_changed = Signal(str, bool)
 
@@ -121,6 +123,7 @@ class SettingsWidget(QWidget):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_excel_tab(), "Kết nối Excel")
         self.tabs.addTab(self._build_branch_tab(), "Thông tin chi nhánh")
+        self.tabs.addTab(self._build_unit_directory_tab(), UNIT_SETTINGS_TITLE)
         self.tabs.addTab(self._build_database_tab(), "Cơ sở dữ liệu")
         self.tabs.addTab(self._build_printer_tab(), "Máy in")
         self.tabs.addTab(self._build_update_tab(), "Cập nhật")
@@ -301,6 +304,40 @@ class SettingsWidget(QWidget):
         open_button.setCursor(Qt.CursorShape.PointingHandCursor)
         open_button.clicked.connect(
             lambda checked=False: self.quick_access_settings_requested.emit()
+        )
+        button_row.addWidget(open_button)
+        button_row.addStretch()
+
+        card_layout.addWidget(title)
+        card_layout.addWidget(description)
+        card_layout.addLayout(button_row)
+        layout.addWidget(card)
+        layout.addStretch()
+        return page
+
+    def _build_unit_directory_tab(self) -> QWidget:
+        page, layout = self._scroll_tab()
+        card = QFrame()
+        card.setObjectName("SettingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 16)
+        card_layout.setSpacing(10)
+
+        title = QLabel("Danh mục chi nhánh, Hội sở/Phòng giao dịch")
+        title.setObjectName("SectionTitle")
+        description = QLabel(
+            "Cấu hình tên chi nhánh và Phòng giao dịch dùng cho NIM, Customer.db, "
+            "Dashboard và các file export. Mục này khác với tab Thông tin chi nhánh "
+            "kiểu cũ ở bên trái."
+        )
+        description.setObjectName("MutedText")
+        description.setWordWrap(True)
+        button_row = QHBoxLayout()
+        open_button = QPushButton("Mở danh mục chi nhánh/PGD")
+        open_button.setObjectName("PrimaryButton")
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_button.clicked.connect(
+            lambda checked=False: self.unit_settings_requested.emit()
         )
         button_row.addWidget(open_button)
         button_row.addStretch()
@@ -895,13 +932,14 @@ class SettingsWidget(QWidget):
         index = {
             "Kết nối Excel": 0,
             "Thông tin chi nhánh": 1,
-            "Cơ sở dữ liệu": 2,
-            "Sao lưu dữ liệu": 2,
-            "Cài đặt máy in": 3,
-            "Cập nhật": 4,
-            "Cập nhật phiên bản": 4,
-            "Truy cập nhanh": 5,
-            "Cài đặt truy cập nhanh": 5,
+            UNIT_SETTINGS_TITLE: 2,
+            "Cơ sở dữ liệu": 3,
+            "Sao lưu dữ liệu": 3,
+            "Cài đặt máy in": 4,
+            "Cập nhật": 5,
+            "Cập nhật phiên bản": 5,
+            "Truy cập nhanh": 6,
+            "Cài đặt truy cập nhanh": 6,
         }.get(title, 0)
         self.tabs.setCurrentIndex(index)
 

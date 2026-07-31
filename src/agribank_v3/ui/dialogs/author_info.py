@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
 )
 
 from agribank_v3 import __version__
+from agribank_v3.features.settings.unit_directory.service import get_unit_directory_service
 from agribank_v3.ui.icons import app_icon, icon_path
 
 
 AUTHOR_NAME = "Nguyễn Hoài Nam"
-ORGANIZATION = "Agribank Chi nhánh Lộc Phát Lâm Đồng"
+DEFAULT_ORGANIZATION = "Agribank"
 CONTACT = "0972.173.064 (ZALO)"
 DESCRIPTION = (
     "Ứng dụng hỗ trợ Excel nghiệp vụ, tra cứu dữ liệu, tạo nhanh các loại "
@@ -38,12 +39,13 @@ SECURITY_NOTICE = (
 
 
 def author_information_text() -> str:
+    organization = _organization_name()
     return "\n".join(
         (
             "AgribankV3 - Công cụ Excel nghiệp vụ",
             "Tên ứng dụng: AgribankV3",
             f"Tác giả: {AUTHOR_NAME}",
-            f"Đơn vị: {ORGANIZATION}",
+            f"Đơn vị: {organization}",
             f"Phiên bản: {__version__} - Bản thử nghiệm",
             f"Liên hệ: {CONTACT}",
             f"Mô tả: {DESCRIPTION}",
@@ -52,6 +54,20 @@ def author_information_text() -> str:
             f"Lưu ý: {SECURITY_NOTICE}",
         )
     )
+
+
+def _organization_name() -> str:
+    try:
+        service = get_unit_directory_service()
+        settings = service.get_settings()
+        if settings.organization_name:
+            return settings.organization_name
+        home_branch = service.get_home_branch()
+        if home_branch is not None:
+            return service.format_branch_display(home_branch)
+    except Exception:
+        pass
+    return DEFAULT_ORGANIZATION
 
 
 class AuthorInfoDialog(QDialog):
@@ -135,10 +151,11 @@ class AuthorInfoDialog(QDialog):
         details_grid.setColumnMinimumWidth(0, 105)
         details_grid.setColumnStretch(1, 1)
 
+        organization = _organization_name()
         rows = (
             ("Tên ứng dụng", "AgribankV3"),
             ("Tác giả", AUTHOR_NAME),
-            ("Đơn vị", ORGANIZATION),
+            ("Đơn vị", organization),
             ("Phiên bản", f"{__version__} - Bản thử nghiệm"),
             ("Liên hệ", CONTACT),
             ("Mô tả", DESCRIPTION),

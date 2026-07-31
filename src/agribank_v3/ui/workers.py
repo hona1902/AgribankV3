@@ -4,7 +4,7 @@ from collections.abc import Callable
 import inspect
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, Signal, Slot
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 
 
 class FunctionWorker(QObject):
@@ -72,8 +72,8 @@ def run_in_thread(
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     worker.progress.connect(bridge.progress)
-    worker.finished.connect(thread.quit)
-    worker.failed.connect(thread.quit)
+    worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+    worker.failed.connect(thread.quit, Qt.ConnectionType.DirectConnection)
     worker.finished.connect(bridge.finished)
     worker.failed.connect(bridge.failed)
     worker.finished.connect(worker.deleteLater)

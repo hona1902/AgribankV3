@@ -70,7 +70,7 @@ class AppSettingsDatabase:
     """Owns durable application settings stored outside Excel workbooks."""
 
     COMPONENT = "app_settings"
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
     DEFAULT_DATABASE_NAME = "DuLieuV3.db"
     QUIZ_DATABASE_NAME = "quiz.db"
     BACKUP_FORMAT = "agribank-v3-database-bundle"
@@ -216,6 +216,11 @@ class AppSettingsDatabase:
                     """,
                     (self.COMPONENT, self.SCHEMA_VERSION, self._now()),
                 )
+                from agribank_v3.features.settings.unit_directory.repository import (
+                    ensure_unit_directory_schema,
+                )
+
+                ensure_unit_directory_schema(database)
         except sqlite3.Error as exc:
             raise SettingsDatabaseError(
                 f"Không thể khởi tạo cơ sở dữ liệu cài đặt: {exc}"
@@ -641,6 +646,7 @@ class AppSettingsDatabase:
                 sidecar.unlink(missing_ok=True)
             os.replace(restore_temp, self.database_path)
             self.initialize_schema()
+            self._invalidate_unit_directory_cache()
         except SettingsDatabaseError:
             raise
         except (sqlite3.Error, OSError) as exc:
@@ -734,6 +740,7 @@ class AppSettingsDatabase:
                         self.quiz_database_path,
                     )
                 self.initialize_schema()
+                self._invalidate_unit_directory_cache()
             except (sqlite3.Error, OSError, SettingsDatabaseError) as exc:
                 try:
                     self._replace_database(
@@ -813,6 +820,16 @@ class AppSettingsDatabase:
             )
             shutil.copy2(source, replacement)
         os.replace(replacement, destination)
+
+    def _invalidate_unit_directory_cache(self) -> None:
+        try:
+            from agribank_v3.features.settings.unit_directory.service import (
+                invalidate_unit_directory_cache,
+            )
+
+            invalidate_unit_directory_cache(self.database_path)
+        except Exception:
+            pass
 
     def _migrate_from_legacy_database(self) -> None:
         if not self.legacy_database_path.is_file():

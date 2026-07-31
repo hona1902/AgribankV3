@@ -9,6 +9,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from agribank_v3.features.credit.summary.customer.database import customer_database_path
+from agribank_v3.features.credit.summary.database import credit_summary_database_path
 from agribank_v3.settings import AppSettingsDatabase
 from agribank_v3.update.db_migrations import MigrationSpec
 from agribank_v3.update.update_manager import (
@@ -109,6 +111,42 @@ class UpdateManagerTests(unittest.TestCase):
             value = connection.execute("SELECT name FROM user_data").fetchone()[0]
         self.assertEqual(value, "Du lieu goc")
 
+    def test_update_backup_includes_credit_summary_database(self) -> None:
+        summary_path = credit_summary_database_path(self.database_path)
+        with closing(sqlite3.connect(summary_path)) as connection:
+            connection.execute("CREATE TABLE summary_data(id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO summary_data(name) VALUES ('Du lieu tong hop')")
+            connection.commit()
+
+        backup_path = backup_user_databases(
+            self.database,
+            backup_root=self.root / "backups" / "update-summary-test",
+        )
+
+        self.assertTrue((backup_path / "DuLieuV3.db").is_file())
+        self.assertTrue((backup_path / "CreditSummary.db").is_file())
+        with closing(sqlite3.connect(backup_path / "CreditSummary.db")) as connection:
+            value = connection.execute("SELECT name FROM summary_data").fetchone()[0]
+        self.assertEqual(value, "Du lieu tong hop")
+
+    def test_update_backup_includes_customer_database(self) -> None:
+        customer_path = customer_database_path(self.database_path)
+        with closing(sqlite3.connect(customer_path)) as connection:
+            connection.execute("CREATE TABLE customer_data(id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO customer_data(name) VALUES ('Du lieu khach hang')")
+            connection.commit()
+
+        backup_path = backup_user_databases(
+            self.database,
+            backup_root=self.root / "backups" / "update-customer-test",
+        )
+
+        self.assertTrue((backup_path / "DuLieuV3.db").is_file())
+        self.assertTrue((backup_path / "Customer.db").is_file())
+        with closing(sqlite3.connect(backup_path / "Customer.db")) as connection:
+            value = connection.execute("SELECT name FROM customer_data").fetchone()[0]
+        self.assertEqual(value, "Du lieu khach hang")
+
     def test_migration_add_column_preserves_data(self) -> None:
         with closing(sqlite3.connect(self.database_path)) as connection:
             connection.execute("CREATE TABLE credit_groups(ma_to TEXT PRIMARY KEY)")
@@ -198,19 +236,26 @@ class UpdateManagerTests(unittest.TestCase):
     def test_update_package_does_not_overwrite_user_database(self) -> None:
         payload = self.root / "payload"
         package_db = payload / "data" / "DuLieuV3.db"
+        package_customer_db = payload / "data" / "Customer.db"
         package_db.parent.mkdir(parents=True)
         (payload / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
         package_db.write_text("empty package database", encoding="utf-8")
+        package_customer_db.write_text("empty package customer database", encoding="utf-8")
         target = self.root / "target"
         user_db = target / "data" / "DuLieuV3.db"
+        user_customer_db = target / "data" / "Customer.db"
         user_db.parent.mkdir(parents=True)
         user_db.write_text("real user database", encoding="utf-8")
+        user_customer_db.write_text("real user customer database", encoding="utf-8")
 
         copied, skipped = install_staged_files(payload, target)
 
         self.assertNotIn(Path("data") / "DuLieuV3.db", copied)
         self.assertIn(Path("data") / "DuLieuV3.db", skipped)
+        self.assertNotIn(Path("data") / "Customer.db", copied)
+        self.assertIn(Path("data") / "Customer.db", skipped)
         self.assertEqual(user_db.read_text(encoding="utf-8"), "real user database")
+        self.assertEqual(user_customer_db.read_text(encoding="utf-8"), "real user customer database")
 
     def test_delta_update_requires_base_version(self) -> None:
         update_root = self._write_delta_update(

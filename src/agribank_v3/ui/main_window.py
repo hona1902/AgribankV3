@@ -98,6 +98,26 @@ from agribank_v3.features.credit.auto_interest.placeholder_windows import (
     CreateAutoInterestFileWindow,
     CreateAutoInterestReportWindow,
 )
+from agribank_v3.features.credit.summary.models import (
+    CREDIT_LIMIT_TITLE,
+    LOAN_COMPARE_TITLE,
+    NIM_DN_TITLE,
+    NIM_NV_TITLE,
+    SummaryDataType,
+)
+from agribank_v3.features.credit.summary.windows import (
+    CreditLimitWindow,
+    LoanCompareWindow,
+    NimWindow,
+)
+from agribank_v3.features.credit.summary.customer.routes import CUSTOMER_DATA_TITLE
+from agribank_v3.features.credit.summary.customer.window_controller import (
+    open_customer_management_window as open_customer_management_window_shared,
+)
+from agribank_v3.features.settings.unit_directory import UNIT_SETTINGS_TITLE
+from agribank_v3.features.settings.unit_directory.unit_settings_window import (
+    UnitSettingsWindow,
+)
 from agribank_v3.features.credit.tovayvon.menu import TOVAYVON_FEATURES
 from agribank_v3.features.credit.tovayvon.placeholder_windows import (
     CREDIT_GROUP_MANAGEMENT_ROUTE_TITLES,
@@ -826,6 +846,8 @@ class MainWindow(QMainWindow):
         self.author_info_dialog: AuthorInfoDialog | None = None
         self.settlement_guidance_dialog: SettlementGuidanceDialog | None = None
         self.printer_settings_dialog: PrinterSettingsDialog | None = None
+        self.unit_settings_window: UnitSettingsWindow | None = None
+        self._customer_management_window = None
         self.quick_access_container: QWidget | None = None
         self.quick_access_layout: QVBoxLayout | None = None
         self._background_threads: list[object] = []
@@ -975,6 +997,9 @@ class MainWindow(QMainWindow):
                 )
                 self.settings_widget.quick_access_settings_requested.connect(
                     self._show_quick_access_settings_dialog
+                )
+                self.settings_widget.unit_settings_requested.connect(
+                    self._show_unit_settings_window
                 )
                 self.settings_widget.addin_mode_changed.connect(
                     self._apply_addin_mode
@@ -2543,6 +2568,10 @@ class MainWindow(QMainWindow):
             self.settings_widget.show_tab_for_feature(title)
             return
 
+        if title == UNIT_SETTINGS_TITLE:
+            self._show_unit_settings_window()
+            return
+
         if title == "Kiểm tra nghiệp vụ":
             self.select_page(NAVIGATION.index("Trắc nghiệm"))
             return
@@ -2553,6 +2582,26 @@ class MainWindow(QMainWindow):
 
         if title == AUTO_INTEREST_TITLE:
             self._show_auto_interest_page()
+            return
+
+        if title == NIM_DN_TITLE:
+            NimWindow(self, SummaryDataType.NIM_DN).exec()
+            return
+
+        if title == CUSTOMER_DATA_TITLE:
+            self.open_customer_management_window()
+            return
+
+        if title == NIM_NV_TITLE:
+            NimWindow(self, SummaryDataType.NIM_NV).exec()
+            return
+
+        if title == LOAN_COMPARE_TITLE:
+            self.open_customer_management_window(initial_tab="movement")
+            return
+
+        if title == CREDIT_LIMIT_TITLE:
+            CreditLimitWindow(self).exec()
             return
 
         if title == CREATE_INTEREST_FILE_TITLE:
@@ -2689,6 +2738,30 @@ class MainWindow(QMainWindow):
             title,
             "Chức năng này đang nằm trong lộ trình chuyển đổi từ VBA sang Python.",
         )
+
+    def open_customer_management_window(self, initial_tab: str | int | None = None):
+        return open_customer_management_window_shared(
+            self,
+            self.settings_database.database_path,
+            open_nim_dn_callback=lambda: self.open_feature(NIM_DN_TITLE),
+            initial_tab=initial_tab,
+        )
+
+    def _show_unit_settings_window(self) -> None:
+        if self.unit_settings_window is not None and self.unit_settings_window.isVisible():
+            self.unit_settings_window.raise_()
+            self.unit_settings_window.activateWindow()
+            return
+        dialog = UnitSettingsWindow(self.settings_database.database_path, self)
+        self.unit_settings_window = dialog
+        dialog.finished.connect(self._clear_unit_settings_window)
+        dialog.show()
+        dialog.raise_()
+
+    def _clear_unit_settings_window(self) -> None:
+        if self.unit_settings_window is not None:
+            self.unit_settings_window.deleteLater()
+            self.unit_settings_window = None
 
     def _run_python_settlement(self, spec_key: str) -> None:
         spec = SETTLEMENT_SPECS[spec_key]

@@ -15,6 +15,8 @@ from uuid import uuid4
 import zipfile
 
 from agribank_v3 import __version__
+from agribank_v3.features.credit.summary.customer.database import customer_database_path
+from agribank_v3.features.credit.summary.database import credit_summary_database_path
 from agribank_v3.runtime_paths import application_root
 from agribank_v3.settings import AppSettingsDatabase, SettingsDatabaseError
 from agribank_v3.update.db_migrations import (
@@ -38,6 +40,8 @@ UPDATE_PATH_PREFERENCE_KEY = "update_path"
 APP_VERSION_PREFERENCE_KEY = "last_successful_update_version"
 DATABASE_FILE_NAMES = {
     "dulieuv3.db",
+    "creditsummary.db",
+    "customer.db",
     "quiz.db",
     "agribank_v3.sqlite3",
 }
@@ -393,6 +397,20 @@ def backup_user_databases(
         destination / settings_database.database_path.name,
         required=False,
     )
+    summary_database_path = credit_summary_database_path(settings_database.database_path)
+    if summary_database_path.is_file():
+        _backup_sqlite_database(
+            summary_database_path,
+            destination / summary_database_path.name,
+            required=False,
+        )
+    customer_path = customer_database_path(settings_database.database_path)
+    if customer_path.is_file():
+        _backup_sqlite_database(
+            customer_path,
+            destination / customer_path.name,
+            required=False,
+        )
     if settings_database.quiz_database_path.is_file():
         _backup_sqlite_database(
             settings_database.quiz_database_path,
