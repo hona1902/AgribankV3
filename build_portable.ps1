@@ -38,7 +38,6 @@ $addData = "src\agribank_v3\resources;agribank_v3\resources"
     --exclude-module PySide6.Qt3DLogic `
     --exclude-module PySide6.Qt3DRender `
     --exclude-module PySide6.QtBluetooth `
-    --exclude-module PySide6.QtCharts `
     --exclude-module PySide6.QtDataVisualization `
     --exclude-module PySide6.QtDesigner `
     --exclude-module PySide6.QtGraphs `
@@ -48,8 +47,6 @@ $addData = "src\agribank_v3\resources;agribank_v3\resources"
     --exclude-module PySide6.QtMultimediaWidgets `
     --exclude-module PySide6.QtNetworkAuth `
     --exclude-module PySide6.QtNfc `
-    --exclude-module PySide6.QtOpenGL `
-    --exclude-module PySide6.QtOpenGLWidgets `
     --exclude-module PySide6.QtPdf `
     --exclude-module PySide6.QtPdfWidgets `
     --exclude-module PySide6.QtPositioning `
@@ -100,8 +97,11 @@ $buildInfo | ConvertTo-Json | Set-Content `
     -Path (Join-Path $appDir "agribank_v3_build_info.json") `
     -Encoding UTF8
 
-Copy-Item "data\DuLieuV3.db" (Join-Path $appDir "data\DuLieuV3.db") -Force
-Copy-Item "data\quiz.db" (Join-Path $appDir "data\quiz.db") -Force
+$databaseFiles = Get-ChildItem -Path (Join-Path $root "data") -File |
+    Where-Object { $_.Extension -in ".db", ".sqlite3" }
+foreach ($databaseFile in $databaseFiles) {
+    Copy-Item $databaseFile.FullName (Join-Path $appDir "data\$($databaseFile.Name)") -Force
+}
 if (Test-Path "templates") {
     Copy-Item "templates\*" (Join-Path $appDir "templates") -Recurse -Force
 }
@@ -111,8 +111,6 @@ Copy-Item "tools\addins\Tool\Agribank_QuyetToan.xlam" `
 
 $pysideDir = Join-Path $appDir "_internal\PySide6"
 $pruneFiles = @(
-    "opengl32sw.dll",
-    "Qt6OpenGL.dll",
     "Qt6Pdf.dll",
     "Qt6Qml.dll",
     "Qt6QmlMeta.dll",
