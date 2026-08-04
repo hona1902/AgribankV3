@@ -147,6 +147,20 @@ class UpdateManagerTests(unittest.TestCase):
             value = connection.execute("SELECT name FROM customer_data").fetchone()[0]
         self.assertEqual(value, "Du lieu khach hang")
 
+    def test_update_backup_includes_hmhethan_directory(self) -> None:
+        store_file = self.database_path.parent / "HMHETHAN" / "HMHETHAN_20240101.xlsx"
+        store_file.parent.mkdir(parents=True)
+        store_file.write_text("excel batch", encoding="utf-8")
+
+        backup_path = backup_user_databases(
+            self.database,
+            backup_root=self.root / "backups" / "update-hmhethan-test",
+        )
+
+        copied = backup_path / "HMHETHAN" / "HMHETHAN_20240101.xlsx"
+        self.assertTrue(copied.is_file())
+        self.assertEqual(copied.read_text(encoding="utf-8"), "excel batch")
+
     def test_migration_add_column_preserves_data(self) -> None:
         with closing(sqlite3.connect(self.database_path)) as connection:
             connection.execute("CREATE TABLE credit_groups(ma_to TEXT PRIMARY KEY)")
@@ -237,16 +251,22 @@ class UpdateManagerTests(unittest.TestCase):
         payload = self.root / "payload"
         package_db = payload / "data" / "DuLieuV3.db"
         package_customer_db = payload / "data" / "Customer.db"
+        package_hmhethan = payload / "data" / "HMHETHAN" / "package.xlsx"
         package_db.parent.mkdir(parents=True)
+        package_hmhethan.parent.mkdir(parents=True)
         (payload / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
         package_db.write_text("empty package database", encoding="utf-8")
         package_customer_db.write_text("empty package customer database", encoding="utf-8")
+        package_hmhethan.write_text("empty package batch", encoding="utf-8")
         target = self.root / "target"
         user_db = target / "data" / "DuLieuV3.db"
         user_customer_db = target / "data" / "Customer.db"
+        user_hmhethan = target / "data" / "HMHETHAN" / "user.xlsx"
         user_db.parent.mkdir(parents=True)
+        user_hmhethan.parent.mkdir(parents=True)
         user_db.write_text("real user database", encoding="utf-8")
         user_customer_db.write_text("real user customer database", encoding="utf-8")
+        user_hmhethan.write_text("real user batch", encoding="utf-8")
 
         copied, skipped = install_staged_files(payload, target)
 
@@ -254,8 +274,11 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertIn(Path("data") / "DuLieuV3.db", skipped)
         self.assertNotIn(Path("data") / "Customer.db", copied)
         self.assertIn(Path("data") / "Customer.db", skipped)
+        self.assertNotIn(Path("data") / "HMHETHAN" / "package.xlsx", copied)
+        self.assertIn(Path("data") / "HMHETHAN" / "package.xlsx", skipped)
         self.assertEqual(user_db.read_text(encoding="utf-8"), "real user database")
         self.assertEqual(user_customer_db.read_text(encoding="utf-8"), "real user customer database")
+        self.assertEqual(user_hmhethan.read_text(encoding="utf-8"), "real user batch")
 
     def test_delta_update_requires_base_version(self) -> None:
         update_root = self._write_delta_update(

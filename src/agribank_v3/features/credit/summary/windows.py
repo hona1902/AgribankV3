@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import getpass
 from pathlib import Path
@@ -11,6 +12,7 @@ from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSettings, Qt, QTimer, 
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSpinBox,
     QTabWidget,
@@ -42,6 +45,7 @@ from agribank_v3.features.credit.summary.models import (
     NIM_DN_TITLE,
     NIM_NV_TITLE,
     NIM_TITLE,
+    CreditLimitRow,
     DashboardData,
     DashboardMetric,
     NIM_DN_CONFIG,
@@ -51,9 +55,12 @@ from agribank_v3.features.credit.summary.models import (
     SummaryError,
 )
 from agribank_v3.features.credit.summary.history_dialog import OfficerHistoryDialog
+from agribank_v3.features.credit.summary.customer.officer_center_repository import OFFICER_MODE_IMPORTED, OfficerCenterFilters
+from agribank_v3.features.credit.summary.customer.officer_detail_registry import open_shared_officer_detail
 from agribank_v3.features.credit.summary.nim_ui_config import NimUiConfig, get_nim_ui_config
 from agribank_v3.features.credit.summary.officer_history.widgets import MultiLineHeaderView, NumericTableWidgetItem
 from agribank_v3.features.credit.summary.reports import export_rows
+from agribank_v3.features.credit.summary.reports import export_credit_limit_view_report
 from agribank_v3.features.credit.summary.repository import NIM_OFFICER_DISPLAY_SQL, SummaryRepository
 from agribank_v3.features.credit.summary.services import (
     compare_loan_balances,
@@ -105,6 +112,52 @@ LOAN_COMPARE_FIELD_ALIASES = {
     "previous_balance": "previous_blance",
     "current_balance": "current_blance",
 }
+
+CREDIT_LIMIT_FIELD_ORDER = (
+    "batch_name",
+    "customer_code",
+    "customer_name",
+    "contract_number",
+    "approved_date",
+    "approved_amount",
+    "outstanding_balance",
+    "expiry_date",
+    "officer",
+    "days_to_expiry",
+    "status",
+    "note",
+)
+CREDIT_LIMIT_HEADERS = {
+    "batch_name": "Batch",
+    "customer_code": "Mã KH",
+    "customer_name": "Tên KH",
+    "contract_number": "Số HĐTD",
+    "approved_date": "Ngày HĐTD",
+    "approved_amount": "Hạn mức TD",
+    "outstanding_balance": "Tổng dư nợ HĐTD",
+    "expiry_date": "Ngày hết hạn",
+    "officer": "Cán bộ TD",
+    "days_to_expiry": "Số ngày",
+    "status": "Trạng thái",
+    "note": "Ghi chú",
+}
+CREDIT_LIMIT_MONEY_FIELDS = {"approved_amount", "outstanding_balance"}
+CREDIT_LIMIT_DATE_FIELDS = {"approved_date", "expiry_date", "reference_date"}
+CREDIT_LIMIT_INTEGER_FIELDS = {"days_to_expiry", "source_row_count", "warn_days"}
+CREDIT_LIMIT_DEFAULT_WIDTHS = {
+    "batch_name": 145,
+    "customer_code": 82,
+    "customer_name": 160,
+    "contract_number": 100,
+    "approved_date": 82,
+    "approved_amount": 104,
+    "outstanding_balance": 112,
+    "expiry_date": 82,
+    "officer": 126,
+    "days_to_expiry": 62,
+    "status": 88,
+    "note": 170,
+}
 LOAN_COMPARE_CATEGORY_LABELS = {
     "Khach hang tat toan": "Khách hàng tất toán",
     "Khach hang vay giam": "Khách hàng vay giảm",
@@ -153,19 +206,36 @@ class MiniChart(QWidget):
             painter.setPen(QColor("#2563eb"))
 
 
-class NimTrendChart(QWidget):
+class CreditLimitOfficerChart(QWidget):
+    title = "Top CBTD theo số HĐTD cảnh báo"
+    x_axis_label = "Số HĐTD"
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.points_data: tuple[tuple[str, float, float], ...] = ()
-        self.point_rects: list[tuple[QRect, tuple[str, float, float]]] = []
-        self.setMinimumHeight(190)
+        self.values: tuple[tuple[object, ...], ...] = ()
+        self.top_limit = 10
+        self.segment_rects: list[tuple[QRect, tuple[object, ...], str]] = []
+        self.last_tooltip_text = ""
+        self.tooltip_label = QLabel(self)
+        self.tooltip_label.setObjectName("CreditLimitChartTooltip")
+        self.tooltip_label.setWordWrap(True)
+        self.tooltip_label.setMaximumWidth(360)
+        self.tooltip_label.setStyleSheet(
+            "QLabel#CreditLimitChartTooltip {"
+            "background: #ffffff;"
+            "border: 1px solid #cbd5e1;"
+            "border-radius: 4px;"
+            "padding: 7px 9px;"
+            "color: #111827;"
+            "}"
+        )
+        self.tooltip_label.hide()
+        self.setMinimumHeight(300)
         self.setMouseTracking(True)
 
-    def set_values(self, values: tuple[tuple[str, float], ...]) -> None:
-        _ = values
-
-    def set_trend(self, values: tuple[tuple[str, float, float], ...]) -> None:
-        self.points_data = values
+    def set_values(self, values: tuple[tuple[object, ...], ...]) -> None:
+        self.values = tuple(values[: self.top_limit])
+        self.tooltip_label.hide()
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -173,7 +243,154 @@ class NimTrendChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#ffffff"))
-        rect = self.rect().adjusted(46, 16, -18, -38)
+        painter.setPen(QColor("#111827"))
+        painter.drawText(QRect(10, 8, self.width() - 20, 22), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.title)
+        self._draw_legend(painter)
+        plot = self._plot_rect()
+        painter.setPen(QColor("#d8dee8"))
+        painter.drawRect(plot)
+        self.segment_rects = []
+        if not self.values:
+            painter.setPen(QColor("#6b7280"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Không có HĐTD cảnh báo theo bộ lọc hiện tại.")
+            return
+
+        max_total = max(max(0, _chart_total(item)) for item in self.values) or 1
+        ticks = _integer_ticks(max_total)
+        painter.setPen(QColor("#e5e7eb"))
+        for tick in ticks:
+            x = plot.left() + int(plot.width() * tick / max(1, ticks[-1]))
+            painter.drawLine(x, plot.top(), x, plot.bottom())
+            painter.setPen(QColor("#6b7280"))
+            painter.drawText(QRect(x - 20, plot.bottom() + 4, 40, 16), Qt.AlignmentFlag.AlignCenter, str(tick))
+            painter.setPen(QColor("#e5e7eb"))
+        painter.setPen(QColor("#374151"))
+        painter.drawText(QRect(plot.left(), plot.bottom() + 22, plot.width(), 18), Qt.AlignmentFlag.AlignCenter, self.x_axis_label)
+
+        row_count = len(self.values)
+        row_gap = 8
+        bar_height = max(14, min(26, (plot.height() - row_gap * max(0, row_count - 1)) // max(1, row_count)))
+        metrics = painter.fontMetrics()
+        for index, payload in enumerate(self.values):
+            top = plot.top() + index * (bar_height + row_gap)
+            label_rect = QRect(8, top - 2, plot.left() - 16, bar_height + 4)
+            painter.setPen(QColor("#374151"))
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, _chart_officer_name(payload))
+            expired = max(0, _chart_expired(payload))
+            expiring = max(0, _chart_expiring(payload))
+            total = expired + expiring
+            if total <= 0:
+                continue
+            x = plot.left()
+            expired_width = int(plot.width() * expired / max(1, ticks[-1]))
+            expiring_width = int(plot.width() * expiring / max(1, ticks[-1]))
+            if expired:
+                expired_rect = QRect(x, top, max(1, expired_width), bar_height)
+                painter.fillRect(expired_rect, QColor("#b91c1c"))
+                self.segment_rects.append((expired_rect, payload, "Đã hết hạn"))
+                if metrics.horizontalAdvance(str(expired)) + 10 < expired_rect.width():
+                    painter.setPen(QColor("#ffffff"))
+                    painter.drawText(expired_rect, Qt.AlignmentFlag.AlignCenter, str(expired))
+                x = expired_rect.right() + 1
+            if expiring:
+                expiring_rect = QRect(x, top, max(1, expiring_width), bar_height)
+                painter.fillRect(expiring_rect, QColor("#d97706"))
+                self.segment_rects.append((expiring_rect, payload, "Sắp hết hạn"))
+                if metrics.horizontalAdvance(str(expiring)) + 10 < expiring_rect.width():
+                    painter.setPen(QColor("#ffffff"))
+                    painter.drawText(expiring_rect, Qt.AlignmentFlag.AlignCenter, str(expiring))
+            total_x = plot.left() + int(plot.width() * total / max(1, ticks[-1]))
+            painter.setPen(QColor("#111827"))
+            painter.drawText(QRect(total_x + 6, top - 1, 84, bar_height + 2), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Tổng: {total}")
+
+    def mouseMoveEvent(self, event) -> None:
+        position = event.position().toPoint()
+        for rect, payload, segment in self.segment_rects:
+            if rect.adjusted(-2, -4, 2, 4).contains(position):
+                self._show_payload_tooltip(payload, segment, position)
+                return
+        self.hide_tooltip()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.hide_tooltip()
+        super().leaveEvent(event)
+
+    def hide_tooltip(self) -> None:
+        self.tooltip_label.hide()
+
+    def tooltip_is_visible(self) -> bool:
+        return not self.tooltip_label.isHidden()
+
+    def _show_payload_tooltip(self, payload: tuple[object, ...], segment: str, position: QPoint) -> None:
+        text = _credit_limit_chart_tooltip(payload, segment)
+        self.last_tooltip_text = text
+        self.tooltip_label.setMaximumWidth(max(80, self.width() - 8))
+        self.tooltip_label.setText(text)
+        self.tooltip_label.adjustSize()
+        x = min(max(4, position.x() + 14), max(4, self.width() - self.tooltip_label.width() - 4))
+        y = min(max(4, position.y() + 14), max(4, self.height() - self.tooltip_label.height() - 4))
+        self.tooltip_label.move(QPoint(x, y))
+        self.tooltip_label.raise_()
+        self.tooltip_label.show()
+
+    def _plot_rect(self) -> QRect:
+        left = min(260, max(150, self.width() // 4))
+        return QRect(left, 62, max(90, self.width() - left - 70), max(70, self.height() - 110))
+
+    def _draw_legend(self, painter: QPainter) -> None:
+        y = 38
+        x = 12
+        for label, color in (("Đã hết hạn", QColor("#b91c1c")), ("Sắp hết hạn", QColor("#d97706"))):
+            painter.fillRect(QRect(x, y + 3, 18, 10), color)
+            painter.setPen(QColor("#374151"))
+            painter.drawText(QRect(x + 24, y - 1, 110, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+            x += 132
+
+
+class NimTrendChart(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.points_data: tuple[tuple[str, float, float, float], ...] = ()
+        self.point_rects: list[tuple[QRect, tuple[str, float, float, float]]] = []
+        self.metric_mode = "nim"
+        self.last_legend_rect = QRect()
+        self.last_plot_rect = QRect()
+        self.last_x_axis_label_rect = QRect()
+        self.setMinimumHeight(220)
+        self.setMouseTracking(True)
+
+    def set_values(self, values: tuple[tuple[str, float], ...]) -> None:
+        _ = values
+
+    def set_trend(self, values: tuple[tuple[object, ...], ...]) -> None:
+        parsed: list[tuple[str, float, float, float]] = []
+        for item in values:
+            period = str(item[0] if len(item) > 0 else "")
+            before = float(item[1] if len(item) > 1 else 0)
+            after = float(item[2] if len(item) > 2 else 0)
+            average = float(item[3] if len(item) > 3 else 0)
+            parsed.append((period, before, after, average))
+        self.points_data = tuple(parsed)
+        self.update()
+
+    def set_metric_mode(self, mode: str) -> None:
+        clean = "rate" if str(mode or "").strip() == "rate" else "nim"
+        if clean == self.metric_mode:
+            return
+        self.metric_mode = clean
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+        layout = self.chart_layout()
+        rect = layout["plot"]
+        self.last_legend_rect = layout["legend"]
+        self.last_plot_rect = rect
+        self.last_x_axis_label_rect = layout["x_axis"]
         painter.setPen(QColor("#d8dee8"))
         painter.drawRect(rect)
         self.point_rects = []
@@ -182,7 +399,8 @@ class NimTrendChart(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Chưa có dữ liệu xu hướng NIM")
             return
 
-        values = [before for _, before, _ in self.points_data] + [after for _, _, after in self.points_data]
+        series = self._series_payload()
+        values = [value for _label, _color, series_values in series for value in series_values]
         min_value = min(values)
         max_value = max(values)
         if min_value == max_value:
@@ -200,48 +418,81 @@ class NimTrendChart(QWidget):
             painter.drawLine(rect.left(), y, rect.right(), y)
             painter.drawText(QRect(0, y - 9, 42, 18), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, _format_percent_axis(value))
 
-        before_points = self._line_points(rect, min_value, max_value, series_index=1)
-        after_points = self._line_points(rect, min_value, max_value, series_index=2)
-        self._draw_series(painter, before_points, QColor("#1f6feb"), "NIM trước ĐC")
-        self._draw_series(painter, after_points, QColor("#d97706"), "NIM sau ĐC")
+        for _label, color, series_values in series:
+            points = self._line_points(rect, min_value, max_value, series_values)
+            self._draw_series(painter, points, color)
 
         painter.setPen(QColor("#374151"))
         step = max(1, len(self.points_data) // 8)
-        for index, (period, _, _) in enumerate(self.points_data):
+        for index, (period, *_values) in enumerate(self.points_data):
             if index % step == 0 or index == len(self.points_data) - 1:
-                x = before_points[index].x()
+                x = rect.left() + int(rect.width() * index / max(1, len(self.points_data) - 1))
                 painter.drawText(QRect(x - 36, rect.bottom() + 6, 72, 18), Qt.AlignmentFlag.AlignCenter, period)
 
-        legend_y = self.height() - 20
-        self._draw_legend(painter, 54, legend_y, QColor("#1f6feb"), "NIM trước ĐC")
-        self._draw_legend(painter, 170, legend_y, QColor("#d97706"), "NIM sau ĐC")
+        self._draw_legends(painter, layout["legend"])
 
     def mouseMoveEvent(self, event) -> None:
         position = event.position().toPoint()
         for rect, payload in self.point_rects:
             if rect.contains(position):
-                period, before, after = payload
+                period, before, after, average_rate = payload
+                if self.metric_mode == "rate":
+                    tooltip = f"Kỳ: {period}\nLãi suất bình quân: {_format_percent_vn(average_rate)}"
+                else:
+                    tooltip = f"Kỳ: {period}\nNIM trước ĐC: {_format_percent_vn(before)}\nNIM sau ĐC: {_format_percent_vn(after)}"
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    f"{period}\nNIM trước ĐC: {_format_percent_vn(before)}\nNIM sau ĐC: {_format_percent_vn(after)}",
+                    tooltip,
                     self,
                 )
                 return
         QToolTip.hideText()
         super().mouseMoveEvent(event)
 
-    def _line_points(self, rect: QRect, min_value: float, max_value: float, *, series_index: int) -> list[QPoint]:
+    def chart_layout(self) -> dict[str, QRect]:
+        labels = [label for label, _color, _values in self._series_payload()]
+        metrics = self.fontMetrics()
+        row_height = metrics.height() + 8
+        available_width = max(80, self.width() - 64)
+        current_width = 0
+        row_count = 1
+        for label in labels:
+            item_width = metrics.horizontalAdvance(label) + 58
+            if current_width and current_width + item_width > available_width:
+                row_count += 1
+                current_width = 0
+            current_width += item_width
+        legend_height = max(row_height, row_count * row_height) if labels else 0
+        legend = QRect(46, 8, available_width, legend_height)
+        plot_top = legend.bottom() + 8 if labels else 16
+        x_axis_height = metrics.height() + 8
+        x_axis_top = max(plot_top + 48, self.height() - x_axis_height - 10)
+        plot = QRect(46, plot_top, max(80, self.width() - 64), max(42, x_axis_top - plot_top - 8))
+        x_axis = QRect(plot.left(), plot.bottom() + 5, plot.width(), x_axis_height)
+        return {"legend": legend, "plot": plot, "x_axis": x_axis}
+
+    def legend_overlaps_x_axis(self) -> bool:
+        layout = self.chart_layout()
+        return layout["legend"].intersects(layout["x_axis"])
+
+    def _series_payload(self) -> list[tuple[str, QColor, list[float]]]:
+        if self.metric_mode == "rate":
+            return [("Lãi suất bình quân", QColor("#059669"), [average for _period, _before, _after, average in self.points_data])]
+        return [
+            ("NIM trước ĐC", QColor("#1f6feb"), [before for _period, before, _after, _average in self.points_data]),
+            ("NIM sau ĐC", QColor("#d97706"), [after for _period, _before, after, _average in self.points_data]),
+        ]
+
+    def _line_points(self, rect: QRect, min_value: float, max_value: float, values: list[float]) -> list[QPoint]:
         points: list[QPoint] = []
-        count = len(self.points_data)
-        for index, payload in enumerate(self.points_data):
-            value = payload[series_index]
+        count = len(values)
+        for index, value in enumerate(values):
             x = rect.left() + int(rect.width() * index / max(1, count - 1))
             y = rect.bottom() - int(((value - min_value) / (max_value - min_value)) * rect.height())
             points.append(QPoint(x, y))
         return points
 
-    def _draw_series(self, painter: QPainter, points: list[QPoint], color: QColor, label: str) -> None:
-        _ = label
+    def _draw_series(self, painter: QPainter, points: list[QPoint], color: QColor) -> None:
         painter.setPen(QPen(color, 2))
         for index in range(1, len(points)):
             painter.drawLine(points[index - 1], points[index])
@@ -251,14 +502,24 @@ class NimTrendChart(QWidget):
             painter.drawEllipse(point, 4, 4)
             self.point_rects.append((QRect(point.x() - 8, point.y() - 8, 16, 16), self.points_data[index]))
 
-    @staticmethod
-    def _draw_legend(painter: QPainter, x: int, y: int, color: QColor, label: str) -> None:
-        painter.setPen(QPen(color, 2))
-        painter.drawLine(x, y, x + 22, y)
-        painter.setBrush(color)
-        painter.drawEllipse(QPoint(x + 11, y), 4, 4)
-        painter.setPen(QColor("#374151"))
-        painter.drawText(QRect(x + 28, y - 9, 120, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+    def _draw_legends(self, painter: QPainter, legend_rect: QRect) -> None:
+        metrics = self.fontMetrics()
+        x = legend_rect.left()
+        y = legend_rect.top() + metrics.height() // 2 + 4
+        row_height = metrics.height() + 8
+        for label, color, _values in self._series_payload():
+            label_width = metrics.horizontalAdvance(label) + 8
+            item_width = label_width + 50
+            if x > legend_rect.left() and x + item_width > legend_rect.right():
+                x = legend_rect.left()
+                y += row_height
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(x, y, x + 22, y)
+            painter.setBrush(color)
+            painter.drawEllipse(QPoint(x + 11, y), 4, 4)
+            painter.setPen(QColor("#374151"))
+            painter.drawText(QRect(x + 30, y - metrics.height() // 2, label_width, metrics.height() + 2), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+            x += item_width + 12
 
 
 class MetricStrip(MetricGrid):
@@ -272,12 +533,15 @@ class MetricStrip(MetricGrid):
 def _dashboard_metric_to_kpi(metric: DashboardMetric) -> KpiMetric:
     value = str(metric.value or "").strip()
     label_key = metric.label.casefold()
-    if "dư nợ" in label_key or "nguồn vốn" in label_key or "số dư" in label_key:
+    if "dư nợ" in label_key or "nguồn vốn" in label_key or "số dư" in label_key or "hạn mức" in label_key:
         number = _parse_vn_number(value)
         return KpiMetric(metric.label, number, "money", full_value=number, tooltip=metric.detail)
     if "nim" in label_key or "lãi suất" in label_key:
         number = _parse_vn_percent(value)
         return KpiMetric(metric.label, number, "percent", full_value=number, tooltip=metric.detail)
+    if "hđtd" in label_key or "cảnh báo" in label_key:
+        number = _parse_vn_number(value)
+        return KpiMetric(metric.label, number, "count", full_value=number, tooltip=metric.detail)
     return KpiMetric(metric.label, value, "text", tooltip=metric.detail)
 
 
@@ -286,7 +550,22 @@ def _parse_vn_number(value: str) -> float | None:
     if not text:
         return None
     text = text.replace("đồng", "").replace("%", "").strip()
-    text = text.replace(".", "").replace(",", ".")
+    text = text.replace(" ", "")
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "." in text:
+        parts = text.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]) and len(parts[0]) <= 3:
+            text = "".join(parts)
+    elif "," in text:
+        parts = text.split(",")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]) and len(parts[0]) <= 3:
+            text = "".join(parts)
+        else:
+            text = text.replace(",", ".")
     try:
         return float(text)
     except ValueError:
@@ -306,6 +585,7 @@ class SummaryDataTab(QWidget):
         self.page = 1
         self.page_size = 200
         self.current_rows: list[dict[str, object]] = []
+        self.current_dashboard = DashboardData(metrics=())
         self.settings = QSettings("AgribankV3", "AgribankV3")
         self._restoring_columns = False
         self.search_timer = QTimer(self)
@@ -411,6 +691,7 @@ class SummaryDataTab(QWidget):
             QMessageBox.warning(self, self.title, str(exc))
             return
         self.current_rows = result.rows
+        self.current_dashboard = dashboard
         self._render_table(result.rows)
         self.metrics.set_data(dashboard)
         self._update_chart(dashboard)
@@ -449,11 +730,11 @@ class SummaryDataTab(QWidget):
             )
         except Exception as exc:
             QMessageBox.warning(self, "Xuất báo cáo", str(exc))
-        return
+            return
+        QMessageBox.information(self, "Xuất báo cáo", f"Đã xuất: {output}")
 
     def _export_rows(self) -> list[dict[str, object]]:
         return self.current_rows
-        QMessageBox.information(self, "Xuất báo cáo", f"Đã xuất: {output}")
 
     def backup_data(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -964,6 +1245,7 @@ class NimTab(SummaryDataTab):
         self.customer_management_window: QDialog | None = None
         self.unit_directory: UnitDirectoryService
         super().__init__(repository, parent)
+        self._install_chart_mode_selector()
         self.unit_directory = get_unit_directory_service(repository.main_database_path)
         self._unit_directory_listener = self.reload
         self.unit_directory.add_listener(self._unit_directory_listener)
@@ -975,6 +1257,36 @@ class NimTab(SummaryDataTab):
 
     def _create_chart(self) -> QWidget:
         return NimTrendChart()
+
+    def _install_chart_mode_selector(self) -> None:
+        if self.data_type != SummaryDataType.NIM_DN or not isinstance(self.chart, NimTrendChart):
+            return
+        selector = QWidget(self)
+        selector.setObjectName("NimChartModeSelector")
+        row = QHBoxLayout(selector)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        row.addWidget(QLabel("Chỉ tiêu biểu đồ:"))
+        self.chart_metric_group = QButtonGroup(selector)
+        self.chart_metric_group.setExclusive(True)
+        self.chart_nim_radio = QRadioButton("NIM")
+        self.chart_rate_radio = QRadioButton("Lãi suất bình quân")
+        self.chart_nim_radio.setChecked(True)
+        self.chart_metric_group.addButton(self.chart_nim_radio)
+        self.chart_metric_group.addButton(self.chart_rate_radio)
+        self.chart_nim_radio.toggled.connect(lambda checked: checked and self._chart_metric_changed("nim"))
+        self.chart_rate_radio.toggled.connect(lambda checked: checked and self._chart_metric_changed("rate"))
+        row.addWidget(self.chart_nim_radio)
+        row.addWidget(self.chart_rate_radio)
+        row.addStretch()
+        layout = self.layout()
+        if isinstance(layout, QVBoxLayout):
+            layout.insertWidget(1, selector)
+        self.chart_mode_selector = selector
+
+    def _chart_metric_changed(self, mode: str) -> None:
+        if isinstance(self.chart, NimTrendChart):
+            self.chart.set_metric_mode(mode)
 
     def _add_filters(self, row: QHBoxLayout) -> None:
         self.period_filter = _combo("Kỳ")
@@ -1007,6 +1319,9 @@ class NimTab(SummaryDataTab):
             customer_button = _secondary_button("Dữ liệu khách hàng")
             customer_button.clicked.connect(self.open_customer_management)
             row.addWidget(customer_button)
+            debt_group_button = _secondary_button("Phân tích nhóm nợ")
+            debt_group_button.clicked.connect(self.open_debt_group_analysis)
+            row.addWidget(debt_group_button)
 
     def eventFilter(self, watched, event) -> bool:
         if watched == self.table.viewport() and event.type() == QEvent.Type.Resize:
@@ -1130,7 +1445,8 @@ class NimTab(SummaryDataTab):
                     self.title,
                     "Dữ liệu khách hàng kỳ "
                     f"{', '.join(existing_periods)} đã tồn tại. "
-                    "Bạn có muốn ghi đè toàn bộ dữ liệu kỳ này không?",
+                    "Bạn có muốn ghi đè toàn bộ dữ liệu kỳ này không?\n\n"
+                    "Nếu file nhập không có cột AQCCDFIN, dữ liệu nhóm nợ của kỳ này sẽ không được tạo.",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
@@ -1165,7 +1481,7 @@ class NimTab(SummaryDataTab):
 
     def open_customer_management(self) -> None:
         if self.data_type != SummaryDataType.NIM_DN:
-            return
+            return None
         from agribank_v3.features.credit.summary.customer.window_controller import open_customer_management_window
 
         self.customer_management_window = open_customer_management_window(
@@ -1173,6 +1489,20 @@ class NimTab(SummaryDataTab):
             self.repository.main_database_path,
             open_nim_dn_callback=lambda: self.window().raise_(),
         )
+        return self.customer_management_window
+
+    def open_debt_group_analysis(self) -> None:
+        if self.data_type != SummaryDataType.NIM_DN:
+            return None
+        from agribank_v3.features.credit.summary.customer.window_controller import open_customer_management_window
+
+        self.customer_management_window = open_customer_management_window(
+            self,
+            self.repository.main_database_path,
+            initial_tab="debt_group",
+            open_nim_dn_callback=lambda: self.window().raise_(),
+        )
+        return self.customer_management_window
 
     def delete_period(self) -> None:
         dialog = DeleteNimPeriodDialog(self.repository, self.data_type, parent=self)
@@ -1276,6 +1606,27 @@ class NimTab(SummaryDataTab):
             return
         branch_code = str(row.get("branch_code") or "").strip()
         trctcd = str(row.get("trctcd") or "").strip()
+        if self.data_type == SummaryDataType.NIM_DN:
+            opened = open_shared_officer_detail(
+                self,
+                self.repository.main_database_path,
+                {
+                    "officer_code": str(row.get("officer_code") or "").strip(),
+                    "officer_name": _display_officer_name(officer),
+                    "officer_key": f"CODE:{str(row.get('officer_code') or '').strip()}" if row.get("officer_code") else "",
+                    "branch_code": branch_code,
+                    "transaction_office": trctcd,
+                },
+                filters=OfficerCenterFilters(
+                    report_period=str(row.get("period") or "").strip(),
+                    branch_code=branch_code,
+                    transaction_office=trctcd,
+                    customer_type=str(row.get("customer_type") or ""),
+                    mode=OFFICER_MODE_IMPORTED,
+                ),
+            )
+            if opened is not None:
+                return
         dialog = OfficerHistoryDialog(
             self.repository,
             self.data_type,
@@ -1415,7 +1766,7 @@ class NimTab(SummaryDataTab):
             ).fetchone()
         return dict(row or {})
 
-    def _trend_rows(self, filters: dict[str, object]) -> tuple[tuple[str, float, float], ...]:
+    def _trend_rows(self, filters: dict[str, object]) -> tuple[tuple[str, float, float, float], ...]:
         chart_filters = dict(filters)
         chart_filters["period"] = ""
         where, params = self._nim_where(chart_filters)
@@ -1424,6 +1775,7 @@ class NimTab(SummaryDataTab):
                 f"""
                 SELECT
                     period,
+                    CASE WHEN SUM(balance) <> 0 THEN SUM(interest_rate_numerator) / SUM(balance) ELSE 0 END AS average_rate,
                     CASE WHEN SUM(balance) <> 0 THEN SUM(numerator_before) / SUM(balance) ELSE 0 END AS nim_before,
                     CASE WHEN SUM(balance) <> 0 THEN SUM(numerator_after) / SUM(balance) ELSE 0 END AS nim_after
                 FROM nim_period_summary
@@ -1433,7 +1785,15 @@ class NimTab(SummaryDataTab):
                 """,
                 params,
             ).fetchall()
-        return tuple((str(row["period"]), float(row["nim_before"] or 0), float(row["nim_after"] or 0)) for row in rows)
+        return tuple(
+            (
+                str(row["period"]),
+                float(row["nim_before"] or 0),
+                float(row["nim_after"] or 0),
+                float(row["average_rate"] or 0),
+            )
+            for row in rows
+        )
 
     def _nim_where(
         self,
@@ -1720,6 +2080,13 @@ class CreditLimitWindow(QDialog):
 class CreditLimitTab(SummaryDataTab):
     title = CREDIT_LIMIT_TITLE
 
+    def __init__(self, repository: SummaryRepository, parent: QWidget | None = None) -> None:
+        self._pending_batch_id = ""
+        super().__init__(repository, parent)
+
+    def _create_chart(self) -> QWidget:
+        return CreditLimitOfficerChart()
+
     def _add_filters(self, row: QHBoxLayout) -> None:
         self.batch_filter = _combo("Batch")
         self.status_filter = _combo("Trạng thái")
@@ -1740,34 +2107,87 @@ class CreditLimitTab(SummaryDataTab):
         self.warn_days_input.setValue(30)
         self.reference_date_input = QDateEdit(QDate.currentDate())
         self.reference_date_input.setCalendarPopup(True)
+        self.min_limit_input.valueChanged.connect(self._filter_changed)
+        self.warn_days_input.valueChanged.connect(self._filter_changed)
+        self.reference_date_input.dateChanged.connect(self._filter_changed)
         form.addRow("Hạn mức tối thiểu", self.min_limit_input)
         form.addRow("Ngày cảnh báo", self.warn_days_input)
         form.addRow("Ngày tham chiếu", self.reference_date_input)
         row.addWidget(group)
-        import_button = _primary_button("Import LN01")
-        import_button.clicked.connect(self.import_file)
-        row.addWidget(import_button)
+        self.import_button = _primary_button("Import LN01")
+        self.import_button.clicked.connect(self.import_file)
+        row.addWidget(self.import_button)
         super()._add_action_buttons(row)
 
     def reload_filters(self) -> None:
-        batches = self.repository.list_batches(SummaryDataType.CREDIT_LIMIT)
-        values = [f"{batch.id} - {batch.period}" for batch in batches]
-        _populate_combo(self.batch_filter, values)
-        _populate_combo(self.status_filter, self.repository.distinct_values("credit_limit_details", "status"))
-        _populate_combo(self.officer_filter, self.repository.distinct_values("credit_limit_details", "officer"))
+        current_batch = self._pending_batch_id or _batch_key(self.batch_filter)
+        batch_items: list[tuple[str, str | int]] = []
+        file_batches = self.repository.list_credit_limit_batches()
+        if file_batches:
+            batch_items = [
+                (
+                    f"{batch.imported_at:%d/%m/%Y %H:%M:%S} - {batch.source_file_name} ({batch.accepted_row_count:,} cảnh báo)"
+                    if batch.imported_at
+                    else f"{batch.batch_name} ({batch.accepted_row_count:,} cảnh báo)",
+                    batch.batch_id,
+                )
+                for batch in file_batches
+            ]
+        else:
+            batch_items = [
+                (f"{batch.id} - {batch.period} - {batch.file_name}", batch.id)
+                for batch in self.repository.list_batches(SummaryDataType.CREDIT_LIMIT)
+            ]
+        _set_combo_items(self.batch_filter, batch_items, "Tất cả Batch", current_batch)
+        self._pending_batch_id = ""
+        batch_id = _batch_key(self.batch_filter)
+        reference = self._reference_date()
+        status_values = self.repository.distinct_credit_limit_values(
+            "status",
+            batch_id=batch_id,
+            min_limit=self.min_limit_input.value(),
+            warn_days=self.warn_days_input.value(),
+            reference_date=reference,
+        )
+        officer_values = self.repository.distinct_credit_limit_values(
+            "officer",
+            batch_id=batch_id,
+            min_limit=self.min_limit_input.value(),
+            warn_days=self.warn_days_input.value(),
+            reference_date=reference,
+        )
+        _set_combo_items(self.status_filter, [(value, value) for value in status_values], "Tất cả Trạng thái", _current_filter(self.status_filter))
+        _set_combo_items(self.officer_filter, [(value, value) for value in officer_values], "Tất cả CBTD", _current_filter(self.officer_filter))
 
     def query_page(self) -> PageResult:
         return self.repository.query_credit_limits(
-            batch_id=_batch_id(self.batch_filter),
+            batch_id=_batch_key(self.batch_filter),
             search=self.search_input.text(),
             status=_current_filter(self.status_filter),
             officer=_current_filter(self.officer_filter),
             page=self.page,
             page_size=self.page_size,
+            min_limit=self.min_limit_input.value(),
+            warn_days=self.warn_days_input.value(),
+            reference_date=self._reference_date(),
         )
 
     def query_dashboard(self) -> DashboardData:
-        return self.repository.dashboard_credit_limits(_batch_id(self.batch_filter))
+        return self.repository.dashboard_credit_limits(
+            _batch_key(self.batch_filter),
+            search=self.search_input.text(),
+            status=_current_filter(self.status_filter),
+            officer=_current_filter(self.officer_filter),
+            min_limit=self.min_limit_input.value(),
+            warn_days=self.warn_days_input.value(),
+            reference_date=self._reference_date(),
+        )
+
+    def _update_chart(self, dashboard: DashboardData) -> None:
+        if isinstance(self.chart, CreditLimitOfficerChart):
+            self.chart.set_values(dashboard.pies)
+        else:
+            super()._update_chart(dashboard)
 
     def import_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Chọn file LN01", "", "CSV (*.csv)")
@@ -1775,6 +2195,24 @@ class CreditLimitTab(SummaryDataTab):
             return
         qdate = self.reference_date_input.date()
         reference = date(qdate.year(), qdate.month(), qdate.day())
+        duplicate_policy = "error"
+        try:
+            duplicates = self.repository.credit_limit_duplicate_batches(Path(path))
+        except Exception as exc:
+            QMessageBox.warning(self, self.title, str(exc))
+            return
+        if duplicates:
+            choice = self._choose_duplicate_action(duplicates[0])
+            if choice == "open":
+                self._pending_batch_id = duplicates[0].batch_id
+                self.page = 1
+                self.reload()
+                return
+            if choice == "new":
+                duplicate_policy = "new"
+            else:
+                return
+        self.import_button.setEnabled(False)
         self.run_background(
             self.title,
             lambda progress: import_credit_limit_file(
@@ -1784,18 +2222,380 @@ class CreditLimitTab(SummaryDataTab):
                 warn_days=self.warn_days_input.value(),
                 reference_date=reference,
                 export_path=_vba_output_path("DuLieu", "BaoCaoHanMucHetHan.xlsx"),
+                duplicate_policy=duplicate_policy,
+                progress=progress,
+            ),
+            self._import_finished,
+        )
+
+    def backup_data(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Sao lưu dữ liệu HMHETHAN",
+            "HMHETHAN-backup.zip",
+            "Backup (*.zip)",
+        )
+        if not path:
+            return
+        self.run_background(
+            "Sao lưu dữ liệu HMHETHAN",
+            lambda progress: self.repository.backup_credit_limit_storage(Path(path), progress=progress),
+            lambda output: QMessageBox.information(self, "Sao lưu dữ liệu HMHETHAN", f"Đã sao lưu: {output}"),
+        )
+
+    def restore_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Khôi phục dữ liệu HMHETHAN",
+            "",
+            "Backup (*.zip)",
+        )
+        if not path:
+            return
+        policy = self._choose_restore_policy()
+        if not policy:
+            return
+        self.run_background(
+            "Khôi phục dữ liệu HMHETHAN",
+            lambda progress: self.repository.restore_credit_limit_storage(
+                Path(path),
+                conflict_policy=policy,
                 progress=progress,
             ),
             lambda result: QMessageBox.information(
                 self,
-                self.title,
-                _result_message(result, "Import xong."),
+                "Khôi phục dữ liệu HMHETHAN",
+                (
+                    "Đã khôi phục: {restored}; bỏ qua: {skipped}; ghi đè: {overwritten}; "
+                    "không hợp lệ: {invalid}."
+                ).format(**result),
             ),
         )
+
+    def open_maintenance(self) -> None:
+        dialog = CreditLimitMaintenanceDialog(self.repository, parent=self)
+        dialog.exec()
+        self.reload()
+
+    def _render_table(self, rows: list[dict[str, object]]) -> None:
+        self.table.clear()
+        self.table.setColumnCount(len(CREDIT_LIMIT_FIELD_ORDER))
+        self.table.setHorizontalHeaderLabels([CREDIT_LIMIT_HEADERS[field] for field in CREDIT_LIMIT_FIELD_ORDER])
+        self.table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for column_index, field in enumerate(CREDIT_LIMIT_FIELD_ORDER):
+                item = QTableWidgetItem(self._display_value(field, _credit_limit_row_value(row, field)))
+                item.setTextAlignment(self._display_alignment(field))
+                self.table.setItem(row_index, column_index, item)
+        QTimer.singleShot(0, self._restore_column_widths)
+
+    def _restore_column_widths(self) -> None:
+        self._restoring_columns = True
+        try:
+            available = max(900, self.table.viewport().width())
+            base_widths = [CREDIT_LIMIT_DEFAULT_WIDTHS[field] for field in CREDIT_LIMIT_FIELD_ORDER]
+            widths = _fit_column_widths(base_widths, available)
+            for index, width in enumerate(widths):
+                header_item = self.table.horizontalHeaderItem(index)
+                saved_width = self.settings.value(self._column_width_key(header_item.text()), type=int) if header_item else None
+                self.table.setColumnWidth(index, max(48, int(saved_width or width)))
+            header = self.table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header.setStretchLastSection(True)
+            self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            if hasattr(header, "refresh_height"):
+                header.refresh_height()
+        finally:
+            self._restoring_columns = False
+
+    def _display_value(self, header: str, value: object) -> str:
+        if header in CREDIT_LIMIT_MONEY_FIELDS:
+            return _format_money_vn(value)
+        if header in CREDIT_LIMIT_INTEGER_FIELDS:
+            return _format_integer_vn(value)
+        if header in CREDIT_LIMIT_DATE_FIELDS:
+            return _format_date_vn(value)
+        return "" if value is None else str(value)
+
+    def _display_alignment(self, header: str) -> Qt.AlignmentFlag:
+        if header in CREDIT_LIMIT_MONEY_FIELDS or header in CREDIT_LIMIT_INTEGER_FIELDS:
+            return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        if header in CREDIT_LIMIT_DATE_FIELDS:
+            return Qt.AlignmentFlag.AlignCenter
+        return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+    def export_current_rows(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Xuất báo cáo",
+            f"{self.title}.xlsx",
+            "Excel (*.xlsx);;PDF (*.pdf);;CSV (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            destination = Path(path)
+            if destination.suffix.casefold() == ".xlsx":
+                output = export_credit_limit_view_report(
+                    self._export_rows(),
+                    self.current_dashboard.metrics,
+                    destination,
+                    title=self.title,
+                    sheet_name=self.title,
+                )
+            else:
+                output = export_rows(
+                    self._export_rows(),
+                    destination,
+                    title=self.title,
+                    sheet_name=self.title,
+                )
+        except Exception as exc:
+            QMessageBox.warning(self, "Xuất báo cáo", str(exc))
+            return
+        QMessageBox.information(self, "Xuất báo cáo", f"Đã xuất: {output}")
+
+    def _export_rows(self) -> list[dict[str, object]]:
+        return [
+            {
+                CREDIT_LIMIT_HEADERS[field]: _credit_limit_row_value(row, field)
+                for field in CREDIT_LIMIT_FIELD_ORDER
+            }
+            for row in self.current_rows
+        ]
+
+    def _reference_date(self) -> date:
+        qdate = self.reference_date_input.date()
+        return date(qdate.year(), qdate.month(), qdate.day())
+
+    def _import_finished(self, result: object) -> None:
+        self.import_button.setEnabled(True)
+        batch_id = getattr(result, "batch_id", "")
+        self._pending_batch_id = str(batch_id or "")
+        QMessageBox.information(self, self.title, _result_message(result, "Import xong."))
+
+    def _import_failed(self, exc: Exception) -> None:
+        self.import_button.setEnabled(True)
+        self.progress.setVisible(False)
+        QMessageBox.warning(self, self.title, str(exc))
+
+    def run_background(self, title: str, function: Callable[[Callable[[str], None]], object], on_done: Callable[[object], None]) -> None:
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+
+        def wrapped(progress):
+            return function(progress)
+
+        def done(payload):
+            self.progress.setVisible(False)
+            self.progress.setRange(0, 100)
+            self.import_button.setEnabled(True)
+            on_done(payload)
+            self.page = 1
+            self.reload()
+
+        def failed(exc: Exception):
+            self.import_button.setEnabled(True)
+            self.progress.setVisible(False)
+            QMessageBox.warning(self, title, str(exc))
+
+        run_in_thread(self, wrapped, done, failed, lambda message: self.progress.setFormat(message))
+
+    def _choose_duplicate_action(self, batch) -> str:
+        message = QMessageBox(self)
+        message.setWindowTitle(self.title)
+        message.setIcon(QMessageBox.Icon.Question)
+        message.setText(
+            "File LN01 này đã được nhập trước đó.\n\n"
+            f"Batch: {batch.batch_name}\n"
+            f"File: {batch.file_name}"
+        )
+        open_button = message.addButton("Mở batch đã có", QMessageBox.ButtonRole.AcceptRole)
+        new_button = message.addButton("Nhập thành batch mới", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_button = message.addButton("Hủy", QMessageBox.ButtonRole.RejectRole)
+        message.exec()
+        clicked = message.clickedButton()
+        if clicked is open_button:
+            return "open"
+        if clicked is new_button:
+            return "new"
+        if clicked is cancel_button:
+            return ""
+        return ""
+
+    def _choose_restore_policy(self) -> str:
+        message = QMessageBox(self)
+        message.setWindowTitle("Khôi phục dữ liệu HMHETHAN")
+        message.setIcon(QMessageBox.Icon.Question)
+        message.setText("Chọn cách xử lý nếu file batch đã tồn tại trong thư mục HMHETHAN.")
+        skip_button = message.addButton("Bỏ qua file trùng", QMessageBox.ButtonRole.AcceptRole)
+        overwrite_button = message.addButton("Ghi đè", QMessageBox.ButtonRole.DestructiveRole)
+        keep_button = message.addButton("Giữ cả hai", QMessageBox.ButtonRole.ActionRole)
+        cancel_button = message.addButton("Hủy", QMessageBox.ButtonRole.RejectRole)
+        message.exec()
+        clicked = message.clickedButton()
+        if clicked is skip_button:
+            return "skip"
+        if clicked is overwrite_button:
+            return "overwrite"
+        if clicked is keep_button:
+            return "keep_both"
+        if clicked is cancel_button:
+            return ""
+        return ""
 
     def _filter_changed(self) -> None:
         self.page = 1
         self.reload()
+
+
+class CreditLimitMaintenanceDialog(QDialog):
+    def __init__(self, repository: SummaryRepository, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.repository = repository
+        self.setWindowTitle("Bảo trì dữ liệu HMHETHAN")
+        self.resize(920, 560)
+        self._build_ui()
+        self.reload()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(("Batch", "File", "Ngày import", "Cảnh báo", "Dung lượng", "Nguồn", "Trạng thái"))
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        layout.addWidget(self.table, stretch=1)
+
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
+
+        row = QHBoxLayout()
+        refresh_button = _secondary_button("Làm mới")
+        refresh_button.clicked.connect(self.reload)
+        migrate_button = _secondary_button("Chuyển dữ liệu legacy")
+        migrate_button.clicked.connect(self.migrate_legacy)
+        delete_button = _danger_button("Xóa batch đã chọn")
+        delete_button.clicked.connect(self.delete_selected_batch)
+        open_folder_button = _secondary_button("Mở thư mục HMHETHAN")
+        open_folder_button.clicked.connect(self.open_storage_folder)
+        close_button = _primary_button("Đóng")
+        close_button.clicked.connect(self.accept)
+        for button in (refresh_button, migrate_button, delete_button, open_folder_button):
+            row.addWidget(button)
+        row.addStretch()
+        row.addWidget(close_button)
+        layout.addLayout(row)
+
+    def reload(self) -> None:
+        status = self.repository.credit_limit_storage_status()
+        self.status_label.setText(
+            "Thư mục: {path}\n"
+            "Batch hợp lệ: {valid}; file lỗi: {invalid}; file tạm: {temporary}; dung lượng: {size}".format(
+                path=status.storage_path,
+                valid=_format_integer_vn(status.valid_files),
+                invalid=_format_integer_vn(status.invalid_files),
+                temporary=_format_integer_vn(status.temporary_files),
+                size=_format_size(status.total_size_bytes),
+            )
+        )
+        self.table.setRowCount(len(status.batches))
+        for row_index, batch in enumerate(status.batches):
+            values = (
+                batch.batch_name,
+                batch.file_name,
+                batch.imported_at.strftime("%d/%m/%Y %H:%M:%S") if batch.imported_at else "",
+                _format_integer_vn(batch.accepted_row_count),
+                _format_size(batch.file_size),
+                batch.source_file_name,
+                batch.status,
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, batch.batch_id)
+                if column in {3, 4}:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(row_index, column, item)
+        for index, width in enumerate((210, 220, 135, 85, 90, 150, 85)):
+            self.table.setColumnWidth(index, width)
+
+    def selected_batch_id(self) -> str:
+        row = self.table.currentRow()
+        if row < 0:
+            return ""
+        item = self.table.item(row, 0)
+        return str(item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
+
+    def delete_selected_batch(self) -> None:
+        batch_id = self.selected_batch_id()
+        if not batch_id:
+            QMessageBox.information(self, self.windowTitle(), "Chưa chọn batch cần xóa.")
+            return
+        if QMessageBox.question(
+            self,
+            self.windowTitle(),
+            "Xóa batch HMHETHAN đã chọn? File sẽ được chuyển vào thư mục Trash để có thể kiểm tra lại.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            trash_path = self.repository.delete_credit_limit_batch(batch_id)
+        except Exception as exc:
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
+            return
+        QMessageBox.information(self, self.windowTitle(), f"Đã chuyển vào Trash: {trash_path}")
+        self.reload()
+
+    def migrate_legacy(self) -> None:
+        if QMessageBox.question(
+            self,
+            self.windowTitle(),
+            "Chuyển các batch Hạn mức legacy trong SQLite sang file Excel HMHETHAN? Dữ liệu SQLite cũ được giữ nguyên.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self._run_background(
+            lambda progress: self.repository.migrate_legacy_credit_limit_batches(progress=progress),
+            lambda result: QMessageBox.information(
+                self,
+                self.windowTitle(),
+                f"Đã chuyển: {result['migrated']}; bỏ qua: {result['skipped']}.",
+            ),
+        )
+
+    def open_storage_folder(self) -> None:
+        path = self.repository.credit_limit_storage_status().storage_path
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _run_background(self, function: Callable[[Callable[[str], None]], object], on_done: Callable[[object], None]) -> None:
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+
+        def done(payload):
+            self.progress.setVisible(False)
+            self.progress.setRange(0, 100)
+            on_done(payload)
+            self.reload()
+
+        def failed(exc: Exception):
+            self.progress.setVisible(False)
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
+
+        run_in_thread(self, lambda progress: function(progress), done, failed, lambda message: self.progress.setFormat(message))
 
 
 def _primary_button(text: str) -> QPushButton:
@@ -1858,6 +2658,67 @@ def _batch_id(combo: QComboBox) -> int | None:
         return int(value.split(" - ", 1)[0])
     except ValueError:
         return None
+
+
+def _batch_key(combo: QComboBox) -> str | int | None:
+    value = combo.currentData()
+    if value not in (None, ""):
+        return value
+    text = _current_filter(combo)
+    if not text:
+        return None
+    try:
+        return int(text.split(" - ", 1)[0])
+    except ValueError:
+        return text
+
+
+def _credit_limit_row_value(row: Mapping[str, object] | CreditLimitRow, field: str) -> object:
+    if isinstance(row, Mapping):
+        return row.get(field, "")
+    if isinstance(row, CreditLimitRow):
+        values = {
+            "customer_code": row.customer_code,
+            "customer_name": row.customer_name,
+            "contract_number": row.contract_number,
+            "approved_date": row.approved_date,
+            "approved_amount": row.approved_amount,
+            "outstanding_balance": row.outstanding_balance,
+            "expiry_date": row.expiry_date,
+            "address": row.address,
+            "officer": row.officer,
+            "officer_code": row.officer_code,
+            "note": row.note,
+            "days_to_expiry": row.days_to_expiry,
+            "status": row.status,
+            "branch_code": row.branch_code,
+            "account_number": row.account_number,
+            "credit_line_type": row.credit_line_type,
+            "source_row_count": row.source_row_count,
+        }
+        return values.get(field, "")
+    return ""
+
+
+def _set_combo_items(
+    combo: QComboBox,
+    values: list[tuple[str, str | int]],
+    first_label: str,
+    selected: object = "",
+) -> None:
+    selected_text = str(selected or "")
+    combo.blockSignals(True)
+    try:
+        combo.clear()
+        combo.addItem(first_label, "")
+        selected_index = 0
+        for text, data in values:
+            combo.addItem(str(text), data)
+            if selected_text and str(data) == selected_text:
+                selected_index = combo.count() - 1
+        combo.setCurrentIndex(selected_index)
+    finally:
+        combo.blockSignals(False)
 
 
 def _loan_compare_category_items(values: list[str]) -> list[tuple[str, str]]:
@@ -1942,6 +2803,21 @@ def _format_money_vn(value: object) -> str:
     return _format_integer_vn(value)
 
 
+def _format_date_vn(value: object) -> str:
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            parsed = date.fromisoformat(text) if fmt == "%Y-%m-%d" else datetime.strptime(text, fmt).date()
+            return parsed.strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            continue
+    return text
+
+
 def _format_percent_vn(value: object) -> str:
     try:
         number = Decimal(str(value or 0))
@@ -1976,6 +2852,79 @@ def _current_user() -> str:
 
 def _format_percent_axis(value: float) -> str:
     return _format_percent_vn(value)
+
+
+def _chart_officer_name(payload: tuple[object, ...]) -> str:
+    value = payload[1] if len(payload) > 1 else ""
+    text = str(value or "").strip()
+    return text or "Không xác định CBTD"
+
+
+def _chart_expired(payload: tuple[object, ...]) -> int:
+    return _payload_int(payload, 2)
+
+
+def _chart_expiring(payload: tuple[object, ...]) -> int:
+    return _payload_int(payload, 3)
+
+
+def _chart_total(payload: tuple[object, ...]) -> int:
+    if len(payload) > 4:
+        return _payload_int(payload, 4)
+    return _chart_expired(payload) + _chart_expiring(payload)
+
+
+def _chart_total_limit(payload: tuple[object, ...]) -> float:
+    return _payload_float(payload, 5)
+
+
+def _chart_total_outstanding(payload: tuple[object, ...]) -> float:
+    return _payload_float(payload, 6)
+
+
+def _payload_int(payload: tuple[object, ...], index: int) -> int:
+    try:
+        return int(round(float(payload[index] if len(payload) > index else 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _payload_float(payload: tuple[object, ...], index: int) -> float:
+    try:
+        return float(payload[index] if len(payload) > index else 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _credit_limit_chart_tooltip(payload: tuple[object, ...], segment: str = "") -> str:
+    prefix = f"Chỉ tiêu: {segment}\n" if segment else ""
+    return (
+        f"{prefix}"
+        f"Cán bộ: {_chart_officer_name(payload)}\n"
+        f"HĐTD đã hết hạn: {_format_integer_vn(_chart_expired(payload))}\n"
+        f"HĐTD sắp hết hạn: {_format_integer_vn(_chart_expiring(payload))}\n"
+        f"Tổng cảnh báo: {_format_integer_vn(_chart_total(payload))}\n"
+        f"Tổng hạn mức: {_format_money_vn(_chart_total_limit(payload))} đồng\n"
+        f"Tổng dư nợ: {_format_money_vn(_chart_total_outstanding(payload))} đồng"
+    )
+
+
+def _integer_ticks(max_value: int) -> list[int]:
+    max_value = max(1, int(max_value))
+    if max_value <= 5:
+        step = 1
+    elif max_value <= 10:
+        step = 2
+    elif max_value <= 25:
+        step = 5
+    elif max_value <= 100:
+        step = 10
+    else:
+        step = 20
+        while max_value / step > 8:
+            step *= 2
+    end = ((max_value + step - 1) // step) * step
+    return list(range(0, end + step, step))
 
 
 def _nim_window_title(data_type: SummaryDataType | None) -> str:

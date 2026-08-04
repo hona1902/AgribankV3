@@ -46,6 +46,7 @@ DATABASE_FILE_NAMES = {
     "agribank_v3.sqlite3",
 }
 DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".mdb", ".accdb"}
+USER_DATA_DIRECTORIES = {"hmhethan"}
 SKIPPED_DIRECTORIES = {
     ".git",
     ".venv",
@@ -417,6 +418,10 @@ def backup_user_databases(
             destination / settings_database.quiz_database_path.name,
             required=False,
         )
+    _backup_directory(
+        settings_database.database_path.parent / "HMHETHAN",
+        destination / "HMHETHAN",
+    )
     return destination
 
 
@@ -500,7 +505,7 @@ def create_updater_script(
                 ":APP_PROCESS_EXITED",
                 (
                     'robocopy "%SOURCE%" "%TARGET%" /E '
-                    f"/XD .git .venv __pycache__ backups backup logs temp KetQua "
+                    f"/XD .git .venv __pycache__ backups backup logs temp KetQua HMHETHAN "
                     f"/XF {excluded_files} *.db *.sqlite *.sqlite3 *.mdb *.accdb "
                     '>> "%LOGFILE%" 2>&1'
                 ),
@@ -703,6 +708,8 @@ def _should_skip_relative(relative: Path) -> bool:
     parts = [part.casefold() for part in relative.parts]
     if any(part in SKIPPED_DIRECTORIES for part in parts[:-1]):
         return True
+    if any(part in USER_DATA_DIRECTORIES for part in parts):
+        return True
     name = relative.name.casefold()
     if name in DATABASE_FILE_NAMES or name.endswith("-wal") or name.endswith("-shm"):
         return True
@@ -760,6 +767,24 @@ def _backup_sqlite_database(source: Path, destination: Path, *, required: bool) 
         raise UpdateError(f"Không thể sao lưu database {source.name}: {exc}") from exc
     finally:
         temporary_destination.unlink(missing_ok=True)
+
+
+def _backup_directory(source: Path, destination: Path) -> None:
+    if not source.is_dir():
+        return
+    source_root = source.resolve()
+    for item in source_root.rglob("*"):
+        if not item.is_file():
+            continue
+        relative = item.relative_to(source_root)
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+        try:
+            shutil.copy2(item, temporary)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _stamp() -> str:

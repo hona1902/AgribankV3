@@ -6,11 +6,14 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
+    QLabel,
     QMessageBox,
+    QRadioButton,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -20,8 +23,10 @@ from PySide6.QtWidgets import (
 
 from agribank_v3.features.credit.summary.dashboard_charts import (
     DashboardBarChart,
+    DashboardBranchComparisonChart,
     branch_bar_values,
     branch_empty_message,
+    branch_period_pair_values,
     growth_series,
     overview_series,
 )
@@ -32,6 +37,7 @@ from agribank_v3.features.credit.summary.dashboard_export import (
     SHEET_BY_TAB,
     DashboardNimExportService,
     export_dashboard_rows,
+    export_dashboard_workbook,
 )
 from agribank_v3.features.credit.summary.dashboard_service import (
     DashboardFilters,
@@ -67,6 +73,14 @@ from agribank_v3.ui.components.controls import (
 from agribank_v3.ui.components.kpi import KpiMetric, MetricGrid
 
 
+OVERVIEW_MODE_ALL = "all"
+OVERVIEW_MODE_ENDPOINTS = "endpoints"
+BRANCH_MODE_PERIOD_COMPARE = "period_compare"
+BRANCH_MODE_CURRENT = "current"
+DETAIL_MODE_BRANCH = "branch"
+DETAIL_MODE_OFFICE = "office"
+
+
 class NimDashboardWindow(QDialog):
     def __init__(
         self,
@@ -80,6 +94,10 @@ class NimDashboardWindow(QDialog):
         self.ui_config = get_nim_ui_config(data_type)
         self.dashboard_data: DashboardNimData | None = None
         self.visible_export_rows: dict[str, list[dict[str, object]]] = {}
+        self.overview_table_mode = OVERVIEW_MODE_ALL
+        self.branch_compare_mode = BRANCH_MODE_PERIOD_COMPARE
+        self.detail_group_mode = DETAIL_MODE_BRANCH
+        self._radio_groups: list[QButtonGroup] = []
         self.repository.unit_directory.add_listener(self._unit_directory_changed)
         self.setWindowTitle(self.ui_config.dashboard_title)
         self.setWindowFlags(
@@ -156,6 +174,17 @@ class NimDashboardWindow(QDialog):
         layout.addLayout(self._tab_actions("overview"))
         self.overview_chart = AnalysisLineChart()
         self.overview_table = _table()
+        layout.addLayout(
+            self._radio_row(
+                "Chế độ bảng:",
+                (
+                    ("Hiện toàn bộ các kỳ", OVERVIEW_MODE_ALL),
+                    ("Chỉ so sánh Từ kỳ và Đến kỳ", OVERVIEW_MODE_ENDPOINTS),
+                ),
+                selected=OVERVIEW_MODE_ALL,
+                callback=self._overview_mode_changed,
+            )
+        )
         layout.addWidget(self.overview_chart, stretch=2)
         layout.addWidget(self.overview_table, stretch=1)
         self.tabs.addTab(tab, "Tổng quan theo kỳ")
@@ -164,9 +193,24 @@ class NimDashboardWindow(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addLayout(self._tab_actions("branch"))
-        self.branch_chart = DashboardBarChart()
+        layout.addLayout(
+            self._radio_row(
+                "Chế độ so sánh:",
+                (
+                    ("So sánh Từ kỳ đến kỳ", BRANCH_MODE_PERIOD_COMPARE),
+                    ("Kỳ hiện tại", BRANCH_MODE_CURRENT),
+                ),
+                selected=BRANCH_MODE_PERIOD_COMPARE,
+                callback=self._branch_mode_changed,
+            )
+        )
+        self.branch_compare_chart = DashboardBranchComparisonChart()
+        self.branch_current_chart = DashboardBarChart()
+        self.branch_current_chart.hide()
+        self.branch_chart = self.branch_compare_chart
         self.branch_table = _table()
-        layout.addWidget(self.branch_chart, stretch=2)
+        layout.addWidget(self.branch_compare_chart, stretch=2)
+        layout.addWidget(self.branch_current_chart, stretch=2)
         layout.addWidget(self.branch_table, stretch=1)
         self.tabs.addTab(tab, "So sánh chi nhánh")
 
@@ -184,6 +228,17 @@ class NimDashboardWindow(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.addLayout(self._tab_actions("detail"))
+        layout.addLayout(
+            self._radio_row(
+                "Chế độ nhóm:",
+                (
+                    ("Tổng hợp theo chi nhánh", DETAIL_MODE_BRANCH),
+                    ("Chi tiết theo Hội sở/PGD", DETAIL_MODE_OFFICE),
+                ),
+                selected=DETAIL_MODE_BRANCH,
+                callback=self._detail_mode_changed,
+            )
+        )
         self.detail_table = _table(wrap_header=True)
         layout.addWidget(self.detail_table)
         self.tabs.addTab(tab, "Bảng dữ liệu chi tiết")
@@ -195,6 +250,42 @@ class NimDashboardWindow(QDialog):
         button.clicked.connect(lambda _checked=False, key=tab_key: self.export_tab(key))
         row.addWidget(button)
         return row
+
+    def _radio_row(
+        self,
+        label: str,
+        options: tuple[tuple[str, str], ...],
+        *,
+        selected: str,
+        callback,
+    ) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        row.addWidget(QLabel(label))
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        self._radio_groups.append(group)
+        for text, value in options:
+            radio = QRadioButton(text)
+            radio.setProperty("modeValue", value)
+            radio.setChecked(value == selected)
+            group.addButton(radio)
+            row.addWidget(radio)
+            radio.toggled.connect(lambda checked, mode=value: checked and callback(mode))
+        row.addStretch()
+        return row
+
+    def _overview_mode_changed(self, mode: str) -> None:
+        self.overview_table_mode = mode
+        self._render_overview_tab()
+
+    def _branch_mode_changed(self, mode: str) -> None:
+        self.branch_compare_mode = mode
+        self._render_branch_tab()
+
+    def _detail_mode_changed(self, mode: str) -> None:
+        self.detail_group_mode = mode
+        self._render_detail_tab()
 
     def reload(self) -> None:
         self._reload_filter_options()
@@ -236,7 +327,12 @@ class NimDashboardWindow(QDialog):
         if not path:
             return
         try:
-            output = export_dashboard_rows(rows, Path(path), sheet_name=self.ui_config.dashboard_sheets.get(tab_key, "DashboardNIM"))
+            output = export_dashboard_rows(
+                rows,
+                Path(path),
+                sheet_name=self.ui_config.dashboard_sheets.get(tab_key, "DashboardNIM"),
+                metadata=self._export_metadata(tab_key),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Xuất Excel", str(exc))
             return
@@ -255,7 +351,16 @@ class NimDashboardWindow(QDialog):
         if not path:
             return
         try:
-            output = service.export_all_tabs(Path(path))
+            output = export_dashboard_workbook(
+                [
+                    (self.ui_config.dashboard_sheets["overview"], self.visible_export_rows.get("overview") or service.overview_by_period_rows()),
+                    (self.ui_config.dashboard_sheets["branch"], self.visible_export_rows.get("branch") or service.branch_comparison_rows()),
+                    (self.ui_config.dashboard_sheets["growth"], self.visible_export_rows.get("growth") or service.growth_rows()),
+                    (self.ui_config.dashboard_sheets["detail"], self.visible_export_rows.get("detail") or service.detail_rows()),
+                ],
+                Path(path),
+                metadata=self._export_metadata("all"),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Xuất toàn bộ", str(exc))
             return
@@ -304,7 +409,10 @@ class NimDashboardWindow(QDialog):
         data = self.dashboard_data
         if data is None:
             return
-        rows = self._export_service().overview_by_period_rows()
+        service = self._export_service()
+        if service is None:
+            return
+        rows = service.overview_endpoint_rows() if self.overview_table_mode == OVERVIEW_MODE_ENDPOINTS else service.overview_by_period_rows()
         self.visible_export_rows["overview"] = rows
         self.overview_chart.set_series(overview_series(data.period_rows, self.ui_config), empty_message="Không có dữ liệu NIM theo kỳ.")
         headers = [
@@ -329,24 +437,53 @@ class NimDashboardWindow(QDialog):
         data = self.dashboard_data
         if data is None:
             return
+        service = self._export_service()
+        if service is None:
+            return
         metric = str(self.metric_combo.currentData() or METRIC_BALANCE)
         metric_label = self.ui_config.metric_labels().get(metric, metric)
-        rows = self._export_service().branch_comparison_rows()
-        self.visible_export_rows["branch"] = rows
-        bars = branch_bar_values(data.branch_rows, metric)
-        self.branch_chart.set_bars(
-            bars,
-            value_kind=metric_value_kind(metric),
-            metric_label=metric_label,
-            empty_message=branch_empty_message(metric),
-        )
-        headers = ["Kỳ", "Tên chi nhánh", self.ui_config.balance_label]
-        widths = [78, 180, 130]
-        if self.ui_config.include_average_rate:
-            headers.append("Lãi suất bình quân")
-            widths.append(110)
-        headers.extend(["NIM trước ĐC", "NIM sau ĐC", "Chỉ tiêu đang chọn", "Giá trị chỉ tiêu"])
-        widths.extend([100, 100, 140, 112])
+        if self.branch_compare_mode == BRANCH_MODE_CURRENT:
+            rows = service.branch_current_rows()
+            self.visible_export_rows["branch"] = rows
+            bars = branch_bar_values(data.branch_rows, metric)
+            self.branch_compare_chart.hide()
+            self.branch_current_chart.show()
+            self.branch_chart = self.branch_current_chart
+            self.branch_current_chart.set_bars(
+                bars,
+                value_kind=metric_value_kind(metric),
+                metric_label=metric_label,
+                empty_message=branch_empty_message(metric),
+            )
+            headers = ["Kỳ", "Mã chi nhánh", "Tên chi nhánh", self.ui_config.balance_label]
+            widths = [72, 96, 178, 126]
+            if self.ui_config.include_average_rate:
+                headers.append("Lãi suất bình quân")
+                widths.append(108)
+            headers.extend(["NIM trước ĐC", "NIM sau ĐC", "Chỉ tiêu đang chọn", "Giá trị chỉ tiêu"])
+            widths.extend([96, 96, 136, 112])
+        else:
+            rows = service.branch_period_comparison_rows()
+            self.visible_export_rows["branch"] = rows
+            pairs, from_period, to_period = branch_period_pair_values(
+                data.branch_rows,
+                metric,
+                from_period=data.filters.period_from,
+                to_period=data.filters.period_to,
+            )
+            self.branch_current_chart.hide()
+            self.branch_compare_chart.show()
+            self.branch_chart = self.branch_compare_chart
+            self.branch_compare_chart.set_pairs(
+                pairs,
+                value_kind=metric_value_kind(metric),
+                metric_label=metric_label,
+                from_period=from_period,
+                to_period=to_period,
+                empty_message=branch_empty_message(metric),
+            )
+            headers = tuple(rows[0].keys()) if rows else _branch_compare_headers(self.ui_config, metric)
+            widths = _branch_compare_widths(metric)
         _render_dict_table(
             self.branch_table,
             tuple(headers),
@@ -388,13 +525,24 @@ class NimDashboardWindow(QDialog):
         data = self.dashboard_data
         if data is None:
             return
-        rows = self._export_service().detail_rows()
+        service = self._export_service()
+        if service is None:
+            return
+        if self.detail_group_mode == DETAIL_MODE_OFFICE:
+            rows = service.detail_office_rows()
+            headers = ["Kỳ", "Mã chi nhánh", "Tên chi nhánh", "Mã đơn vị", "Hội sở/Phòng GD", "Loại đơn vị", "Loại KH", self.ui_config.balance_label, "NIM trước ĐC", "NIM sau ĐC", self.ui_config.growth_percent_label, self.ui_config.balance_delta_label]
+            widths = [72, 94, 150, 96, 120, 106, 82, 122, 92, 92, 116, 130]
+            if self.ui_config.include_average_rate:
+                headers.insert(8, "Lãi suất bình quân")
+                widths.insert(8, 104)
+        else:
+            rows = service.detail_branch_rows()
+            headers = ["Kỳ", "Mã chi nhánh", "Tên chi nhánh", "Loại KH", self.ui_config.balance_label, "NIM trước ĐC", "NIM sau ĐC", self.ui_config.growth_percent_label, self.ui_config.balance_delta_label]
+            widths = [72, 94, 170, 82, 126, 94, 94, 122, 136]
+            if self.ui_config.include_average_rate:
+                headers.insert(5, "Lãi suất bình quân")
+                widths.insert(5, 106)
         self.visible_export_rows["detail"] = rows
-        headers = ["Kỳ", "Tên chi nhánh", "Phòng GD", "Loại KH", self.ui_config.balance_label, "NIM trước ĐC", "NIM sau ĐC", self.ui_config.growth_percent_label, self.ui_config.balance_delta_label]
-        widths = [74, 150, 112, 82, 124, 94, 94, 124, 136]
-        if self.ui_config.include_average_rate:
-            headers.insert(5, "Lãi suất bình quân")
-            widths.insert(5, 102)
         _render_dict_table(
             self.detail_table,
             tuple(headers),
@@ -408,6 +556,34 @@ class NimDashboardWindow(QDialog):
         if data is None:
             return None
         return DashboardNimExportService(data, metric=str(self.metric_combo.currentData() or METRIC_BALANCE))
+
+    def _export_metadata(self, tab_key: str) -> list[tuple[str, object]]:
+        filters = self._filters()
+        metadata: list[tuple[str, object]] = [
+            ("Chức năng", self.ui_config.dashboard_title),
+            ("Tab", self.ui_config.dashboard_sheets.get(tab_key, tab_key)),
+            ("Từ kỳ", filters.period_from or "Tất cả"),
+            ("Đến kỳ", filters.period_to or "Tất cả"),
+            ("Chi nhánh", self.branch_combo.currentText()),
+            ("Phòng GD", self.transaction_office_combo.currentText()),
+            ("Loại KH", self.customer_type_combo.currentText()),
+            ("Chỉ tiêu", self.metric_combo.currentText()),
+        ]
+        if tab_key == "overview":
+            metadata.append(("Chế độ bảng", "Chỉ so sánh Từ kỳ và Đến kỳ" if self.overview_table_mode == OVERVIEW_MODE_ENDPOINTS else "Hiện toàn bộ các kỳ"))
+        elif tab_key == "branch":
+            metadata.append(("Chế độ bảng", "Kỳ hiện tại" if self.branch_compare_mode == BRANCH_MODE_CURRENT else "So sánh Từ kỳ đến kỳ"))
+        elif tab_key == "detail":
+            metadata.append(("Chế độ bảng", "Chi tiết theo Hội sở/PGD" if self.detail_group_mode == DETAIL_MODE_OFFICE else "Tổng hợp theo chi nhánh"))
+        elif tab_key == "all":
+            metadata.extend(
+                [
+                    ("Chế độ bảng Tổng quan", "Chỉ so sánh Từ kỳ và Đến kỳ" if self.overview_table_mode == OVERVIEW_MODE_ENDPOINTS else "Hiện toàn bộ các kỳ"),
+                    ("Chế độ bảng So sánh chi nhánh", "Kỳ hiện tại" if self.branch_compare_mode == BRANCH_MODE_CURRENT else "So sánh Từ kỳ đến kỳ"),
+                    ("Chế độ bảng Chi tiết", "Chi tiết theo Hội sở/PGD" if self.detail_group_mode == DETAIL_MODE_OFFICE else "Tổng hợp theo chi nhánh"),
+                ]
+            )
+        return metadata
 
 
 def _table(*, wrap_header: bool = False) -> FitTableWidget:
@@ -455,8 +631,34 @@ def _render_dict_table(
     table.setSortingEnabled(True)
 
 
+def _branch_compare_headers(ui_config: NimUiConfig, metric: str) -> tuple[str, ...]:
+    if metric == METRIC_BALANCE:
+        return (
+            "Mã chi nhánh",
+            "Tên chi nhánh",
+            f"{ui_config.balance_label} Từ kỳ",
+            f"{ui_config.balance_label} Đến kỳ",
+            "Tăng/giảm tuyệt đối",
+            "Tăng trưởng (%)",
+        )
+    metric_label = ui_config.metric_labels().get(metric, metric)
+    return (
+        "Mã chi nhánh",
+        "Tên chi nhánh",
+        f"{metric_label} Từ kỳ",
+        f"{metric_label} Đến kỳ",
+        "Thay đổi (điểm %)",
+    )
+
+
+def _branch_compare_widths(metric: str) -> tuple[int, ...]:
+    if metric == METRIC_BALANCE:
+        return (96, 190, 136, 136, 136, 116)
+    return (96, 190, 130, 130, 132)
+
+
 def _is_numeric_header(header: str, metric: str) -> bool:
-    if header in MONEY_HEADERS or header in PERCENT_HEADERS:
+    if _is_money_header(header) or _is_percent_header(header):
         return True
     if header == "Giá trị chỉ tiêu":
         return metric in {METRIC_BALANCE, METRIC_NIM_BEFORE, METRIC_NIM_AFTER, METRIC_AVERAGE_RATE, METRIC_BALANCE_GROWTH}
@@ -466,10 +668,10 @@ def _is_numeric_header(header: str, metric: str) -> bool:
 def _format_display_value(header: str, value: object, metric: str) -> str:
     if value is None or value == "":
         return "N/A"
-    if header in MONEY_HEADERS:
+    if _is_money_header(header):
         return format_money_vn(value, signed=header.startswith("Tăng/giảm"))
-    if header in PERCENT_HEADERS:
-        return format_percent_vn(value, signed=header.startswith("Tăng trưởng") or header.startswith("Biến động"))
+    if _is_percent_header(header):
+        return format_percent_vn(value, signed=header.startswith("Tăng trưởng") or header.startswith("Biến động") or header.startswith("Thay đổi"))
     if header == "Giá trị chỉ tiêu":
         if metric == METRIC_BALANCE:
             return format_money_vn(value)
@@ -483,6 +685,25 @@ def _alignment_for_header(header: str, metric: str) -> Qt.AlignmentFlag:
     if _is_numeric_header(header, metric):
         return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
     return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+
+
+def _is_money_header(header: str) -> bool:
+    if header in MONEY_HEADERS:
+        return True
+    lowered = header.casefold()
+    return (
+        "dư nợ" in lowered
+        or "nguồn vốn" in lowered
+        or "số dư" in lowered
+        or "tăng/giảm tuyệt đối" in lowered
+    ) and "tăng trưởng" not in lowered
+
+
+def _is_percent_header(header: str) -> bool:
+    if header in PERCENT_HEADERS:
+        return True
+    lowered = header.casefold()
+    return "nim" in lowered or "lãi suất" in lowered or "tăng trưởng" in lowered or "điểm %" in lowered
 
 
 def _combo(tooltip: str, first_label: str) -> QComboBox:

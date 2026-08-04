@@ -45,6 +45,9 @@ class AnalysisLineChart(QWidget):
         self.single_point_message = ""
         self.point_rects: list[tuple[QRect, str, str, str, float | None, str]] = []
         self.zoom_factor = 1.0
+        self.last_legend_rect = QRect()
+        self.last_plot_rect = QRect()
+        self.last_x_axis_label_rect = QRect()
         self.setMinimumHeight(240)
         self.setMouseTracking(True)
 
@@ -66,7 +69,11 @@ class AnalysisLineChart(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#ffffff"))
-        rect = self.rect().adjusted(58, 16, -18, -42)
+        layout = self.chart_layout()
+        rect = layout["plot"]
+        self.last_legend_rect = layout["legend"]
+        self.last_plot_rect = rect
+        self.last_x_axis_label_rect = layout["x_axis"]
         painter.setPen(QColor("#d8dee8"))
         painter.drawRect(rect)
         self.point_rects = []
@@ -95,7 +102,7 @@ class AnalysisLineChart(QWidget):
         for index, item in enumerate(self.series):
             self._draw_series(painter, rect, periods, item, min_value, max_value, _series_color(item.label, index))
         self._draw_period_labels(painter, rect, periods)
-        self._draw_legends(painter)
+        self._draw_legends(painter, layout["legend"])
         if len(periods) == 1 and self.single_point_message:
             painter.setPen(QColor("#6b7280"))
             painter.drawText(QRect(rect.left(), rect.top() + 8, rect.width(), 20), Qt.AlignmentFlag.AlignCenter, self.single_point_message)
@@ -116,9 +123,14 @@ class AnalysisLineChart(QWidget):
         position = event.position().toPoint()
         for rect, period, label, metric_label, value, value_kind in self.point_rects:
             if rect.contains(position):
+                tooltip = (
+                    _tooltip_text(period, label, metric_label, value, value_kind)
+                    if metric_label
+                    else self._period_tooltip(period)
+                )
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    _tooltip_text(period, label, metric_label, value, value_kind),
+                    tooltip,
                     self,
                 )
                 return
@@ -170,25 +182,64 @@ class AnalysisLineChart(QWidget):
                 x = rect.left() + int(rect.width() * index / max(1, len(periods) - 1))
                 painter.drawText(QRect(x - 38, rect.bottom() + 6, 76, 18), Qt.AlignmentFlag.AlignCenter, period)
 
-    def _draw_legends(self, painter: QPainter) -> None:
-        x = 58
-        y = self.height() - 20
+    def _draw_legends(self, painter: QPainter, legend_rect: QRect) -> None:
+        metrics = self.fontMetrics()
+        x = legend_rect.left()
+        y = legend_rect.top() + metrics.height() // 2 + 4
+        row_height = metrics.height() + 8
         for index, item in enumerate(self.series):
             color = _series_color(item.label, index)
+            label_width = metrics.horizontalAdvance(item.label) + 8
+            item_width = label_width + 50
+            if x > legend_rect.left() and x + item_width > legend_rect.right():
+                x = legend_rect.left()
+                y += row_height
             painter.setPen(QPen(color, 2))
             painter.drawLine(x, y, x + 22, y)
             painter.setBrush(color)
             painter.drawEllipse(QPoint(x + 11, y), 4, 4)
             painter.setPen(QColor("#374151"))
-            label_width = min(170, max(76, len(item.label) * 7))
-            painter.drawText(QRect(x + 28, y - 9, label_width, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, item.label)
-            x += label_width + 38
-            if x > self.width() - 180:
-                break
+            painter.drawText(QRect(x + 30, y - metrics.height() // 2, label_width, metrics.height() + 2), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, item.label)
+            x += item_width + 12
 
     def _draw_center_text(self, painter: QPainter, text: str) -> None:
         painter.setPen(QColor("#6b7280"))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+
+    def chart_layout(self) -> dict[str, QRect]:
+        metrics = self.fontMetrics()
+        labels = [item.label for item in self.series]
+        row_height = metrics.height() + 8
+        available_width = max(100, self.width() - 76)
+        row_count = 1
+        current_width = 0
+        for label in labels:
+            item_width = metrics.horizontalAdvance(label) + 58
+            if current_width and current_width + item_width > available_width:
+                row_count += 1
+                current_width = 0
+            current_width += item_width
+        legend_height = max(row_height, row_count * row_height) if labels else 0
+        legend = QRect(58, 8, available_width, legend_height)
+        plot_top = legend.bottom() + 8 if labels else 16
+        x_axis_height = metrics.height() + 8
+        x_axis_top = max(plot_top + 56, self.height() - x_axis_height - 10)
+        plot = QRect(58, plot_top, max(90, self.width() - 76), max(48, x_axis_top - plot_top - 8))
+        x_axis = QRect(plot.left(), plot.bottom() + 5, plot.width(), x_axis_height)
+        return {"legend": legend, "plot": plot, "x_axis": x_axis}
+
+    def legend_overlaps_x_axis(self) -> bool:
+        layout = self.chart_layout()
+        return layout["legend"].intersects(layout["x_axis"])
+
+    def _period_tooltip(self, period: str) -> str:
+        lines = [period]
+        for item in self.series:
+            value_by_period = {item_period: value for item_period, value in item.values}
+            value = value_by_period.get(period)
+            if value is not None:
+                lines.append(f"{item.label}: {_format_value(value, item.value_kind)}")
+        return "\n".join(lines)
 
     def _visible_periods(self) -> tuple[str, ...]:
         periods = self._all_periods()

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QFileDialog, QComboBox, QHBoxLayout, QLabel, QMess
 from agribank_v3.features.credit.summary.customer.dashboard_tab import CustomerDashboardTab
 from agribank_v3.features.credit.summary.customer.customer_list_tab import CustomerListTab
 from agribank_v3.features.credit.summary.customer.cross_branch_tab import CrossBranchCustomersTab
+from agribank_v3.features.credit.summary.customer.debt_group_tab import DebtGroupAnalysisTab
 from agribank_v3.features.credit.summary.customer.delete_period_dialog import DeleteCustomerPeriodDialog
 from agribank_v3.features.credit.summary.customer.export_service import (
     export_all_customer_sheets,
@@ -136,6 +137,7 @@ class CustomerManagementWindow(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, stretch=1)
         self.dashboard_tab = CustomerDashboardTab(self.repository, self.current_filters, self)
+        self.debt_group_tab = DebtGroupAnalysisTab(self.repository, self.current_filters, self)
         self.list_tab = CustomerListTab(self.repository, self.current_filters, self)
         self.movement_tab = CustomerMovementTab(self.repository, self.current_filters, self)
         self.multiple_tab = MultipleOfficersTab(self.repository, self.current_filters, self)
@@ -143,6 +145,7 @@ class CustomerManagementWindow(QDialog):
         self.import_tab = ImportHistoryTab(self.repository, self)
         self.officer_tab = OfficerManagementTab(self.repository, self)
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
+        self.tabs.addTab(self.debt_group_tab, "Phân tích nhóm nợ")
         self.tabs.addTab(self.list_tab, "Danh sách khách hàng")
         self.tabs.addTab(self.movement_tab, "Biến động dư nợ")
         self.tabs.addTab(self.multiple_tab, "Nhiều cán bộ quản lý")
@@ -164,10 +167,6 @@ class CustomerManagementWindow(QDialog):
         LOGGER.debug("Customer management window open")
         self.refresh_filters()
         self.refresh_all()
-
-    def closeEvent(self, event) -> None:
-        self.repository.unit_directory.remove_listener(self._unit_directory_changed)
-        super().closeEvent(event)
 
     def _unit_directory_changed(self) -> None:
         self.refresh_all()
@@ -237,6 +236,7 @@ class CustomerManagementWindow(QDialog):
             return
         for tab in (
             self.dashboard_tab,
+            self.debt_group_tab,
             self.list_tab,
             self.movement_tab,
             self.multiple_tab,
@@ -296,9 +296,11 @@ class CustomerManagementWindow(QDialog):
                 self.handle_customer_data_became_empty()
                 self.import_tab.refresh()
                 self.officer_tab.refresh()
+                self._refresh_open_related_windows()
                 self._offer_vacuum_after_last_period_delete()
             else:
                 self.refresh_all()
+                self._refresh_open_related_windows()
 
     def open_maintenance(self) -> None:
         self.cancel_period_data_queries()
@@ -361,6 +363,9 @@ class CustomerManagementWindow(QDialog):
         key = str(tab or "").strip().casefold()
         mapping = {
             "dashboard": self.dashboard_tab,
+            "debt_group": self.debt_group_tab,
+            "debt-group": self.debt_group_tab,
+            "nhom_no": self.debt_group_tab,
             "list": self.list_tab,
             "customers": self.list_tab,
             "movement": self.movement_tab,
@@ -384,6 +389,9 @@ class CustomerManagementWindow(QDialog):
 
     def _apply_filter_changed(self) -> None:
         self.list_tab.page = 1
+        self.debt_group_tab.branch_page = 1
+        self.debt_group_tab.officer_page = 1
+        self.debt_group_tab.customer_page = 1
         self.movement_tab.page = 1
         self.multiple_tab.page = 1
         self.cross_branch_tab.page = 1
@@ -404,6 +412,7 @@ class CustomerManagementWindow(QDialog):
     def invalidate_customer_caches(self) -> None:
         for tab in (
             self.dashboard_tab,
+            self.debt_group_tab,
             self.list_tab,
             self.movement_tab,
             self.multiple_tab,
@@ -418,6 +427,7 @@ class CustomerManagementWindow(QDialog):
         self._filter_timer.stop()
         for tab in (
             self.dashboard_tab,
+            self.debt_group_tab,
             self.list_tab,
             self.movement_tab,
             self.multiple_tab,
@@ -429,6 +439,7 @@ class CustomerManagementWindow(QDialog):
     def wait_for_all_queries(self) -> None:
         for tab in (
             self.dashboard_tab,
+            self.debt_group_tab,
             self.list_tab,
             self.movement_tab,
             self.multiple_tab,
@@ -443,6 +454,7 @@ class CustomerManagementWindow(QDialog):
         self.cancel_period_data_queries()
         self.import_tab.cancel_queries()
         self.officer_tab.cancel_queries()
+        self.repository.unit_directory.remove_listener(self._unit_directory_changed)
         super().closeEvent(event)
 
     def _build_empty_data_banner(self) -> QWidget:
@@ -450,18 +462,25 @@ class CustomerManagementWindow(QDialog):
         banner.setObjectName("CustomerEmptyStateBanner")
         layout = QHBoxLayout(banner)
         layout.setContentsMargins(10, 8, 10, 8)
-        message = QLabel("Chưa có dữ liệu khách hàng. Hãy vào NIM dư nợ và import thư mục FTP Loan để tạo dữ liệu.")
-        message.setObjectName("MutedText")
-        message.setWordWrap(True)
+        self.empty_data_message = QLabel("Chưa có dữ liệu khách hàng. Hãy vào NIM dư nợ và import thư mục FTP Loan để tạo dữ liệu.")
+        self.empty_data_message.setObjectName("MutedText")
+        self.empty_data_message.setWordWrap(True)
         open_nim_button = secondary_button("Mở NIM dư nợ")
         open_nim_button.clicked.connect(self.openNimDnRequested.emit)
-        layout.addWidget(message, stretch=1)
+        layout.addWidget(self.empty_data_message, stretch=1)
         layout.addWidget(open_nim_button)
         banner.hide()
         return banner
 
     def _update_empty_data_banner(self) -> None:
         has_data = bool(self._available_periods) if self._available_periods is not None else self.repository.has_period_data()
+        if not has_data:
+            if self.repository.officer_directory_count():
+                self.empty_data_message.setText("Chưa có dữ liệu khách hàng theo kỳ. Danh mục CBTD vẫn được giữ lại.")
+            else:
+                self.empty_data_message.setText(
+                    "Chưa có dữ liệu khách hàng. Hãy vào NIM dư nợ và import thư mục FTP Loan để tạo dữ liệu."
+                )
         self.empty_data_banner.setVisible(not has_data)
         self.export_all_button.setEnabled(has_data)
         self.export_all_button.setToolTip("" if has_data else "Chưa có dữ liệu để xuất")
@@ -505,6 +524,7 @@ class CustomerManagementWindow(QDialog):
         self._update_empty_data_banner()
         for tab in (
             self.dashboard_tab,
+            self.debt_group_tab,
             self.list_tab,
             self.movement_tab,
             self.multiple_tab,
@@ -549,3 +569,42 @@ class CustomerManagementWindow(QDialog):
         self.period_from_combo.setToolTip("Từ kỳ dùng cho các biểu đồ xu hướng nhiều kỳ.")
         self.period_to_combo.setToolTip("Đến kỳ dùng cho các biểu đồ xu hướng nhiều kỳ.")
         self.current_period_combo.setToolTip("Kỳ báo cáo dùng cho KPI, cơ cấu kỳ hạn và các bảng Top.")
+
+    def _refresh_open_related_windows(self) -> None:
+        seen: set[int] = set()
+        for owner in self._owner_chain():
+            center = getattr(owner, "_officer_center_window", None)
+            self._refresh_related_window(center, seen)
+            registry = getattr(owner, "_shared_officer_detail_windows", None)
+            if isinstance(registry, dict):
+                for window in list(registry.values()):
+                    self._refresh_related_window(window, seen)
+
+    def _owner_chain(self):
+        current = self
+        while current is not None:
+            yield current
+            try:
+                current = current.parent()
+            except RuntimeError:
+                return
+
+    @staticmethod
+    def _refresh_related_window(window, seen: set[int]) -> None:
+        if window is None:
+            return
+        marker = id(window)
+        if marker in seen:
+            return
+        seen.add(marker)
+        try:
+            if hasattr(window, "invalidate_cache"):
+                window.invalidate_cache()
+            if hasattr(window, "refresh_all"):
+                window.refresh_all(use_cache=False)
+            elif hasattr(window, "refresh"):
+                window.refresh(use_cache=False)
+            elif hasattr(window, "reload"):
+                window.reload()
+        except RuntimeError:
+            return

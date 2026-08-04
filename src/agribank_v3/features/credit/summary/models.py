@@ -11,6 +11,12 @@ NIM_NV_TITLE = "NIM nguồn vốn"
 NIM_TITLE = "NIM DN / NIM NV"
 LOAN_COMPARE_TITLE = "So sánh tăng giảm khách hàng"
 CREDIT_LIMIT_TITLE = "Hạn mức tín dụng hết hạn"
+DEBT_GROUP_NORMAL = "NORMAL"
+DEBT_GROUP_ATTENTION = "ATTENTION"
+DEBT_GROUP_BAD_DEBT = "BAD_DEBT"
+DEBT_GROUP_UNKNOWN = "UNKNOWN"
+DEBT_GROUP_VALID_CODES = ("01", "02", "03", "04", "05")
+DEBT_GROUP_COLUMN_SUFFIXES = ("1", "2", "3", "4", "5", "unknown")
 
 
 class SummaryError(RuntimeError):
@@ -110,6 +116,10 @@ class NormalizedLoanRow:
     office_code: str = ""
     office_name: str = ""
     office_type: str = "UNKNOWN"
+    debt_group_code: str = DEBT_GROUP_UNKNOWN
+    debt_group_number: int | None = None
+    debt_group_category: str = DEBT_GROUP_UNKNOWN
+    has_valid_debt_group: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,11 +184,16 @@ class CreditLimitRow:
     note: str
     days_to_expiry: int | None
     status: str
+    officer_code: str = ""
+    branch_code: str = ""
+    account_number: str = ""
+    credit_line_type: str = "Line of Credit"
+    source_row_count: int = 1
 
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
-    batch_id: int
+    batch_id: int | str
     row_count: int
     message: str
     output_path: Path | None = None
@@ -202,9 +217,9 @@ class DashboardMetric:
 @dataclass(frozen=True, slots=True)
 class DashboardData:
     metrics: tuple[DashboardMetric, ...]
-    bars: tuple[tuple[str, float], ...] = ()
-    lines: tuple[tuple[str, float], ...] = ()
-    pies: tuple[tuple[str, float], ...] = ()
+    bars: tuple[tuple[object, ...], ...] = ()
+    lines: tuple[tuple[object, ...], ...] = ()
+    pies: tuple[tuple[object, ...], ...] = ()
 
 
 def now_text() -> str:

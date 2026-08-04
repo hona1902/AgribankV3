@@ -83,7 +83,7 @@ SECTIONS: dict[str, list[Feature]] = {
         Feature(
             CUSTOMER_DATA_TITLE,
             CUSTOMER_DATA_DESCRIPTION,
-            "nv2.png",
+            "customer.svg",
         ),
         Feature(
             NIM_NV_TITLE,
@@ -100,8 +100,8 @@ SECTIONS: dict[str, list[Feature]] = {
             "Theo dõi hợp đồng hạn mức tín dụng đã hết hạn hoặc sắp hết hạn.",
             "m15A.png",
         ),
-        Feature("Danh sách đến hạn", "Tạo danh sách khoản vay đến hạn.", "m09b.png"),
-        Feature("Quản lý CBTD", "Quản lý danh sách cán bộ tín dụng.", "nv2.png"),
+        Feature("Danh sách nợ đến hạn", "Tạo danh sách khoản vay đến hạn.", "m09b.png"),
+        Feature("Quản lý CBTD", "Quản lý danh sách cán bộ tín dụng.", "cbtd.svg"),
         Feature("Sao kê tín dụng", "Tạo sao kê và tổng hợp tín dụng.", "m15A.png"),
     ],
     "Kế toán": [
@@ -188,9 +188,9 @@ QUICK_ACCESS_FEATURES: tuple[QuickAccessFeature, ...] = (
     QuickAccessFeature("normalize_data", "Dữ liệu", SECTIONS["Dữ liệu"][2]),
     QuickAccessFeature("export_report", "Dữ liệu", SECTIONS["Dữ liệu"][3]),
     QuickAccessFeature("interest_schedule", "Tín dụng", SECTIONS["Tín dụng"][1]),
-    QuickAccessFeature("due_list", "Tín dụng", SECTIONS["Tín dụng"][2]),
-    QuickAccessFeature("credit_officer", "Tín dụng", SECTIONS["Tín dụng"][4]),
-    QuickAccessFeature("credit_statement", "Tín dụng", SECTIONS["Tín dụng"][5]),
+    QuickAccessFeature("due_list", "Tín dụng", SECTIONS["Tín dụng"][7]),
+    QuickAccessFeature("credit_officer", "Tín dụng", SECTIONS["Tín dụng"][8]),
+    QuickAccessFeature("credit_statement", "Tín dụng", SECTIONS["Tín dụng"][9]),
     QuickAccessFeature("accounting_report", "Kế toán", SECTIONS["Kế toán"][0]),
     QuickAccessFeature("salary_file", "Kế toán", SECTIONS["Kế toán"][1]),
     QuickAccessFeature("accounting_reconcile", "Kế toán", SECTIONS["Kế toán"][2]),
@@ -237,6 +237,33 @@ FEATURE_GROUPS: dict[str, tuple[FeatureGroup, ...]] = {
     "Dữ liệu": (
         FeatureGroup("Tra cứu và đối chiếu", tuple(SECTIONS["Dữ liệu"][:2])),
         FeatureGroup("Chuẩn hóa và xuất dữ liệu", tuple(SECTIONS["Dữ liệu"][2:])),
+    ),
+    "Tín dụng": (
+        FeatureGroup("Tổ vay vốn", (SECTIONS["Tín dụng"][0],)),
+        FeatureGroup(
+            "NGHIỆP VỤ TÍN DỤNG",
+            (
+                SECTIONS["Tín dụng"][1],
+                SECTIONS["Tín dụng"][7],
+                SECTIONS["Tín dụng"][6],
+                SECTIONS["Tín dụng"][9],
+            ),
+        ),
+        FeatureGroup(
+            "PHÂN TÍCH SỐ LIỆU",
+            (
+                SECTIONS["Tín dụng"][2],
+                SECTIONS["Tín dụng"][4],
+                SECTIONS["Tín dụng"][3],
+                SECTIONS["Tín dụng"][5],
+            ),
+        ),
+        FeatureGroup(
+            "QUẢN LÝ",
+            (
+                SECTIONS["Tín dụng"][8],
+            ),
+        ),
     ),
 }
 

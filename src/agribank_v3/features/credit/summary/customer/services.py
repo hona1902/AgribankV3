@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from agribank_v3.features.credit.summary.models import NormalizedLoanRow
+from agribank_v3.features.credit.summary.models import (
+    DEBT_GROUP_ATTENTION,
+    DEBT_GROUP_BAD_DEBT,
+    DEBT_GROUP_NORMAL,
+    DEBT_GROUP_UNKNOWN,
+    NormalizedLoanRow,
+)
 from agribank_v3.features.credit.summary.customer.filters import (
     MOVEMENT_STATUS_DECREASE,
     MOVEMENT_STATUS_INCREASE,
@@ -43,6 +49,21 @@ SHORT_TERM_FTP_CODES = frozenset(
 )
 MEDIUM_LONG_TERM_FTP_CODES = frozenset({"DN7", "DN8", "DN9", "DN10", "DN11", "DN12"})
 OFFICE_UNKNOWN_SUFFIX = "UNKNOWN"
+DEBT_GROUP_SUFFIX_BY_CODE = {
+    "01": "1",
+    "02": "2",
+    "03": "3",
+    "04": "4",
+    "05": "5",
+    DEBT_GROUP_UNKNOWN: "unknown",
+}
+DEBT_GROUP_CATEGORY_BY_CODE = {
+    "01": DEBT_GROUP_NORMAL,
+    "02": DEBT_GROUP_ATTENTION,
+    "03": DEBT_GROUP_BAD_DEBT,
+    "04": DEBT_GROUP_BAD_DEBT,
+    "05": DEBT_GROUP_BAD_DEBT,
+}
 
 
 def normalize_customer_sequence(value: object) -> str:
@@ -97,6 +118,27 @@ def map_customer_type_code(value: object) -> CustomerTypeCode:
     return CustomerTypeCode.OTHER
 
 
+def normalize_debt_group(value: object) -> tuple[str, int | None, str, bool]:
+    text = "" if value is None else str(value).strip()
+    if text.startswith("'"):
+        text = text[1:].strip()
+    if not text or text.casefold() in {"null", "none", "n/a", "na"}:
+        return DEBT_GROUP_UNKNOWN, None, DEBT_GROUP_UNKNOWN, False
+    text = text.replace(",", ".")
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".", 1)[0]
+    if not re.fullmatch(r"\d+", text):
+        return DEBT_GROUP_UNKNOWN, None, DEBT_GROUP_UNKNOWN, False
+    try:
+        number = int(text)
+    except ValueError:
+        return DEBT_GROUP_UNKNOWN, None, DEBT_GROUP_UNKNOWN, False
+    if number < 1 or number > 5:
+        return DEBT_GROUP_UNKNOWN, None, DEBT_GROUP_UNKNOWN, False
+    code = f"{number:02d}"
+    return code, number, DEBT_GROUP_CATEGORY_BY_CODE[code], True
+
+
 def customer_type_label(value: object) -> str:
     code = map_customer_type_code(value)
     if code == CustomerTypeCode.PERSONAL:
@@ -124,10 +166,22 @@ def split_officer(value: object) -> OfficerIdentity:
 
 
 @dataclass(slots=True)
+class _DebtGroupAccumulator:
+    balance: float = 0.0
+    interest_rate_numerator: float = 0.0
+    nim_before_numerator: float = 0.0
+    nim_after_numerator: float = 0.0
+    source_row_count: int = 0
+
+
+@dataclass(slots=True)
 class _OfficerAccumulator:
     officer_code: str
     officer_name: str
     balance_managed: float = 0.0
+    short_term_balance: float = 0.0
+    medium_long_term_balance: float = 0.0
+    other_balance: float = 0.0
     source_loan_count: int = 0
     interest_rate_numerator: float = 0.0
     nim_before_numerator: float = 0.0
@@ -135,6 +189,13 @@ class _OfficerAccumulator:
     first_seen_order: int = 0
     branch_code: str = ""
     transaction_office: str = ""
+    has_debt_group_data: bool = False
+    debt_group_unknown_row_count: int = 0
+    debt_groups: dict[str, _DebtGroupAccumulator] | None = None
+
+    def __post_init__(self) -> None:
+        if self.debt_groups is None:
+            self.debt_groups = _empty_debt_group_accumulators()
 
 
 @dataclass(slots=True)
@@ -165,10 +226,15 @@ class _OfficeAccumulator:
     nim_after_numerator: float = 0.0
     source_loan_count: int = 0
     officers: dict[str, _OfficeOfficerAccumulator] | None = None
+    has_debt_group_data: bool = False
+    debt_group_unknown_row_count: int = 0
+    debt_groups: dict[str, _DebtGroupAccumulator] | None = None
 
     def __post_init__(self) -> None:
         if self.officers is None:
             self.officers = {}
+        if self.debt_groups is None:
+            self.debt_groups = _empty_debt_group_accumulators()
 
 
 @dataclass(slots=True)
@@ -189,10 +255,72 @@ class _CustomerAccumulator:
     nim_after_numerator: float = 0.0
     source_loan_count: int = 0
     officer_keys: set[str] | None = None
+    has_debt_group_data: bool = False
+    debt_group_unknown_row_count: int = 0
+    debt_groups: dict[str, _DebtGroupAccumulator] | None = None
 
     def __post_init__(self) -> None:
         if self.officer_keys is None:
             self.officer_keys = set()
+        if self.debt_groups is None:
+            self.debt_groups = _empty_debt_group_accumulators()
+
+
+def _empty_debt_group_accumulators() -> dict[str, _DebtGroupAccumulator]:
+    return {suffix: _DebtGroupAccumulator() for suffix in ("1", "2", "3", "4", "5", "unknown")}
+
+
+def _debt_group_suffix(code: object) -> str:
+    return DEBT_GROUP_SUFFIX_BY_CODE.get(str(code or "").strip().upper(), "unknown")
+
+
+def _add_debt_group_amounts(
+    target,
+    row: NormalizedLoanRow,
+    balance: float,
+    interest_rate_numerator: float,
+    nim_before_numerator: float,
+    nim_after_numerator: float,
+) -> None:
+    suffix = _debt_group_suffix(row.debt_group_code if row.has_valid_debt_group else DEBT_GROUP_UNKNOWN)
+    groups = target.debt_groups or _empty_debt_group_accumulators()
+    target.debt_groups = groups
+    item = groups[suffix]
+    item.balance += balance
+    item.interest_rate_numerator += interest_rate_numerator
+    item.nim_before_numerator += nim_before_numerator
+    item.nim_after_numerator += nim_after_numerator
+    item.source_row_count += 1
+    target.has_debt_group_data = True
+    if not row.has_valid_debt_group:
+        target.debt_group_unknown_row_count += 1
+
+
+def _debt_group_kwargs(target) -> dict[str, object]:
+    groups = target.debt_groups or _empty_debt_group_accumulators()
+    output: dict[str, object] = {
+        "has_debt_group_data": bool(target.has_debt_group_data),
+        "worst_debt_group": _worst_debt_group(groups, float(getattr(target, "total_balance", 0) or getattr(target, "balance_managed", 0) or 0)),
+        "debt_group_unknown_row_count": int(target.debt_group_unknown_row_count or 0),
+    }
+    for suffix in ("1", "2", "3", "4", "5", "unknown"):
+        group = groups[suffix]
+        output[f"debt_group_{suffix}_balance"] = float(group.balance or 0)
+        output[f"debt_group_{suffix}_interest_numerator"] = float(group.interest_rate_numerator or 0)
+        output[f"debt_group_{suffix}_nim_before_numerator"] = float(group.nim_before_numerator or 0)
+        output[f"debt_group_{suffix}_nim_after_numerator"] = float(group.nim_after_numerator or 0)
+    return output
+
+
+def _worst_debt_group(groups: dict[str, _DebtGroupAccumulator], total_balance: float) -> str:
+    if total_balance <= 0:
+        return ""
+    for suffix in ("5", "4", "3", "2", "1"):
+        if float(groups.get(suffix, _DebtGroupAccumulator()).balance or 0) > 0:
+            return f"{int(suffix):02d}"
+    if float(groups.get("unknown", _DebtGroupAccumulator()).balance or 0) > 0:
+        return DEBT_GROUP_UNKNOWN
+    return ""
 
 
 class CustomerAggregationService:
@@ -211,6 +339,9 @@ class CustomerAggregationService:
         self._source_row_count = 0
         self._source_total_balance = 0.0
         self._order = 0
+        self._debt_group_valid_row_count = 0
+        self._debt_group_counts = {"01": 0, "02": 0, "03": 0, "04": 0, "05": 0, DEBT_GROUP_UNKNOWN: 0}
+        self._debt_group_invalid_samples: list[str] = []
 
     def add_file(
         self,
@@ -224,6 +355,8 @@ class CustomerAggregationService:
         invalid_row_count: int = 0,
         warning_count: int = 0,
         warnings: tuple[str, ...] = (),
+        debt_group_invalid_samples: tuple[str, ...] = (),
+        debt_group_header_present: bool = False,
     ) -> None:
         file_path = Path(file_path)
         file_customer_codes: set[str] = set()
@@ -234,6 +367,10 @@ class CustomerAggregationService:
         self._warning_count += max(0, int(warning_count) - len(warnings))
         for warning in warnings:
             self._add_warning(warning)
+        for sample in debt_group_invalid_samples:
+            text = str(sample or "").strip()
+            if text and text not in self._debt_group_invalid_samples and len(self._debt_group_invalid_samples) < 20:
+                self._debt_group_invalid_samples.append(text)
         for row in rows:
             if not row.customer_code:
                 self._invalid_row_count += 1
@@ -244,7 +381,7 @@ class CustomerAggregationService:
             if not file_branch_code and row.branch_code:
                 file_branch_code = row.branch_code
             file_customer_codes.add(row.customer_code)
-            self._add_row(row)
+            self._add_row(row, debt_group_header_present=debt_group_header_present)
         self._files.append(
             CustomerImportFile(
                 file_name=file_path.name,
@@ -315,6 +452,7 @@ class CustomerAggregationService:
                     nim_before=(float(customer.nim_before_numerator or 0) / balance) if balance else 0.0,
                     nim_after=(float(customer.nim_after_numerator or 0) / balance) if balance else 0.0,
                     source_loan_count=int(customer.source_loan_count or 0),
+                    **_debt_group_kwargs(customer),
                 )
             )
             for officer in sorted(customer_officers, key=lambda item: item.first_seen_order):
@@ -325,6 +463,9 @@ class CustomerAggregationService:
                         officer_code=officer.officer_code,
                         officer_name=officer.officer_name,
                         balance_managed=float(officer.balance_managed or 0),
+                        short_term_balance=float(officer.short_term_balance or 0),
+                        medium_long_term_balance=float(officer.medium_long_term_balance or 0),
+                        other_balance=float(officer.other_balance or 0),
                         source_loan_count=int(officer.source_loan_count or 0),
                         interest_rate_numerator=float(officer.interest_rate_numerator or 0),
                         nim_before_numerator=float(officer.nim_before_numerator or 0),
@@ -333,6 +474,7 @@ class CustomerAggregationService:
                         first_seen_order=officer.first_seen_order,
                         branch_code=officer.branch_code,
                         transaction_office=officer.transaction_office,
+                        **_debt_group_kwargs(officer),
                     )
                 )
 
@@ -364,6 +506,7 @@ class CustomerAggregationService:
                     nim_after_numerator=float(office.nim_after_numerator or 0),
                     source_loan_count=int(office.source_loan_count or 0),
                     first_seen_order=office.first_seen_order,
+                    **_debt_group_kwargs(office),
                 )
             )
 
@@ -396,9 +539,17 @@ class CustomerAggregationService:
             summaries=tuple(summaries),
             officer_rows=tuple(officer_rows),
             office_rows=tuple(office_rows),
+            debt_group_valid_row_count=self._debt_group_valid_row_count,
+            debt_group_1_row_count=self._debt_group_counts["01"],
+            debt_group_2_row_count=self._debt_group_counts["02"],
+            debt_group_3_row_count=self._debt_group_counts["03"],
+            debt_group_4_row_count=self._debt_group_counts["04"],
+            debt_group_5_row_count=self._debt_group_counts["05"],
+            debt_group_unknown_row_count=self._debt_group_counts[DEBT_GROUP_UNKNOWN],
+            debt_group_invalid_samples=tuple(self._debt_group_invalid_samples),
         )
 
-    def _add_row(self, row: NormalizedLoanRow) -> None:
+    def _add_row(self, row: NormalizedLoanRow, *, debt_group_header_present: bool = False) -> None:
         self._order += 1
         key = (row.period, row.customer_code)
         customer_type = map_customer_type_code(row.customer_type).value
@@ -439,6 +590,20 @@ class CustomerAggregationService:
         customer.nim_before_numerator += nim_before_numerator
         customer.nim_after_numerator += nim_after_numerator
         customer.source_loan_count += 1
+        if debt_group_header_present:
+            if row.has_valid_debt_group:
+                self._debt_group_valid_row_count += 1
+                self._debt_group_counts[row.debt_group_code] = self._debt_group_counts.get(row.debt_group_code, 0) + 1
+            else:
+                self._debt_group_counts[DEBT_GROUP_UNKNOWN] = self._debt_group_counts.get(DEBT_GROUP_UNKNOWN, 0) + 1
+            _add_debt_group_amounts(
+                customer,
+                row,
+                balance,
+                interest_rate_numerator,
+                nim_before_numerator,
+                nim_after_numerator,
+            )
         self._add_office_row(
             row,
             balance,
@@ -446,6 +611,7 @@ class CustomerAggregationService:
             interest_rate_numerator,
             nim_before_numerator,
             nim_after_numerator,
+            debt_group_header_present=debt_group_header_present,
         )
 
         officer_code = str(row.officer_code or "").strip()
@@ -467,10 +633,25 @@ class CustomerAggregationService:
         elif not officer.officer_name and officer_name:
             officer.officer_name = officer_name
         officer.balance_managed += balance
+        if term == LoanTerm.SHORT_TERM:
+            officer.short_term_balance += balance
+        elif term == LoanTerm.MEDIUM_LONG_TERM:
+            officer.medium_long_term_balance += balance
+        else:
+            officer.other_balance += balance
         officer.source_loan_count += 1
         officer.interest_rate_numerator += interest_rate_numerator
         officer.nim_before_numerator += nim_before_numerator
         officer.nim_after_numerator += nim_after_numerator
+        if debt_group_header_present:
+            _add_debt_group_amounts(
+                officer,
+                row,
+                balance,
+                interest_rate_numerator,
+                nim_before_numerator,
+                nim_after_numerator,
+            )
 
     def _add_office_row(
         self,
@@ -480,6 +661,8 @@ class CustomerAggregationService:
         interest_rate_numerator: float,
         nim_before_numerator: float,
         nim_after_numerator: float,
+        *,
+        debt_group_header_present: bool = False,
     ) -> None:
         trctcd = normalize_trctcd(row.trctcd)
         office_code = str(row.office_code or "").strip() or build_office_code(row.branch_code, trctcd)
@@ -515,6 +698,15 @@ class CustomerAggregationService:
         office.nim_before_numerator += nim_before_numerator
         office.nim_after_numerator += nim_after_numerator
         office.source_loan_count += 1
+        if debt_group_header_present:
+            _add_debt_group_amounts(
+                office,
+                row,
+                balance,
+                interest_rate_numerator,
+                nim_before_numerator,
+                nim_after_numerator,
+            )
 
         officer_code = str(row.officer_code or "").strip()
         officer_name = str(row.officer_name or "").strip()

@@ -60,6 +60,7 @@ class DashboardPeriodRow:
 @dataclass(frozen=True, slots=True)
 class DashboardBranchRow:
     period: str
+    branch_code: str
     branch: str
     balance: float
     average_rate: float
@@ -74,8 +75,11 @@ class DashboardBranchRow:
 @dataclass(frozen=True, slots=True)
 class DashboardDetailRow:
     period: str
+    branch_code: str
     branch: str
+    office_code: str
     transaction_office: str
+    office_type: str
     customer_type: str
     balance: float
     average_rate: float
@@ -187,6 +191,7 @@ def _branch_rows(rows: list[dict[str, object]]) -> tuple[DashboardBranchRow, ...
     parsed = [
         DashboardBranchRow(
             period=str(row.get("period") or ""),
+            branch_code=str(row.get("branch_code") or ""),
             branch=str(row.get("branch") or ""),
             balance=float(row.get("balance") or 0),
             average_rate=float(row.get("average_rate") or 0),
@@ -202,8 +207,11 @@ def _detail_rows(rows: list[dict[str, object]]) -> tuple[DashboardDetailRow, ...
     parsed = [
         DashboardDetailRow(
             period=str(row.get("period") or ""),
+            branch_code=str(row.get("branch_code") or ""),
             branch=str(row.get("branch") or ""),
+            office_code=_office_code(row),
             transaction_office=str(row.get("transaction_office") or ""),
+            office_type=_office_type(row),
             customer_type=str(row.get("customer_type") or "Tất cả"),
             balance=float(row.get("balance") or 0),
             average_rate=float(row.get("average_rate") or 0),
@@ -240,11 +248,11 @@ def _with_period_growth(rows: list[DashboardPeriodRow]) -> list[DashboardPeriodR
 
 
 def _with_branch_growth(rows: list[DashboardBranchRow]) -> list[DashboardBranchRow]:
-    grouped: dict[str, list[DashboardBranchRow]] = {}
+    grouped: dict[tuple[str, str], list[DashboardBranchRow]] = {}
     for row in rows:
-        grouped.setdefault(row.branch, []).append(row)
+        grouped.setdefault((row.branch_code, row.branch), []).append(row)
     output: list[DashboardBranchRow] = []
-    for branch, branch_rows in grouped.items():
+    for key, branch_rows in grouped.items():
         previous: DashboardBranchRow | None = None
         for row in sorted(branch_rows, key=lambda item: item.period):
             delta, growth = _growth(row.balance, previous.balance if previous else None)
@@ -253,7 +261,8 @@ def _with_branch_growth(rows: list[DashboardBranchRow]) -> list[DashboardBranchR
             output.append(
                 DashboardBranchRow(
                     period=row.period,
-                    branch=branch,
+                    branch_code=row.branch_code,
+                    branch=key[1],
                     balance=row.balance,
                     average_rate=row.average_rate,
                     nim_before=row.nim_before,
@@ -265,13 +274,13 @@ def _with_branch_growth(rows: list[DashboardBranchRow]) -> list[DashboardBranchR
                 )
             )
             previous = row
-    return sorted(output, key=lambda item: (item.period, item.branch.casefold()))
+    return sorted(output, key=lambda item: (item.period, item.branch_code.casefold(), item.branch.casefold()))
 
 
 def _with_detail_growth(rows: list[DashboardDetailRow]) -> list[DashboardDetailRow]:
-    grouped: dict[tuple[str, str, str], list[DashboardDetailRow]] = {}
+    grouped: dict[tuple[str, str, str, str, str], list[DashboardDetailRow]] = {}
     for row in rows:
-        grouped.setdefault((row.branch, row.transaction_office, row.customer_type), []).append(row)
+        grouped.setdefault((row.branch_code, row.branch, row.office_code, row.transaction_office, row.customer_type), []).append(row)
     output: list[DashboardDetailRow] = []
     for key, detail_rows in grouped.items():
         previous: DashboardDetailRow | None = None
@@ -282,9 +291,12 @@ def _with_detail_growth(rows: list[DashboardDetailRow]) -> list[DashboardDetailR
             output.append(
                 DashboardDetailRow(
                     period=row.period,
-                    branch=key[0],
-                    transaction_office=key[1],
-                    customer_type=key[2],
+                    branch_code=row.branch_code,
+                    branch=key[1],
+                    office_code=row.office_code,
+                    transaction_office=key[3],
+                    office_type=row.office_type,
+                    customer_type=key[4],
                     balance=row.balance,
                     average_rate=row.average_rate,
                     nim_before=row.nim_before,
@@ -296,7 +308,7 @@ def _with_detail_growth(rows: list[DashboardDetailRow]) -> list[DashboardDetailR
                 )
             )
             previous = row
-    return sorted(output, key=lambda item: (item.period, item.branch.casefold(), item.transaction_office.casefold(), item.customer_type.casefold()))
+    return sorted(output, key=lambda item: (item.period, item.branch_code.casefold(), item.office_code.casefold(), item.customer_type.casefold()))
 
 
 def _growth(current: float, previous: float | None) -> tuple[float | None, float | None]:
@@ -306,6 +318,23 @@ def _growth(current: float, previous: float | None) -> tuple[float | None, float
     if previous == 0:
         return delta, None
     return delta, (delta / previous) * 100
+
+
+def _office_code(row: dict[str, object]) -> str:
+    branch_code = str(row.get("branch_code") or "").strip()
+    trctcd = str(row.get("trctcd") or "").strip()
+    if branch_code and trctcd:
+        return f"{branch_code}-{trctcd}"
+    return trctcd
+
+
+def _office_type(row: dict[str, object]) -> str:
+    trctcd = str(row.get("trctcd") or "").strip()
+    if trctcd == "00":
+        return "Hội sở"
+    if trctcd:
+        return "Phòng giao dịch"
+    return ""
 
 
 def _kpis(

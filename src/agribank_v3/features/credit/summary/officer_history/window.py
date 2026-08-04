@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from agribank_v3.features.credit.summary.models import SummaryDataType
+from agribank_v3.features.credit.summary.customer.filters import CustomerFilters
+from agribank_v3.features.credit.summary.customer.repository import CustomerRepository
 from agribank_v3.features.credit.summary.nim_ui_config import NimUiConfig, get_nim_ui_config
 from agribank_v3.features.credit.summary.repository import SummaryRepository
 from agribank_v3.ui.components.controls import (
@@ -38,6 +40,7 @@ from .models import (
     METRIC_BALANCE_GROWTH,
     METRIC_NIM_AFTER,
     METRIC_NIM_BEFORE,
+    ChartSeries,
     ComparisonRow,
     GrowthPoint,
     HistoryFilters,
@@ -86,6 +89,7 @@ class OfficerHistoryDialog(QDialog):
         super().__init__(parent)
         self.repository = repository
         self.history_repository = OfficerHistoryRepository(repository)
+        self.customer_repository = CustomerRepository(repository.main_database_path)
         self.data_type = data_type
         self.ui_config = get_nim_ui_config(data_type)
         self.officer = officer
@@ -100,6 +104,7 @@ class OfficerHistoryDialog(QDialog):
         self.compare_chart_page = 0
         self.branch_compare_rows: tuple[ComparisonRow, ...] = ()
         self.branch_compare_series = ()
+        self.debt_quality_rows: tuple[dict[str, object], ...] = ()
         self.setWindowTitle(self.ui_config.officer_history_title)
         self.setWindowFlags(
             self.windowFlags()
@@ -125,6 +130,7 @@ class OfficerHistoryDialog(QDialog):
         self._build_growth_tab()
         self._build_officer_compare_tab()
         self._build_branch_compare_tab()
+        self._build_debt_quality_tab()
         layout.addWidget(self.tabs, stretch=1)
 
         actions = QHBoxLayout()
@@ -318,6 +324,28 @@ class OfficerHistoryDialog(QDialog):
         layout.addWidget(self.branch_compare_table, stretch=1)
         self.tabs.addTab(tab, "So sánh chi nhánh")
 
+    def _build_debt_quality_tab(self) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        self.debt_quality_metrics = MetricGrid()
+        self.debt_quality_metrics.set_empty(
+            (
+                "Tổng dư nợ cán bộ",
+                "Nợ cần chú ý",
+                "Nợ xấu",
+                "Tỷ lệ nhóm 2",
+                "Tỷ lệ nợ xấu",
+                "Số KH có nhóm 2",
+                "Số KH có nợ xấu",
+            )
+        )
+        self.debt_quality_chart = AnalysisLineChart()
+        self.debt_quality_table = _table()
+        layout.addWidget(self.debt_quality_metrics)
+        layout.addWidget(self.debt_quality_chart, stretch=2)
+        layout.addWidget(self.debt_quality_table, stretch=1)
+        self.tabs.addTab(tab, "Chất lượng tín dụng")
+
     def reload(self) -> None:
         self._reload_filter_options()
         filters = self._filters()
@@ -335,6 +363,7 @@ class OfficerHistoryDialog(QDialog):
         self.growth_rows = build_officer_growth_history(self.overview.points)
         self.apply_officer_comparison(show_limit_warning=False)
         self.reload_branch_comparison()
+        self.reload_debt_quality()
         self._render_info()
         self._render_current_tab()
 
@@ -398,6 +427,23 @@ class OfficerHistoryDialog(QDialog):
             filters=self._filters(),
         )
         self._render_branch_compare()
+
+    def reload_debt_quality(self) -> None:
+        history_filters = self._filters()
+        customer_filters = CustomerFilters(
+            period_from=history_filters.period_from,
+            period_to=history_filters.period_to,
+            customer_type=history_filters.customer_type,
+            officer=self.officer_code or self.officer,
+        )
+        self.debt_quality_rows = tuple(
+            self.customer_repository.get_officer_debt_group_history(
+                officer_code=self.officer_code,
+                officer_name=self.officer,
+                filters=customer_filters,
+            )
+        )
+        self._render_debt_quality()
 
     def export_excel(self) -> None:
         tab_key, rows = self._current_export_rows()
@@ -492,6 +538,8 @@ class OfficerHistoryDialog(QDialog):
             self._render_officer_compare()
         elif index == 3:
             self._render_branch_compare()
+        elif index == 4:
+            self._render_debt_quality()
 
     def _render_overview(self) -> None:
         points = self.overview.points if self.overview else ()
@@ -730,6 +778,56 @@ class OfficerHistoryDialog(QDialog):
             (90, 190, 180, 120, 100, 150, 120),
         )
 
+    def _render_debt_quality(self) -> None:
+        rows = list(self.debt_quality_rows)
+        current = rows[-1] if rows else {}
+        self.debt_quality_metrics.set_metrics(
+            [
+                KpiMetric("Tổng dư nợ cán bộ", current.get("total_balance", 0), "money"),
+                KpiMetric("Nợ cần chú ý", current.get("attention_balance", 0), "money"),
+                KpiMetric("Nợ xấu", current.get("bad_debt_balance", 0), "money"),
+                KpiMetric("Tỷ lệ nhóm 2", current.get("attention_ratio"), "percent"),
+                KpiMetric("Tỷ lệ nợ xấu", current.get("bad_debt_ratio"), "percent"),
+                KpiMetric("Số KH có nhóm 2", current.get("attention_customer_count", 0), "count"),
+                KpiMetric("Số KH có nợ xấu", current.get("bad_debt_customer_count", 0), "count"),
+            ]
+        )
+        self.debt_quality_chart.set_series(
+            (
+                ChartSeries(
+                    "Tỷ lệ nhóm 2",
+                    tuple((str(row.get("period") or ""), row.get("attention_ratio")) for row in rows),
+                    "percent",
+                ),
+                ChartSeries(
+                    "Tỷ lệ nợ xấu",
+                    tuple((str(row.get("period") or ""), row.get("bad_debt_ratio")) for row in rows),
+                    "percent",
+                ),
+            ),
+            empty_message="Chưa có dữ liệu nhóm nợ cho cán bộ này.",
+            single_point_message="Chưa đủ dữ liệu lịch sử để hiển thị xu hướng.",
+        )
+        _render_table(
+            self.debt_quality_table,
+            ("Kỳ", "Tổng dư nợ", "Nợ cần chú ý", "Nợ xấu", "Tỷ lệ nhóm 2", "Tỷ lệ nợ xấu", "Lãi suất bình quân", "NIM trước ĐC", "NIM sau ĐC"),
+            [
+                (
+                    row.get("period", ""),
+                    (row.get("total_balance"), format_money_vn(row.get("total_balance"))),
+                    (row.get("attention_balance"), format_money_vn(row.get("attention_balance"))),
+                    (row.get("bad_debt_balance"), format_money_vn(row.get("bad_debt_balance"))),
+                    (row.get("attention_ratio"), format_percent_vn(row.get("attention_ratio"))),
+                    (row.get("bad_debt_ratio"), format_percent_vn(row.get("bad_debt_ratio"))),
+                    (row.get("average_rate"), format_percent_vn(row.get("average_rate"))),
+                    (row.get("nim_before"), format_percent_vn(row.get("nim_before"))),
+                    (row.get("nim_after"), format_percent_vn(row.get("nim_after"))),
+                )
+                for row in rows
+            ],
+            (90, 140, 140, 140, 115, 115, 130, 120, 120),
+        )
+
     def _current_export_rows(self) -> tuple[str, list[dict[str, object]]]:
         index = self.tabs.currentIndex()
         if index == 1:
@@ -749,6 +847,21 @@ class OfficerHistoryDialog(QDialog):
             return "officer_compare", _comparison_export_rows(rows, self.ui_config)
         if index == 3:
             return "branch_compare", _comparison_export_rows(self.branch_compare_rows, self.ui_config)
+        if index == 4:
+            return "debt_quality", [
+                {
+                    "Kỳ": row.get("period", ""),
+                    "Tổng dư nợ": row.get("total_balance", 0),
+                    "Nợ cần chú ý": row.get("attention_balance", 0),
+                    "Nợ xấu": row.get("bad_debt_balance", 0),
+                    "Tỷ lệ nhóm 2": row.get("attention_ratio"),
+                    "Tỷ lệ nợ xấu": row.get("bad_debt_ratio"),
+                    "Lãi suất bình quân": row.get("average_rate"),
+                    "NIM trước ĐC": row.get("nim_before"),
+                    "NIM sau ĐC": row.get("nim_after"),
+                }
+                for row in self.debt_quality_rows
+            ]
         points = self.overview.points if self.overview else ()
         output = []
         for point in points:

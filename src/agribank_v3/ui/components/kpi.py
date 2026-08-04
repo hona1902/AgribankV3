@@ -247,6 +247,10 @@ def kpi_display_values(metric: KpiMetric) -> tuple[str, str]:
     if value_type == "count":
         display = format_count_vn(value, signed=metric.signed)
         return display, display
+    if value_type in {"number", "decimal", "average"}:
+        display = format_decimal_vn(value, decimals=2, signed=metric.signed)
+        full = format_decimal_vn(full_source, decimals=2, signed=metric.signed)
+        return display, full
     text = str(value).strip()
     return (text or "—"), (str(full_source).strip() or "—")
 
@@ -300,6 +304,15 @@ def format_count_vn(value: object, *, signed: bool = False) -> str:
         return "—"
     prefix = "+" if signed and number > 0 else ""
     return prefix + f"{number:,}".replace(",", ".")
+
+
+def format_decimal_vn(value: object, *, decimals: int = 2, signed: bool = False) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return "—"
+    prefix = "+" if signed and number > 0 else ""
+    return prefix + _format_decimal_vn(number, decimals)
 
 
 def _format_decimal_vn(value: float, decimals: int) -> str:

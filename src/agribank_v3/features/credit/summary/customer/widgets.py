@@ -402,6 +402,8 @@ class SearchBox(QLineEdit):
         self.setObjectName("AgribankSearchBox")
         self.setPlaceholderText(placeholder)
         self.setClearButtonEnabled(True)
+        self.setMinimumWidth(280)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(350)

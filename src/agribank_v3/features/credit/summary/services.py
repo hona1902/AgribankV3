@@ -7,6 +7,7 @@ from datetime import date, datetime
 import csv
 import getpass
 import hashlib
+import logging
 from io import StringIO
 import os
 from pathlib import Path
@@ -46,6 +47,7 @@ from agribank_v3.features.credit.summary.customer.services import (
     build_office_code,
     classify_office_type,
     map_customer_type_code,
+    normalize_debt_group,
     normalize_trctcd,
     normalize_customer_sequence,
     split_officer as split_customer_officer,
@@ -54,6 +56,7 @@ from agribank_v3.features.settings.unit_directory.service import (
     UnitDirectoryService,
     get_unit_directory_service,
 )
+from agribank_v3.runtime_paths import application_root
 
 
 ProgressCallback = Callable[[str], None]
@@ -105,6 +108,15 @@ class ParsedNimFile:
     customer_warning_count: int
     customer_warnings: tuple[str, ...]
     unit_warnings: tuple[str, ...]
+    debt_group_header_present: bool = False
+    debt_group_valid_row_count: int = 0
+    debt_group_1_row_count: int = 0
+    debt_group_2_row_count: int = 0
+    debt_group_3_row_count: int = 0
+    debt_group_4_row_count: int = 0
+    debt_group_5_row_count: int = 0
+    debt_group_unknown_row_count: int = 0
+    debt_group_invalid_samples: tuple[str, ...] = ()
 
 
 def import_nim_folder(
@@ -170,6 +182,8 @@ def import_nim_folder(
                     invalid_row_count=parsed.customer_invalid_row_count,
                     warning_count=parsed.customer_warning_count,
                     warnings=parsed.customer_warnings,
+                    debt_group_invalid_samples=parsed.debt_group_invalid_samples,
+                    debt_group_header_present=parsed.debt_group_header_present,
                 )
         if progress:
             customer_count = len({row.customer_code for row in parsed.customer_rows})
@@ -249,7 +263,9 @@ def import_nim_folder(
             f"trung/dài hạn {customer_result.medium_long_term_balance:,.0f}, "
             f"chưa phân loại {customer_result.other_balance:,.0f}, "
             f"KH nhiều cán bộ {customer_result.multiple_officer_customer_count:,}, "
-            f"FTPCD lạ {unknown_count:,}, lỗi dòng {customer_result.invalid_row_count:,}."
+            f"FTPCD lạ {unknown_count:,}, lỗi dòng {customer_result.invalid_row_count:,}, "
+            f"nhóm nợ hợp lệ {customer_result.debt_group_valid_row_count:,}, "
+            f"UNKNOWN {customer_result.debt_group_unknown_row_count:,}."
         )
     elif customer_missing_messages:
         customer_message = " Customer.db chưa cập nhật vì " + "; ".join(customer_missing_messages[:3]) + "."
@@ -636,49 +652,80 @@ def import_credit_limit_file(
     reference_date: date | None = None,
     export_path: Path | None = None,
     imported_by: str | None = None,
+    duplicate_policy: str = "error",
     progress: ProgressCallback | None = None,
 ) -> ImportResult:
     file_path = Path(file_path)
     if file_path.suffix.casefold() != ".csv":
         raise SummaryError("Hạn mức tín dụng chỉ hỗ trợ file CSV LN01.")
     reference_date = reference_date or date.today()
-    if progress:
-        progress(f"Đang đọc file LN01: {file_path.name}")
-    started = perf_counter()
-    agreements = _load_credit_limit_agreements(file_path)
-    rows = filter_credit_limit_rows(
-        agreements,
-        min_limit=float(min_limit),
-        warn_days=int(warn_days),
-        reference_date=reference_date,
-    )
-    duration_ms = int((perf_counter() - started) * 1000)
-    batch_id = repository.create_batch(
-        SummaryDataType.CREDIT_LIMIT,
-        period=reference_date.isoformat(),
-        source_path=file_path,
-        imported_by=imported_by or _current_user(),
-        row_count=len(rows),
-        duration_ms=duration_ms,
-        message=f"Lọc hạn mức từ {file_path.name}",
-        source_hash=_file_hash(file_path),
-    )
-    repository.save_credit_limit_rows(
-        batch_id,
-        rows,
-        reference_date=reference_date.isoformat(),
-        warn_days=warn_days,
-        min_limit=min_limit,
-    )
-    output_path = export_credit_limit_vba(rows, Path(export_path)) if export_path is not None and rows else None
-    if progress:
-        progress(f"Đã lưu {len(rows):,} hợp đồng cảnh báo")
-    return ImportResult(
-        batch_id=batch_id,
-        row_count=len(rows),
-        message=f"Đã lưu {len(rows):,} hợp đồng hạn mức.",
-        output_path=output_path,
-    )
+    stage = "read_ln01"
+    agreements: list[CreditLimitRow] = []
+    rows: list[CreditLimitRow] = []
+    batch_id = ""
+    try:
+        if progress:
+            progress(f"Đang đọc file LN01: {file_path.name}")
+        started = perf_counter()
+        raw_data = file_path.read_bytes()
+        source_hash = hashlib.sha256(raw_data).hexdigest()
+        agreements, source_row_count = _load_credit_limit_agreements_from_bytes(file_path, raw_data)
+        stage = "filter_rows"
+        rows = filter_credit_limit_rows(
+            agreements,
+            min_limit=float(min_limit),
+            warn_days=int(warn_days),
+            reference_date=reference_date,
+        )
+        _ = int((perf_counter() - started) * 1000)
+        stage = "write_excel_batch"
+        metadata = repository.save_credit_limit_excel_batch(
+            source_path=file_path,
+            rows=agreements,
+            accepted_rows=rows,
+            reference_date=reference_date.isoformat(),
+            warn_days=warn_days,
+            min_limit=min_limit,
+            source_file_sha256=source_hash,
+            source_file_size=len(raw_data),
+            imported_by=imported_by or _current_user(),
+            source_row_count=source_row_count,
+            duplicate_policy=duplicate_policy,
+            progress=progress,
+        )
+        batch_id = str(metadata.batch_id)
+        stage = "export_report"
+        output_path = export_credit_limit_vba(rows, Path(export_path)) if export_path is not None and rows else None
+        if progress:
+            progress(f"Đã lưu {len(rows):,} hợp đồng cảnh báo")
+        return ImportResult(
+            batch_id=metadata.batch_id,
+            row_count=len(rows),
+            message=f"Đã lưu {len(rows):,} hợp đồng hạn mức.",
+            output_path=output_path,
+        )
+    except SummaryError as exc:
+        _log_credit_limit_import_failure(
+            repository=repository,
+            source_file=file_path,
+            stage=stage,
+            parsed_rows=len(agreements),
+            first_row_type=type(agreements[0]).__name__ if agreements else "",
+            batch_id=batch_id,
+            exc=exc,
+        )
+        raise
+    except Exception as exc:
+        _log_credit_limit_import_failure(
+            repository=repository,
+            source_file=file_path,
+            stage=stage,
+            parsed_rows=len(agreements),
+            first_row_type=type(agreements[0]).__name__ if agreements else "",
+            batch_id=batch_id,
+            exc=exc,
+        )
+        raise SummaryError("Không thể tạo batch Hạn mức tín dụng từ file LN01.") from exc
 
 
 def filter_credit_limit_rows(
@@ -750,6 +797,9 @@ def _parse_nim_file(
     customer_invalid_row_count = 0
     customer_warning_count = 0
     customer_warnings: list[str] = []
+    debt_group_header_present = "AQCCDFIN" in header_map
+    debt_group_counts = {"01": 0, "02": 0, "03": 0, "04": 0, "05": 0, "UNKNOWN": 0}
+    debt_group_invalid_samples: list[str] = []
     unit_warnings: list[str] = []
     checked_units: set[tuple[str, str]] = set()
     missing_trctcd = "TRCTCD" not in header_map
@@ -847,6 +897,15 @@ def _parse_nim_file(
                     )
                 continue
             officer_identity = split_customer_officer(officer)
+            raw_debt_group = optional_value("AQCCDFIN") if debt_group_header_present else ""
+            debt_group_code, debt_group_number, debt_group_category, has_valid_debt_group = normalize_debt_group(raw_debt_group)
+            if has_valid_debt_group:
+                debt_group_counts[debt_group_code] += 1
+            else:
+                debt_group_counts["UNKNOWN"] += 1
+                sample = str(raw_debt_group or "").strip()
+                if debt_group_header_present and sample and sample not in debt_group_invalid_samples and len(debt_group_invalid_samples) < 20:
+                    debt_group_invalid_samples.append(sample)
             customer_rows.append(
                 NormalizedLoanRow(
                     period=period,
@@ -869,6 +928,10 @@ def _parse_nim_file(
                     office_code=office_code,
                     office_name=transaction_office,
                     office_type=office_type,
+                    debt_group_code=debt_group_code,
+                    debt_group_number=debt_group_number,
+                    debt_group_category=debt_group_category,
+                    has_valid_debt_group=has_valid_debt_group,
                 )
             )
     return ParsedNimFile(
@@ -882,6 +945,15 @@ def _parse_nim_file(
         customer_warning_count=customer_warning_count,
         customer_warnings=tuple(customer_warnings),
         unit_warnings=tuple(unit_warnings),
+        debt_group_header_present=debt_group_header_present,
+        debt_group_valid_row_count=sum(debt_group_counts[code] for code in ("01", "02", "03", "04", "05")),
+        debt_group_1_row_count=debt_group_counts["01"],
+        debt_group_2_row_count=debt_group_counts["02"],
+        debt_group_3_row_count=debt_group_counts["03"],
+        debt_group_4_row_count=debt_group_counts["04"],
+        debt_group_5_row_count=debt_group_counts["05"],
+        debt_group_unknown_row_count=debt_group_counts["UNKNOWN"],
+        debt_group_invalid_samples=tuple(debt_group_invalid_samples),
     )
 
 
@@ -927,6 +999,20 @@ def _load_loan_file(file_path: Path) -> tuple[dict[str, float], dict[str, tuple[
 
 def _load_credit_limit_agreements(file_path: Path) -> list[CreditLimitRow]:
     rows = _read_delimited_rows(file_path)
+    agreements, _source_row_count = _load_credit_limit_agreements_from_rows(rows)
+    return agreements
+
+
+def _load_credit_limit_agreements_from_bytes(file_path: Path, raw_data: bytes) -> tuple[list[CreditLimitRow], int]:
+    text = raw_data.decode("utf-8-sig")
+    rows = _read_delimited_rows_from_text(text)
+    try:
+        return _load_credit_limit_agreements_from_rows(rows)
+    except SummaryError as exc:
+        raise SummaryError(str(exc)) from exc
+
+
+def _load_credit_limit_agreements_from_rows(rows: list[list[str]]) -> tuple[list[CreditLimitRow], int]:
     if not rows:
         raise SummaryError("File LN01 không có dữ liệu.")
     headers = [clean_header(item) for item in rows[0]]
@@ -950,27 +1036,37 @@ def _load_credit_limit_agreements(file_path: Path) -> list[CreditLimitRow]:
             by_contract[contract_number] = replace(
                 existing,
                 outstanding_balance=existing.outstanding_balance + outstanding,
+                source_row_count=existing.source_row_count + 1,
             )
             continue
+        officer_code, officer_name = _split_officer(clean_cell(raw[27]))
         by_contract[contract_number] = CreditLimitRow(
+            branch_code=clean_cell(raw[0]),
             customer_code=clean_cell(raw[1]),
             customer_name=clean_cell(raw[2]),
+            account_number=clean_cell(raw[3]),
+            credit_line_type=clean_cell(raw[62]),
             contract_number=contract_number,
             approved_date=parse_date(raw[15]),
             approved_amount=safe_amount(raw[17]),
             outstanding_balance=outstanding,
             expiry_date=parse_date(raw[18]),
             address=clean_cell(raw[35]),
-            officer=clean_cell(raw[27]),
+            officer=officer_name or clean_cell(raw[27]),
+            officer_code=officer_code,
             note="",
             days_to_expiry=None,
             status="",
         )
-    return list(by_contract.values())
+    return list(by_contract.values()), max(0, len(rows) - 1)
 
 
 def _read_delimited_rows(file_path: Path) -> list[list[str]]:
     text = file_path.read_text(encoding="utf-8-sig")
+    return _read_delimited_rows_from_text(text)
+
+
+def _read_delimited_rows_from_text(text: str) -> list[list[str]]:
     first_line = text.splitlines()[0] if text.splitlines() else ""
     delimiter = ","
     if "\t" in first_line:
@@ -1314,3 +1410,48 @@ def _current_user() -> str:
         return getpass.getuser()
     except Exception:
         return ""
+
+
+def _credit_limit_import_logger() -> logging.Logger:
+    logger = logging.getLogger("agribank_v3.credit_limit_import")
+    if not any(getattr(handler, "_agribank_credit_limit_handler", False) for handler in logger.handlers):
+        log_path = application_root() / "logs" / "credit_limit_import.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler._agribank_credit_limit_handler = True
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    return logger
+
+
+def _log_credit_limit_import_failure(
+    *,
+    repository: SummaryRepository,
+    source_file: Path,
+    stage: str,
+    parsed_rows: int,
+    first_row_type: str,
+    batch_id: str,
+    exc: Exception,
+) -> None:
+    store = getattr(repository, "credit_limit_store", None)
+    temp_path = getattr(store, "temp_path", "")
+    _credit_limit_import_logger().error(
+        "Credit limit import failed:\n"
+        "stage=%s\n"
+        "source_file=%s\n"
+        "parsed_rows=%s\n"
+        "row_type=%s\n"
+        "temp_path=%s\n"
+        "batch_id=%s\n"
+        "exception=%s",
+        stage,
+        source_file,
+        parsed_rows,
+        first_row_type or "",
+        temp_path,
+        batch_id or "",
+        type(exc).__name__,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )

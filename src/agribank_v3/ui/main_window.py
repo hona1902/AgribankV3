@@ -114,6 +114,10 @@ from agribank_v3.features.credit.summary.customer.routes import CUSTOMER_DATA_TI
 from agribank_v3.features.credit.summary.customer.window_controller import (
     open_customer_management_window as open_customer_management_window_shared,
 )
+from agribank_v3.features.credit.summary.customer.officer_center_controller import (
+    open_officer_center_window as open_officer_center_window_shared,
+)
+from agribank_v3.features.credit.summary.customer.officer_center_window import OFFICER_CENTER_TITLE
 from agribank_v3.features.settings.unit_directory import UNIT_SETTINGS_TITLE
 from agribank_v3.features.settings.unit_directory.unit_settings_window import (
     UnitSettingsWindow,
@@ -452,7 +456,7 @@ class ResponsiveFeatureGrid(QWidget):
 
     def _column_count_for_width(self, available_width: int) -> int:
         card_span = FeatureCard.CARD_WIDTH + FEATURE_CARD_GAP
-        return max(1, (max(1, available_width) + FEATURE_CARD_GAP) // card_span)
+        return min(4, max(1, (max(1, available_width) + FEATURE_CARD_GAP) // card_span))
 
     def _relayout_cards(self, force: bool = False) -> None:
         columns = self._column_count_for_width(self._available_layout_width())
@@ -2592,6 +2596,10 @@ class MainWindow(QMainWindow):
             self.open_customer_management_window()
             return
 
+        if title == OFFICER_CENTER_TITLE:
+            self.open_officer_center_window()
+            return
+
         if title == NIM_NV_TITLE:
             NimWindow(self, SummaryDataType.NIM_NV).exec()
             return
@@ -2744,6 +2752,13 @@ class MainWindow(QMainWindow):
             self,
             self.settings_database.database_path,
             open_nim_dn_callback=lambda: self.open_feature(NIM_DN_TITLE),
+            initial_tab=initial_tab,
+        )
+
+    def open_officer_center_window(self, initial_tab: str | int | None = None):
+        return open_officer_center_window_shared(
+            self,
+            self.settings_database.database_path,
             initial_tab=initial_tab,
         )
 

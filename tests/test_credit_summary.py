@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import replace
 from datetime import date
 import os
 from pathlib import Path
@@ -13,29 +14,44 @@ import zipfile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QComboBox, QPushButton, QSizePolicy, QStyleOptionViewItem
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox, QPushButton, QRadioButton, QSizePolicy, QStyleOptionViewItem
 
 from agribank_v3.features.credit.summary.dashboard_repository import NimDashboardRepository
-from agribank_v3.features.credit.summary.dashboard_charts import branch_bar_values
+from agribank_v3.features.credit.summary.dashboard_charts import DashboardBranchComparisonChart, branch_bar_values, branch_period_pair_values
 from agribank_v3.features.credit.summary.dashboard_export import (
     SHEET_BRANCH,
     SHEET_DETAIL,
     SHEET_GROWTH,
     SHEET_OVERVIEW,
     DashboardNimExportService,
+    export_dashboard_rows,
 )
 from agribank_v3.features.credit.summary.dashboard_service import DashboardFilters, build_nim_dashboard
-from agribank_v3.features.credit.summary.dashboard_window import NimDashboardWindow
+from agribank_v3.features.credit.summary.dashboard_window import (
+    BRANCH_MODE_CURRENT,
+    BRANCH_MODE_PERIOD_COMPARE,
+    DETAIL_MODE_OFFICE,
+    OVERVIEW_MODE_ENDPOINTS,
+    NimDashboardWindow,
+)
 from agribank_v3.features.credit.summary.database import CREDIT_SUMMARY_DATABASE_NAME, credit_summary_database_path
 from agribank_v3.features.credit.summary.menu import SUMMARY_FEATURES
 from agribank_v3.features.credit.summary.models import (
+    CreditLimitRow,
     LOAN_COMPARE_TITLE,
     DashboardData,
     DashboardMetric,
     SummaryDataType,
     SummaryError,
 )
+from agribank_v3.features.credit.summary.credit_limit import (
+    CreditLimitExcelBatchStore,
+    credit_limit_row_to_excel_values,
+    excel_record_to_credit_limit_row,
+    normalize_credit_limit_row,
+)
+from agribank_v3.features.credit.summary.credit_limit.models import DATA_SHEET_NAME, META_SHEET_NAME
 from agribank_v3.features.credit.summary.nim_ui_config import NIM_DN_UI_CONFIG, NIM_NV_UI_CONFIG
 from agribank_v3.features.credit.summary.officer_history.export import SHEET_NAMES, export_analysis_rows
 from agribank_v3.features.credit.summary.officer_history.models import (
@@ -61,6 +77,7 @@ from agribank_v3.features.credit.summary.reports import (
     LOAN_COMPARE_VBA_HEADERS,
     NIM_DN_DETAIL_HEADERS,
     NIM_NV_DETAIL_HEADERS,
+    export_credit_limit_view_report,
     export_rows,
 )
 from agribank_v3.features.credit.summary.repository import SummaryRepository
@@ -74,14 +91,24 @@ from agribank_v3.features.credit.summary.services import (
     import_nim_nv,
 )
 from agribank_v3.features.credit.summary.windows import (
+    CreditLimitOfficerChart,
     CreditLimitTab,
     DeleteNimPeriodDialog,
     LoanCompareTab,
+    NimTrendChart,
     NimTab,
     SummaryMaintenanceDialog,
+    _chart_expired,
+    _chart_expiring,
+    _chart_total,
+    _chart_total_limit,
+    _chart_total_outstanding,
+    _credit_limit_chart_tooltip,
+    _credit_limit_row_value,
     _display_officer_name,
     _format_money_vn,
     _format_percent_vn,
+    _integer_ticks,
     _populate_combo,
 )
 from agribank_v3.features.settings.unit_directory.models import (
@@ -103,6 +130,7 @@ from agribank_v3.update.db_migrations import MigrationSpec, apply_migrations
 
 class CreditSummaryTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.qt_app = QApplication.instance() or QApplication([])
         self.temporary_directory = TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
         self.database_path = self.root / "DuLieuV3.db"
@@ -110,6 +138,68 @@ class CreditSummaryTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def _write_ln01_file(self, name: str = "5491_ln01_20260427.csv") -> Path:
+        path = self.root / name
+        headers = [f"H{i}" for i in range(63)]
+        headers[0] = "BRCD"
+        headers[1] = "CUSTSEQ"
+        headers[2] = "CUSTNM"
+        headers[3] = "TAI_KHOAN"
+        headers[5] = "DU_NO"
+        headers[14] = "APPRSEQ"
+        headers[15] = "APPROVED_DATE"
+        headers[17] = "APPROVED_AMOUNT"
+        headers[18] = "EXPIRY_DATE"
+        headers[27] = "OFFICER"
+        headers[35] = "ADDR1"
+        headers[62] = "CREDIT_LINE_YPE"
+
+        def row(customer: str, contract: str, expiry: str, outstanding: str, *, credit_type: str = "Line of Credit") -> list[str]:
+            values = [""] * 63
+            values[0] = "5491"
+            values[1] = customer
+            values[2] = f"Khach {customer}"
+            values[3] = f"TK{customer}"
+            values[5] = outstanding
+            values[14] = contract
+            values[15] = "20240101"
+            values[17] = "1000"
+            values[18] = expiry
+            values[27] = "CB1"
+            values[35] = "Dia chi"
+            values[62] = credit_type
+            return values
+
+        rows = [
+            row("KH01", "HD01", "20240115", "100"),
+            row("KH02", "HD02", "20240210", "200"),
+            row("KH03", "HD03", "20240510", "300"),
+            row("KH04", "HD04", "20240210", "400", credit_type="Term Loan"),
+            row("KH01", "HD01", "20240115", "50"),
+        ]
+        path.write_text("\n".join([",".join(headers), *(",".join(item) for item in rows)]), encoding="utf-8")
+        return path
+
+    def _sample_credit_limit_row(self) -> CreditLimitRow:
+        return CreditLimitRow(
+            customer_code="00123",
+            customer_name="Khach 00123",
+            contract_number="HD001",
+            approved_date=date(2024, 1, 1),
+            approved_amount=1_000_000,
+            outstanding_balance=250_000,
+            expiry_date=date(2024, 1, 15),
+            address="Dia chi",
+            officer="CB1",
+            note="",
+            days_to_expiry=None,
+            status="",
+            branch_code="5491",
+            account_number="0000123456",
+            credit_line_type="Line of Credit",
+            source_row_count=1,
+        )
 
     def _set_sample_nim_kpis(self, tab: NimTab) -> list[CompactKpiCard]:
         tab.metrics.set_data(
@@ -1786,6 +1876,334 @@ class CreditSummaryTests(unittest.TestCase):
         finally:
             workbook.close()
 
+    def _seed_dashboard_mode_data(self, filters: DashboardFilters | None = None):
+        self.repository.unit_directory.save_office(
+            OfficeDirectoryEntry(
+                id=None,
+                branch_code="5491",
+                trctcd="01",
+                office_code="5491-01",
+                office_name="Phòng giao dịch Đức Trọng",
+                short_name="PGD Đức Trọng",
+                office_type=TRANSACTION_OFFICE,
+            )
+        )
+        rows_by_file = {
+            "5491_FTPLN_20260131.csv": [
+                "5491,2,10,1,[540000321] Nguyễn Văn A,00,1000,,CN",
+                "5491,1,8,0,[540000322] Nguyễn Văn B,01,3000,,CN",
+                "5400,1,6,0,[540000323] Nguyễn Văn C,00,2000,,CN",
+            ],
+            "5491_FTPLN_20260228.csv": [
+                "5491,2,9,1,[540000321] Nguyễn Văn A,00,1500,,CN",
+                "5491,1,7,0,[540000322] Nguyễn Văn B,01,3500,,CN",
+                "5400,1,6,0,[540000323] Nguyễn Văn C,00,2500,,CN",
+            ],
+            "5491_FTPLN_20260331.csv": [
+                "5491,2,8,1,[540000321] Nguyễn Văn A,00,2000,,CN",
+                "5491,1,6,0,[540000322] Nguyễn Văn B,01,4000,,CN",
+                "5400,1,6,0,[540000323] Nguyễn Văn C,00,3000,,CN",
+            ],
+        }
+        for filename, rows in rows_by_file.items():
+            self._write_nim_dn_file(filename, rows)
+        import_nim_dn(self.repository, self.root)
+        return build_nim_dashboard(
+            NimDashboardRepository(self.repository),
+            SummaryDataType.NIM_DN,
+            filters or DashboardFilters(period_from="2026-01", period_to="2026-03", customer_type="Cá nhân (CN)"),
+        )
+
+    def _dashboard_mode_window(self, filters: DashboardFilters | None = None) -> NimDashboardWindow:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        self._seed_dashboard_mode_data(filters)
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(window.close)
+        self.addCleanup(window.deleteLater)
+        for combo, value in (
+            (window.period_from_combo, "2026-01"),
+            (window.period_to_combo, "2026-03"),
+            (window.customer_type_combo, "Cá nhân (CN)"),
+        ):
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        window.reload()
+        return window
+
+    def test_nim_debt_chart_legend_does_not_overlap_x_axis(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.resize(640, 260)
+        chart.set_trend((("2026-01", 2.0, 3.0, 8.0), ("2026-02", 2.5, 3.5, 8.5)))
+        self.assertFalse(chart.legend_overlaps_x_axis())
+
+    def test_nim_debt_chart_has_metric_radio_group(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        radios = [radio.text() for radio in tab.findChildren(QRadioButton)]
+        self.assertIn("NIM", radios)
+        self.assertIn("Lãi suất bình quân", radios)
+
+    def test_nim_debt_chart_default_mode_is_nim(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        self.assertEqual(tab.chart.metric_mode, "nim")
+        self.assertTrue(tab.chart_nim_radio.isChecked())
+
+    def test_nim_debt_chart_nim_mode_has_two_series(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.set_trend((("2026-01", 2.0, 3.0, 8.0),))
+        self.assertEqual(len(chart._series_payload()), 2)
+
+    def test_nim_debt_chart_rate_mode_has_one_series(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.set_trend((("2026-01", 2.0, 3.0, 8.0),))
+        chart.set_metric_mode("rate")
+        self.assertEqual(len(chart._series_payload()), 1)
+        self.assertEqual(chart._series_payload()[0][0], "Lãi suất bình quân")
+
+    def test_nim_debt_chart_switch_mode_reuses_loaded_data(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        data = (("2026-01", 2.0, 3.0, 8.0), ("2026-02", 2.2, 3.2, 8.2))
+        chart.set_trend(data)
+        before = chart.points_data
+        chart.set_metric_mode("rate")
+        chart.set_metric_mode("nim")
+        self.assertEqual(chart.points_data, before)
+
+    def test_nim_debt_chart_tooltip_matches_mode(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.set_trend((("2026-07", 2.53, 2.61, 8.59),))
+        self.assertIn("NIM sau ĐC", "\n".join(label for label, _color, _values in chart._series_payload()))
+        chart.set_metric_mode("rate")
+        self.assertEqual([label for label, _color, _values in chart._series_payload()], ["Lãi suất bình quân"])
+
+    def test_chart_legend_layout_at_125_percent_dpi(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.resize(800, 325)
+        chart.set_trend(tuple((f"2026-{month:02d}", 2.0, 2.1, 8.0) for month in range(1, 8)))
+        self.assertFalse(chart.legend_overlaps_x_axis())
+
+    def test_chart_legend_layout_at_150_percent_dpi(self) -> None:
+        chart = NimTrendChart()
+        self.addCleanup(chart.deleteLater)
+        chart.resize(960, 390)
+        chart.set_trend(tuple((f"2026-{month:02d}", 2.0, 2.1, 8.0) for month in range(1, 8)))
+        self.assertFalse(chart.legend_overlaps_x_axis())
+
+    def test_dashboard_overview_legend_does_not_overlap_axis(self) -> None:
+        window = self._dashboard_mode_window()
+        window.overview_chart.resize(800, 320)
+        self.assertFalse(window.overview_chart.legend_overlaps_x_axis())
+
+    def test_period_table_has_all_periods_mode(self) -> None:
+        window = self._dashboard_mode_window()
+        self.assertEqual(window.overview_table_mode, "all")
+
+    def test_period_table_has_endpoint_comparison_mode(self) -> None:
+        window = self._dashboard_mode_window()
+        window._overview_mode_changed(OVERVIEW_MODE_ENDPOINTS)
+        self.assertEqual(window.overview_table_mode, OVERVIEW_MODE_ENDPOINTS)
+
+    def test_period_table_all_periods_returns_intermediate_periods(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).overview_by_period_rows()
+        self.assertEqual([row["Kỳ"] for row in rows], ["2026-01", "2026-02", "2026-03"])
+
+    def test_period_table_has_all_periods_mode_returns_intermediate_periods_alias(self) -> None:
+        self.test_period_table_all_periods_returns_intermediate_periods()
+
+    def test_period_table_endpoint_mode_returns_only_from_and_to(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).overview_endpoint_rows()
+        self.assertEqual([row["Kỳ"] for row in rows], ["2026-01", "2026-03"])
+
+    def test_period_table_same_from_to_returns_one_row(self) -> None:
+        data = self._seed_dashboard_mode_data(DashboardFilters(period_from="2026-02", period_to="2026-02", customer_type="Cá nhân (CN)"))
+        rows = DashboardNimExportService(data).overview_endpoint_rows()
+        self.assertEqual([row["Kỳ"] for row in rows], ["2026-02"])
+        self.assertIsNone(rows[0]["Tăng/giảm dư nợ tuyệt đối"])
+
+    def test_endpoint_growth_compares_to_from_period(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).overview_endpoint_rows()
+        self.assertEqual(rows[-1]["Tăng/giảm dư nợ tuyệt đối"], 3000.0)
+        self.assertAlmostEqual(rows[-1]["Tăng trưởng dư nợ (%)"], 50.0)
+
+    def test_period_table_export_respects_mode(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).overview_endpoint_rows()
+        output = export_dashboard_rows(rows, self.root / "overview-mode.xlsx", sheet_name=SHEET_OVERVIEW, metadata=[("Chế độ bảng", "So sánh Từ kỳ và Đến kỳ")])
+        workbook = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(workbook[SHEET_OVERVIEW].max_row, 3)
+            self.assertEqual(workbook["ThongTin"]["A2"].value, "Chế độ bảng")
+        finally:
+            workbook.close()
+
+    def test_period_chart_still_shows_all_periods_in_endpoint_table_mode(self) -> None:
+        window = self._dashboard_mode_window()
+        window._overview_mode_changed(OVERVIEW_MODE_ENDPOINTS)
+        self.assertEqual(len(window.overview_chart.series[0].values), 3)
+        self.assertEqual(window.overview_table.rowCount(), 2)
+
+    def test_branch_comparison_has_two_modes(self) -> None:
+        window = self._dashboard_mode_window()
+        labels = [radio.text() for radio in window.findChildren(QRadioButton)]
+        self.assertIn("So sánh Từ kỳ đến kỳ", labels)
+        self.assertIn("Kỳ hiện tại", labels)
+
+    def test_branch_comparison_default_is_from_to(self) -> None:
+        window = self._dashboard_mode_window()
+        self.assertEqual(window.branch_compare_mode, BRANCH_MODE_PERIOD_COMPARE)
+
+    def test_branch_from_to_returns_two_period_values(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).branch_period_comparison_rows()
+        self.assertIn("Dư nợ Từ kỳ", rows[0])
+        self.assertIn("Dư nợ Đến kỳ", rows[0])
+
+    def test_branch_current_mode_uses_to_period(self) -> None:
+        window = self._dashboard_mode_window()
+        window._branch_mode_changed(BRANCH_MODE_CURRENT)
+        periods = {window.branch_table.item(row, 0).text() for row in range(window.branch_table.rowCount())}
+        self.assertEqual(periods, {"2026-03"})
+
+    def test_branch_from_to_debt_change(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data, metric=METRIC_BALANCE).branch_period_comparison_rows()
+        loc_phat = [row for row in rows if row["Mã chi nhánh"] == "5491"][0]
+        self.assertEqual(loc_phat["Tăng/giảm tuyệt đối"], 2000.0)
+        self.assertAlmostEqual(loc_phat["Tăng trưởng (%)"], 50.0)
+
+    def test_branch_from_to_nim_change_percentage_points(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data, metric=METRIC_NIM_AFTER).branch_period_comparison_rows()
+        loc_phat = [row for row in rows if row["Mã chi nhánh"] == "5491"][0]
+        self.assertIn("NIM sau ĐC Từ kỳ", loc_phat)
+        self.assertAlmostEqual(loc_phat["Thay đổi (điểm %)"], -2.0)
+
+    def test_branch_from_to_rate_change_percentage_points(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data, metric=METRIC_AVERAGE_RATE).branch_period_comparison_rows()
+        loc_phat = [row for row in rows if row["Mã chi nhánh"] == "5491"][0]
+        self.assertIn("Lãi suất bình quân Từ kỳ", loc_phat)
+        self.assertAlmostEqual(loc_phat["Thay đổi (điểm %)"], -1.833333333333333)
+
+    def test_branch_current_chart_sorted_by_metric(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        bars = branch_bar_values(data.branch_rows, METRIC_BALANCE)
+        self.assertGreaterEqual(bars[0][2] or 0, bars[1][2] or 0)
+
+    def test_branch_comparison_export_respects_mode(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data, metric=METRIC_NIM_AFTER).branch_period_comparison_rows()
+        output = export_dashboard_rows(rows, self.root / "branch-mode.xlsx", sheet_name=SHEET_BRANCH, metadata=[("Chế độ bảng", "So sánh Từ kỳ đến kỳ")])
+        workbook = load_workbook(output, data_only=True)
+        try:
+            headers = [workbook[SHEET_BRANCH].cell(1, column).value for column in range(1, workbook[SHEET_BRANCH].max_column + 1)]
+            self.assertIn("Thay đổi (điểm %)", headers)
+            self.assertEqual(workbook["ThongTin"]["B2"].value, "So sánh Từ kỳ đến kỳ")
+        finally:
+            workbook.close()
+
+    def test_branch_chart_uses_horizontal_layout(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        pairs, from_period, to_period = branch_period_pair_values(data.branch_rows, METRIC_BALANCE, from_period="2026-01", to_period="2026-03")
+        chart = DashboardBranchComparisonChart()
+        self.addCleanup(chart.deleteLater)
+        chart.set_pairs(pairs, value_kind="money", metric_label="Dư nợ", from_period=from_period, to_period=to_period)
+        self.assertEqual(chart.orientation, "horizontal_grouped")
+
+    def test_branch_long_names_do_not_overlap(self) -> None:
+        self.repository.unit_directory.save_branch(BranchDirectoryEntry(branch_code="5491", branch_name="Chi nhánh Lộc Phát Lâm Đồng tên rất dài", short_name=""))
+        data = self._seed_dashboard_mode_data()
+        pairs, _from_period, _to_period = branch_period_pair_values(data.branch_rows, METRIC_BALANCE, from_period="2026-01", to_period="2026-03")
+        self.assertTrue(any("tên rất dài" in label for _code, label, _from_value, _to_value in pairs))
+
+    def test_detail_table_has_branch_and_office_modes(self) -> None:
+        window = self._dashboard_mode_window()
+        labels = [radio.text() for radio in window.findChildren(QRadioButton)]
+        self.assertIn("Tổng hợp theo chi nhánh", labels)
+        self.assertIn("Chi tiết theo Hội sở/PGD", labels)
+
+    def test_detail_branch_mode_one_row_per_branch_period(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_branch_rows()
+        self.assertEqual(len([row for row in rows if row["Kỳ"] == "2026-01" and row["Mã chi nhánh"] == "5491"]), 1)
+        self.assertNotIn("Hội sở/Phòng GD", rows[0])
+
+    def test_detail_branch_mode_weighted_average_rate(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        row = [item for item in DashboardNimExportService(data).detail_branch_rows() if item["Kỳ"] == "2026-01" and item["Mã chi nhánh"] == "5491"][0]
+        self.assertAlmostEqual(row["Lãi suất bình quân"], 8.5)
+
+    def test_detail_branch_mode_weighted_nim_before(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        row = [item for item in DashboardNimExportService(data).detail_branch_rows() if item["Kỳ"] == "2026-01" and item["Mã chi nhánh"] == "5491"][0]
+        self.assertAlmostEqual(row["NIM trước ĐC"], 7.25)
+
+    def test_detail_branch_mode_weighted_nim_after(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        row = [item for item in DashboardNimExportService(data).detail_branch_rows() if item["Kỳ"] == "2026-01" and item["Mã chi nhánh"] == "5491"][0]
+        self.assertAlmostEqual(row["NIM sau ĐC"], 7.0)
+
+    def test_detail_office_mode_one_row_per_office_period(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_office_rows()
+        self.assertEqual(len([row for row in rows if row["Kỳ"] == "2026-01" and row["Mã chi nhánh"] == "5491"]), 2)
+
+    def test_detail_office_mode_dynamic_office_name(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_office_rows()
+        self.assertIn("PGD Đức Trọng", {row["Hội sở/Phòng GD"] for row in rows})
+
+    def test_detail_office_mode_head_office_type(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_office_rows()
+        head = [row for row in rows if row["Mã đơn vị"] == "5491-00"][0]
+        self.assertEqual(head["Loại đơn vị"], "Hội sở")
+
+    def test_detail_office_mode_pgd_type(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_office_rows()
+        pgd = [row for row in rows if row["Mã đơn vị"] == "5491-01"][0]
+        self.assertEqual(pgd["Loại đơn vị"], "Phòng giao dịch")
+
+    def test_detail_growth_compares_same_entity(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_office_rows()
+        pgd_march = [row for row in rows if row["Kỳ"] == "2026-03" and row["Mã đơn vị"] == "5491-01"][0]
+        self.assertEqual(pgd_march["Tăng/giảm dư nợ tuyệt đối"], 500.0)
+        self.assertAlmostEqual(pgd_march["Tăng trưởng dư nợ (%)"], 14.2857142857)
+
+    def test_detail_export_respects_grouping_mode(self) -> None:
+        data = self._seed_dashboard_mode_data()
+        rows = DashboardNimExportService(data).detail_branch_rows()
+        output = export_dashboard_rows(rows, self.root / "detail-mode.xlsx", sheet_name=SHEET_DETAIL, metadata=[("Chế độ bảng", "Tổng hợp theo chi nhánh")])
+        workbook = load_workbook(output, data_only=True)
+        try:
+            headers = [workbook[SHEET_DETAIL].cell(1, column).value for column in range(1, workbook[SHEET_DETAIL].max_column + 1)]
+            self.assertNotIn("Hội sở/Phòng GD", headers)
+            self.assertEqual(workbook["ThongTin"]["B2"].value, "Tổng hợp theo chi nhánh")
+        finally:
+            workbook.close()
+
+    def test_detail_table_uses_limit_offset(self) -> None:
+        self._seed_dashboard_mode_data()
+        repository = NimDashboardRepository(self.repository)
+        filters = DashboardFilters(period_from="2026-01", period_to="2026-03", customer_type="Cá nhân (CN)").as_query_filters()
+        page = repository.detail_summary(SummaryDataType.NIM_DN, filters, limit=1, offset=1)
+        self.assertEqual(len(page), 1)
+        self.assertGreater(repository.detail_summary_count(SummaryDataType.NIM_DN, filters), 1)
+
     def test_officer_multi_select_combo_suppresses_popup_close_on_row_toggle(self) -> None:
         app = QApplication.instance() or QApplication([])
         _ = app
@@ -2973,6 +3391,797 @@ class CreditSummaryTests(unittest.TestCase):
             self.assertEqual(worksheet["J3"].value, "Hợp đồng tín dụng dến hạn trong vòng 30 ngày tới theo thời đểm hiện tại")
         finally:
             workbook.close()
+
+    def test_credit_limit_import_writes_excel_batch_not_detail_database(self) -> None:
+        path = self._write_ln01_file()
+        database_size = self.repository.database_path.stat().st_size
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        self.assertEqual(result.row_count, 2)
+        with closing(self.repository.connect()) as database:
+            batch_count = database.execute(
+                "SELECT COUNT(*) FROM summary_import_history WHERE data_type = ?",
+                (SummaryDataType.CREDIT_LIMIT.value,),
+            ).fetchone()[0]
+            detail_count = database.execute("SELECT COUNT(*) FROM credit_limit_details").fetchone()[0]
+        self.assertEqual(batch_count, 0)
+        self.assertEqual(detail_count, 0)
+        self.assertEqual(self.repository.database_path.stat().st_size, database_size)
+        batches = self.repository.list_credit_limit_batches()
+        self.assertEqual(len(batches), 1)
+        self.assertTrue(batches[0].file_path.is_file())
+        workbook = load_workbook(batches[0].file_path, data_only=True)
+        try:
+            self.assertEqual(workbook.sheetnames, [META_SHEET_NAME, DATA_SHEET_NAME])
+            worksheet = workbook[DATA_SHEET_NAME]
+            self.assertEqual(worksheet.max_row, 4)
+            hd01 = [worksheet.cell(row, 7).value for row in range(2, worksheet.max_row + 1)].index("HD01") + 2
+            self.assertEqual(worksheet.cell(hd01, 11).value, 150)
+            self.assertEqual(worksheet.cell(hd01, 15).value, 2)
+        finally:
+            workbook.close()
+
+    def test_credit_limit_query_status_is_dynamic_from_reference_date(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        january_rows = {
+            row["contract_number"]: row
+            for row in self.repository.query_credit_limits(page_size=20, reference_date=date(2024, 1, 20), warn_days=30).rows
+        }
+        march_rows = {
+            row["contract_number"]: row
+            for row in self.repository.query_credit_limits(page_size=20, reference_date=date(2024, 3, 20), warn_days=30).rows
+        }
+
+        self.assertEqual(january_rows["HD01"]["status"], "Đã hết hạn")
+        self.assertEqual(january_rows["HD02"]["status"], "Sắp hết hạn")
+        self.assertNotIn("HD03", january_rows)
+        self.assertEqual(march_rows["HD01"]["status"], "Đã hết hạn")
+        self.assertEqual(march_rows["HD02"]["status"], "Đã hết hạn")
+        self.assertNotIn("HD03", march_rows)
+
+    def test_credit_limit_duplicate_detection_blocks_same_ln01_by_default(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        with self.assertRaises(SummaryError):
+            import_credit_limit_file(
+                self.repository,
+                path,
+                warn_days=30,
+                reference_date=date(2024, 1, 20),
+            )
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_policy="new",
+        )
+
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 2)
+
+    def test_credit_limit_query_no_data_returns_empty_page(self) -> None:
+        result = self.repository.query_credit_limits(page_size=20)
+
+        self.assertEqual(result.total_rows, 0)
+        self.assertEqual(result.rows, [])
+
+    def test_credit_limit_backup_restore_roundtrip_uses_hmhethan_files(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        batch = self.repository.list_credit_limit_batches()[0]
+        backup = self.repository.backup_credit_limit_storage(self.root / "hmhethan.zip")
+
+        deleted = self.repository.delete_credit_limit_batch(batch.batch_id)
+        self.assertTrue(Path(deleted).is_file())
+        self.assertEqual(self.repository.query_credit_limits(page_size=20).total_rows, 0)
+        restored = self.repository.restore_credit_limit_storage(backup, conflict_policy="skip")
+
+        self.assertEqual(restored["restored"], 1)
+        self.assertEqual(self.repository.query_credit_limits(page_size=20).total_rows, 2)
+
+    def test_credit_limit_migrate_legacy_batches_keeps_legacy_tables(self) -> None:
+        legacy_batch_id = self.repository.create_batch(
+            SummaryDataType.CREDIT_LIMIT,
+            period="2024-01-20",
+            source_path=self.root / "legacy_ln01.csv",
+            imported_by="tester",
+            row_count=1,
+            duration_ms=1,
+            message="legacy",
+            source_hash="",
+        )
+        self.repository.save_credit_limit_rows(
+            legacy_batch_id,
+            [
+                CreditLimitRow(
+                    customer_code="KH01",
+                    customer_name="Khach 01",
+                    contract_number="HD01",
+                    approved_date=date(2024, 1, 1),
+                    approved_amount=1000,
+                    outstanding_balance=100,
+                    expiry_date=date(2024, 1, 15),
+                    address="Dia chi",
+                    officer="CB1",
+                    note="Hợp đồng hạn mức tín dụng ã quá hạn đến thời đểm hiện tại",
+                    days_to_expiry=-5,
+                    status="Đã hết hạn",
+                )
+            ],
+            reference_date="2024-01-20",
+            warn_days=30,
+            min_limit=0,
+        )
+
+        result = self.repository.migrate_legacy_credit_limit_batches()
+
+        self.assertEqual(result, {"migrated": 1, "skipped": 0})
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        with closing(self.repository.connect()) as database:
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM summary_import_history").fetchone()[0], 1)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM credit_limit_details").fetchone()[0], 1)
+        self.assertEqual(self.repository.query_credit_limits(page_size=20).total_rows, 1)
+
+    def test_credit_limit_maintenance_ignores_temp_and_reports_invalid_files(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        storage = self.repository.credit_limit_storage_status().storage_path
+        (storage / "~$temp.xlsx").write_text("", encoding="utf-8")
+        (storage / "invalid.xlsx").write_text("not an excel file", encoding="utf-8")
+
+        status = self.repository.credit_limit_storage_status()
+
+        self.assertEqual(status.valid_files, 1)
+        self.assertEqual(status.invalid_files, 1)
+        self.assertEqual(status.temporary_files, 1)
+
+    def test_credit_limit_excel_store_accepts_credit_limit_row(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+
+        metadata = store.create_batch(
+            source_path=self.root / "sample_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="a" * 64,
+            source_file_size=1,
+        )
+
+        self.assertTrue(metadata.file_path.is_file())
+        self.assertEqual(store.query_credit_limits(page_size=20).total_rows, 1)
+
+    def test_credit_limit_excel_writer_does_not_call_get_on_dataclass(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+
+        metadata = store.create_batch(
+            source_path=self.root / "sample_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="b" * 64,
+            source_file_size=1,
+        )
+
+        self.assertTrue(metadata.file_path.exists())
+
+    def test_credit_limit_row_to_excel_values(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        values = credit_limit_row_to_excel_values(row=row, batch_id="batch-1")
+
+        self.assertEqual(values[0], "batch-1")
+        self.assertEqual(values[2], "00123")
+        self.assertEqual(values[6], "HD001")
+        self.assertEqual(values[8], 1_000_000)
+        self.assertEqual(values[10], 250_000)
+
+    def test_credit_limit_excel_values_preserve_field_order(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        values = credit_limit_row_to_excel_values(row=row, batch_id="batch-1")
+
+        self.assertEqual(values[:5], ["batch-1", "5491", "00123", "Khach 00123", "0000123456"])
+
+    def test_credit_limit_batch_id_passed_separately(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        values = credit_limit_row_to_excel_values(row=row, batch_id="external-batch")
+
+        self.assertEqual(values[0], "external-batch")
+        self.assertFalse(hasattr(row, "batch_id"))
+
+    def test_credit_limit_metadata_not_read_from_row(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        values = credit_limit_row_to_excel_values(row=row, batch_id="metadata-batch")
+
+        self.assertEqual(values[0], "metadata-batch")
+
+    def test_credit_limit_excel_reader_returns_credit_limit_rows(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        rows = self.repository.credit_limit_store._rows_from_file(batch.file_path)
+
+        self.assertTrue(rows)
+        self.assertIsInstance(rows[0], CreditLimitRow)
+
+    def test_credit_limit_mapping_adapter_returns_credit_limit_row(self) -> None:
+        row = normalize_credit_limit_row(
+            {
+                "customer_code": "001",
+                "customer_name": "Khach",
+                "approval_sequence": "HD",
+                "approval_date": "2024-01-01",
+                "approved_limit": "1.000.000",
+                "maturity_date": "2024-01-15",
+                "outstanding_balance": "70.000.000",
+                "officer_name": "CB1",
+            }
+        )
+
+        self.assertIsInstance(row, CreditLimitRow)
+        self.assertEqual(row.approved_amount, 1_000_000)
+        self.assertEqual(row.outstanding_balance, 70_000_000)
+
+    def test_credit_limit_invalid_row_type_raises_clear_error(self) -> None:
+        with self.assertRaisesRegex(TypeError, "Unsupported credit limit row type"):
+            normalize_credit_limit_row(object())
+
+    def test_credit_limit_import_ln01_creates_valid_xlsx(self) -> None:
+        path = self._write_ln01_file()
+
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        workbook = load_workbook(batch.file_path, data_only=True)
+        try:
+            self.assertEqual(workbook.sheetnames, [META_SHEET_NAME, DATA_SHEET_NAME])
+            worksheet = workbook[DATA_SHEET_NAME]
+            self.assertEqual(worksheet.cell(2, 8).is_date, True)
+            self.assertIsInstance(worksheet.cell(2, 9).value, int | float)
+            self.assertIsInstance(worksheet.cell(2, 11).value, int | float)
+        finally:
+            workbook.close()
+
+    def test_credit_limit_import_no_attribute_error(self) -> None:
+        path = self._write_ln01_file()
+
+        result = import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(result.row_count, 2)
+
+    def test_credit_limit_import_failure_cleans_temp_file(self) -> None:
+        path = self._write_ln01_file()
+
+        with patch.object(CreditLimitExcelBatchStore, "_write_data_sheet", side_effect=AttributeError("boom")):
+            with self.assertRaisesRegex(SummaryError, "Không thể tạo batch"):
+                import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        temp_files = list((self.database_path.parent / "HMHETHAN" / "Temp").glob("*"))
+        self.assertEqual(temp_files, [])
+
+    def test_credit_limit_import_failure_does_not_create_batch(self) -> None:
+        path = self._write_ln01_file()
+
+        with patch.object(CreditLimitExcelBatchStore, "_write_data_sheet", side_effect=AttributeError("boom")):
+            with self.assertRaises(SummaryError):
+                import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(self.repository.list_credit_limit_batches(), [])
+
+    def test_credit_limit_import_failure_does_not_write_database(self) -> None:
+        path = self._write_ln01_file()
+        size_before = self.repository.database_path.stat().st_size
+
+        with patch.object(CreditLimitExcelBatchStore, "_write_data_sheet", side_effect=AttributeError("boom")):
+            with self.assertRaises(SummaryError):
+                import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        with closing(self.repository.connect()) as database:
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM summary_import_history WHERE data_type = ?", (SummaryDataType.CREDIT_LIMIT.value,)).fetchone()[0], 0)
+            self.assertEqual(database.execute("SELECT COUNT(*) FROM credit_limit_details").fetchone()[0], 0)
+        self.assertEqual(self.repository.database_path.stat().st_size, size_before)
+
+    def test_credit_limit_import_button_reenabled_after_error(self) -> None:
+        tab = CreditLimitTab(self.repository)
+        self.addCleanup(tab.deleteLater)
+        tab.import_button.setEnabled(False)
+
+        with patch.object(QMessageBox, "warning", return_value=None):
+            tab._import_failed(SummaryError("x"))
+
+        self.assertTrue(tab.import_button.isEnabled())
+
+    def test_credit_limit_kpi_accepts_credit_limit_rows(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+        store.create_batch(
+            source_path=self.root / "sample_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="c" * 64,
+            source_file_size=1,
+        )
+
+        dashboard = store.dashboard_credit_limits(reference_date=date(2024, 1, 20))
+
+        self.assertEqual({metric.label: metric.value for metric in dashboard.metrics}["Tổng dư nợ"], "250.000")
+
+    def test_credit_limit_filter_accepts_credit_limit_rows(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        selected = self.repository.credit_limit_store.filter_rows(
+            batch_id=None,
+            min_limit=0,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(row.customer_code, "00123")
+
+    def test_credit_limit_table_model_accepts_credit_limit_rows(self) -> None:
+        row = self._sample_credit_limit_row()
+
+        self.assertEqual(_credit_limit_row_value(row, "outstanding_balance"), 250_000)
+
+    def test_credit_limit_export_accepts_credit_limit_rows(self) -> None:
+        tab = CreditLimitTab(self.repository)
+        self.addCleanup(tab.deleteLater)
+        tab.current_rows = [self._sample_credit_limit_row()]
+
+        rows = tab._export_rows()
+
+        self.assertEqual(rows[0]["Tổng dư nợ HĐTD"], 250_000)
+
+    def test_credit_limit_export_money_columns_are_numeric(self) -> None:
+        tab = CreditLimitTab(self.repository)
+        self.addCleanup(tab.deleteLater)
+        tab.current_rows = [self._sample_credit_limit_row()]
+
+        output = export_rows(tab._export_rows(), self.root / "credit-limit-ui.xlsx", title=tab.title, sheet_name=tab.title)
+
+        workbook = load_workbook(output, data_only=True)
+        try:
+            worksheet = workbook[tab.title]
+            headers = [worksheet.cell(2, column).value for column in range(1, worksheet.max_column + 1)]
+            approved_column = headers.index("Hạn mức TD") + 1
+            outstanding_column = headers.index("Tổng dư nợ HĐTD") + 1
+            self.assertEqual(worksheet.cell(3, approved_column).value, 1_000_000)
+            self.assertEqual(worksheet.cell(3, outstanding_column).value, 250_000)
+            self.assertEqual(worksheet.cell(3, approved_column).number_format, "#,##0")
+            self.assertEqual(worksheet.cell(3, outstanding_column).number_format, "#,##0")
+        finally:
+            workbook.close()
+
+    def test_credit_limit_export_includes_summary_metrics(self) -> None:
+        tab = CreditLimitTab(self.repository)
+        self.addCleanup(tab.deleteLater)
+        tab.current_rows = [self._sample_credit_limit_row()]
+        tab.current_dashboard = DashboardData(
+            metrics=(
+                DashboardMetric("HĐTD đã hết hạn", "1", "expired"),
+                DashboardMetric("HĐTD sắp hết hạn", "0", "expiring"),
+                DashboardMetric("Tổng HĐTD cảnh báo", "1", "total"),
+                DashboardMetric("Tổng hạn mức", "1.000.000", "limit"),
+                DashboardMetric("Tổng dư nợ", "250.000", "balance"),
+            )
+        )
+
+        output = export_credit_limit_view_report(
+            tab._export_rows(),
+            tab.current_dashboard.metrics,
+            self.root / "credit-limit-summary.xlsx",
+            title=tab.title,
+            sheet_name=tab.title,
+        )
+
+        workbook = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(workbook.sheetnames, ["TongHop", tab.title])
+            summary = workbook["TongHop"]
+            metrics = {summary.cell(row, 1).value: summary.cell(row, 2).value for row in range(3, summary.max_row + 1)}
+            self.assertEqual(metrics["Tổng dư nợ"], 250_000)
+            self.assertEqual(metrics["Tổng hạn mức"], 1_000_000)
+            self.assertEqual(metrics["Tổng HĐTD cảnh báo"], 1)
+        finally:
+            workbook.close()
+
+    def test_credit_limit_legacy_mapping_normalized_once(self) -> None:
+        mapping = {"customer_code": "001", "approval_sequence": "HD", "approved_limit": 100, "maturity_date": "2024-01-15"}
+
+        row = excel_record_to_credit_limit_row(mapping)
+
+        self.assertIsInstance(row, CreditLimitRow)
+
+    def test_credit_limit_total_outstanding_kpi(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        metrics = {metric.label: metric.value for metric in self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20)).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "350")
+
+    def test_credit_limit_total_outstanding_uses_outstanding_balance(self) -> None:
+        row = self._sample_credit_limit_row()
+        store = CreditLimitExcelBatchStore(self.database_path)
+        store.create_batch(
+            source_path=self.root / "sample_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="d" * 64,
+            source_file_size=1,
+        )
+
+        metrics = {metric.label: metric.value for metric in store.dashboard_credit_limits(reference_date=date(2024, 1, 20)).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "250.000")
+
+    def test_credit_limit_total_limit_uses_approved_limit(self) -> None:
+        row = self._sample_credit_limit_row()
+        store = CreditLimitExcelBatchStore(self.database_path)
+        store.create_batch(
+            source_path=self.root / "sample_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="e" * 64,
+            source_file_size=1,
+        )
+
+        metrics = {metric.label: metric.value for metric in store.dashboard_credit_limits(reference_date=date(2024, 1, 20)).metrics}
+
+        self.assertEqual(metrics["Tổng hạn mức"], "1.000.000")
+
+    def test_credit_limit_outstanding_sum_all_filtered_rows(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=120, reference_date=date(2024, 1, 20))
+
+        metrics = {metric.label: metric.value for metric in self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20), warn_days=120).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "650")
+
+    def test_credit_limit_outstanding_not_limited_to_current_page(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=120, reference_date=date(2024, 1, 20))
+
+        page = self.repository.query_credit_limits(page_size=1, reference_date=date(2024, 1, 20), warn_days=120)
+        metrics = {metric.label: metric.value for metric in self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20), warn_days=120).metrics}
+
+        self.assertEqual(len(page.rows), 1)
+        self.assertEqual(metrics["Tổng dư nợ"], "650")
+
+    def test_credit_limit_zero_outstanding_displays_zero(self) -> None:
+        row = self._sample_credit_limit_row()
+        row = CreditLimitRow(**{**{field: getattr(row, field) for field in row.__dataclass_fields__}, "outstanding_balance": 0})
+        store = CreditLimitExcelBatchStore(self.database_path)
+        store.create_batch(
+            source_path=self.root / "zero_ln01.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="f" * 64,
+            source_file_size=1,
+        )
+
+        metrics = {metric.label: metric.value for metric in store.dashboard_credit_limits(reference_date=date(2024, 1, 20)).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "0")
+
+    def test_credit_limit_missing_outstanding_field_displays_na(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+        metadata = store.create_batch(
+            source_path=self.root / "missing-outstanding.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="1" * 64,
+            source_file_size=1,
+        )
+        workbook = load_workbook(metadata.file_path)
+        try:
+            worksheet = workbook[DATA_SHEET_NAME]
+            headers = [worksheet.cell(1, column).value for column in range(1, worksheet.max_column + 1)]
+            worksheet.delete_cols(headers.index("outstanding_balance") + 1)
+            workbook.save(metadata.file_path)
+        finally:
+            workbook.close()
+        store.invalidate_cache()
+
+        metric = {metric.label: metric for metric in store.dashboard_credit_limits(reference_date=date(2024, 1, 20)).metrics}["Tổng dư nợ"]
+
+        self.assertEqual(metric.value, "—")
+        self.assertEqual(metric.detail, "Batch này không có dữ liệu dư nợ HĐTD.")
+
+    def test_credit_limit_numeric_outstanding_from_excel(self) -> None:
+        row = excel_record_to_credit_limit_row({"outstanding_balance": 70_000_000})
+
+        self.assertEqual(row.outstanding_balance, 70_000_000)
+
+    def test_credit_limit_string_outstanding_normalized(self) -> None:
+        row = excel_record_to_credit_limit_row({"outstanding_balance": "70.000.000"})
+
+        self.assertEqual(row.outstanding_balance, 70_000_000)
+
+    def test_credit_limit_total_outstanding_updates_after_filter(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        metrics = {metric.label: metric.value for metric in self.repository.dashboard_credit_limits(status="Đã hết hạn", reference_date=date(2024, 1, 20)).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "150")
+
+    def test_credit_limit_total_outstanding_updates_reference_date(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        metrics = {metric.label: metric.value for metric in self.repository.dashboard_credit_limits(reference_date=date(2024, 3, 20), warn_days=30).metrics}
+
+        self.assertEqual(metrics["Tổng dư nợ"], "350")
+
+    def test_credit_limit_chart_title(self) -> None:
+        self.assertEqual(CreditLimitOfficerChart.title, "Top CBTD theo số HĐTD cảnh báo")
+
+    def test_credit_limit_chart_aggregates_by_officer_code(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+        rows = (
+            replace(row, officer="Nguyễn Văn A", officer_code="540000001", contract_number="HD001"),
+            replace(row, officer="Nguyễn Văn A", officer_code="540000002", contract_number="HD002"),
+        )
+        store.create_batch(
+            source_path=self.root / "officer-code.csv",
+            rows=rows,
+            accepted_rows=rows,
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="2" * 64,
+            source_file_size=1,
+        )
+
+        payload = store.dashboard_credit_limits(reference_date=date(2024, 1, 20)).pies
+
+        self.assertEqual({item[0] for item in payload}, {"540000001", "540000002"})
+        self.assertEqual(len(payload), 2)
+
+    def test_credit_limit_chart_expired_count(self) -> None:
+        payload = ("", "CB1", 21, 5, 26, 100, 50)
+
+        self.assertEqual(_chart_expired(payload), 21)
+
+    def test_credit_limit_chart_expiring_count(self) -> None:
+        payload = ("", "CB1", 21, 5, 26, 100, 50)
+
+        self.assertEqual(_chart_expiring(payload), 5)
+
+    def test_credit_limit_chart_total_warning_count(self) -> None:
+        payload = ("", "CB1", 21, 5, 26, 100, 50)
+
+        self.assertEqual(_chart_total(payload), 26)
+
+    def test_credit_limit_chart_total_limit(self) -> None:
+        payload = ("", "CB1", 21, 5, 26, 12_500_000_000, 4_200_000_000)
+
+        self.assertEqual(_chart_total_limit(payload), 12_500_000_000)
+
+    def test_credit_limit_chart_total_outstanding(self) -> None:
+        payload = ("", "CB1", 21, 5, 26, 12_500_000_000, 4_200_000_000)
+
+        self.assertEqual(_chart_total_outstanding(payload), 4_200_000_000)
+
+    def test_credit_limit_chart_top_limit(self) -> None:
+        chart = CreditLimitOfficerChart()
+        self.addCleanup(chart.deleteLater)
+
+        chart.set_values(tuple(("", f"CB{i}", 1, 0, 1, 0, 0) for i in range(20)))
+
+        self.assertEqual(len(chart.values), 10)
+
+    def test_credit_limit_chart_integer_axis(self) -> None:
+        self.assertEqual(_integer_ticks(4), [0, 1, 2, 3, 4])
+        self.assertEqual(_integer_ticks(26), [0, 10, 20, 30])
+
+    def test_credit_limit_chart_total_labels(self) -> None:
+        payload = ("", "CB1", 1, 2, 3, 0, 0)
+
+        self.assertIn("Tổng cảnh báo: 3", _credit_limit_chart_tooltip(payload))
+
+    def test_credit_limit_chart_long_officer_names(self) -> None:
+        long_name = "Nguyễn Văn Cán Bộ Tín Dụng Tên Rất Dài"
+        payload = ("", long_name, 1, 2, 3, 0, 0)
+
+        self.assertIn(long_name, _credit_limit_chart_tooltip(payload))
+
+    def test_credit_limit_chart_unknown_officer_group(self) -> None:
+        path = self._write_ln01_file()
+        content = path.read_text(encoding="utf-8").replace("CB1", "")
+        path.write_text(content, encoding="utf-8")
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        payload = self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20)).pies[0]
+
+        self.assertEqual(payload[1], "Không xác định CBTD")
+
+    def test_credit_limit_chart_empty_state(self) -> None:
+        chart = CreditLimitOfficerChart()
+        self.addCleanup(chart.deleteLater)
+
+        chart.set_values(())
+
+        self.assertEqual(chart.values, ())
+
+    def test_credit_limit_chart_tooltip_on_hover(self) -> None:
+        chart = CreditLimitOfficerChart()
+        self.addCleanup(chart.deleteLater)
+
+        chart._show_payload_tooltip(("", "CB1", 1, 2, 3, 100, 50), "Đã hết hạn", QPoint(10, 10))
+
+        self.assertTrue(chart.tooltip_is_visible())
+
+    def test_credit_limit_chart_tooltip_officer_name(self) -> None:
+        self.assertIn("Cán bộ: CB1", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_expired_count(self) -> None:
+        self.assertIn("HĐTD đã hết hạn: 1", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_expiring_count(self) -> None:
+        self.assertIn("HĐTD sắp hết hạn: 2", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_total_warning(self) -> None:
+        self.assertIn("Tổng cảnh báo: 3", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_total_limit(self) -> None:
+        self.assertIn("Tổng hạn mức: 100 đồng", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_total_outstanding(self) -> None:
+        self.assertIn("Tổng dư nợ: 50 đồng", _credit_limit_chart_tooltip(("", "CB1", 1, 2, 3, 100, 50)))
+
+    def test_credit_limit_chart_tooltip_persists_while_hovered(self) -> None:
+        chart = CreditLimitOfficerChart()
+        self.addCleanup(chart.deleteLater)
+
+        chart._show_payload_tooltip(("", "CB1", 1, 2, 3, 100, 50), "Sắp hết hạn", QPoint(10, 10))
+
+        self.assertTrue(chart.tooltip_is_visible())
+
+    def test_credit_limit_chart_tooltip_hides_on_leave(self) -> None:
+        chart = CreditLimitOfficerChart()
+        self.addCleanup(chart.deleteLater)
+        chart._show_payload_tooltip(("", "CB1", 1, 2, 3, 100, 50), "", QPoint(10, 10))
+
+        chart.hide_tooltip()
+
+        self.assertFalse(chart.tooltip_is_visible())
+
+    def test_credit_limit_chart_tooltip_stays_inside_screen(self) -> None:
+        chart = CreditLimitOfficerChart()
+        chart.resize(240, 180)
+        self.addCleanup(chart.deleteLater)
+
+        chart._show_payload_tooltip(("", "CB1", 1, 2, 3, 100, 50), "", QPoint(230, 170))
+
+        self.assertLessEqual(chart.tooltip_label.x() + chart.tooltip_label.width(), chart.width())
+        self.assertLessEqual(chart.tooltip_label.y() + chart.tooltip_label.height(), chart.height())
+
+    def test_credit_limit_kpi_chart_table_same_filter(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        page = self.repository.query_credit_limits(status="Đã hết hạn", reference_date=date(2024, 1, 20))
+        dashboard = self.repository.dashboard_credit_limits(status="Đã hết hạn", reference_date=date(2024, 1, 20))
+
+        self.assertEqual(page.total_rows, 1)
+        self.assertEqual(dashboard.pies[0][4], 1)
+        self.assertEqual({metric.label: metric.value for metric in dashboard.metrics}["Tổng HĐTD cảnh báo"], "1")
+
+    def test_credit_limit_batch_change_refreshes_all(self) -> None:
+        self.assertEqual(self.repository.dashboard_credit_limits().metrics[2].value, "0")
+
+    def test_credit_limit_status_change_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(self.repository.dashboard_credit_limits(status="Sắp hết hạn", reference_date=date(2024, 1, 20)).metrics[2].value, "1")
+
+    def test_credit_limit_officer_change_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(self.repository.dashboard_credit_limits(officer="CB1", reference_date=date(2024, 1, 20)).pies[0][1], "CB1")
+
+    def test_credit_limit_search_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        dashboard = self.repository.dashboard_credit_limits(search="HD02", reference_date=date(2024, 1, 20))
+
+        self.assertEqual(dashboard.metrics[2].value, "1")
+
+    def test_credit_limit_reference_date_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        dashboard = self.repository.dashboard_credit_limits(reference_date=date(2024, 3, 20), warn_days=30)
+
+        self.assertEqual(dashboard.metrics[0].value, "2")
+
+    def test_credit_limit_warning_days_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        dashboard = self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20), warn_days=120)
+
+        self.assertEqual(dashboard.metrics[2].value, "3")
+
+    def test_credit_limit_minimum_limit_refreshes_all(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=120, reference_date=date(2024, 1, 20))
+
+        dashboard = self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20), warn_days=120, min_limit=999)
+
+        self.assertEqual(dashboard.metrics[2].value, "3")
+
+    def test_credit_limit_refresh_reads_excel_once(self) -> None:
+        path = self._write_ln01_file()
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+
+        self.repository.query_credit_limits(reference_date=date(2024, 1, 20))
+        cache_size = len(self.repository.credit_limit_store._row_cache)
+        self.repository.dashboard_credit_limits(reference_date=date(2024, 1, 20))
+
+        self.assertEqual(len(self.repository.credit_limit_store._row_cache), cache_size)
+        self.assertIn(batch.file_path, self.repository.credit_limit_store._row_cache)
 
     def test_export_rows_supports_excel_csv_pdf(self) -> None:
         rows = [{"A": "x", "B": 1}]

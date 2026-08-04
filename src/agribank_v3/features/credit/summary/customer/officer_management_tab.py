@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import getpass
+import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -33,6 +35,7 @@ from agribank_v3.features.credit.summary.customer.widgets import (
     SearchBox,
     combo_box,
     current_data,
+    danger_button,
     make_compact_control,
     populate_combo,
     fit_window_to_screen,
@@ -66,14 +69,29 @@ class OfficerManagementTab(QWidget):
         edit_button = secondary_button("Sửa thông tin")
         disable_button = secondary_button("Ngừng sử dụng")
         export_button = secondary_button("Xuất Excel")
+        self.delete_directory_button = danger_button("Xóa danh mục CBTD")
         add_button.clicked.connect(self.add_officer)
         edit_button.clicked.connect(self.edit_officer)
         disable_button.clicked.connect(self.disable_officer)
         export_button.clicked.connect(self.export_excel)
-        for button in (add_button, edit_button, disable_button, export_button):
+        self.delete_directory_button.clicked.connect(self.delete_officer_directory)
+        for button in (add_button, edit_button, disable_button, export_button, self.delete_directory_button):
             actions.addWidget(button)
         actions.addStretch()
         layout.addLayout(actions)
+        self.directory_info_bar = QWidget()
+        self.directory_info_bar.setObjectName("CustomerDirectoryInfoBanner")
+        directory_info_layout = QHBoxLayout(self.directory_info_bar)
+        directory_info_layout.setContentsMargins(10, 6, 10, 6)
+        self.directory_info_label = QLabel(
+            "Danh mục cán bộ được lưu độc lập với dữ liệu các kỳ. "
+            "Việc xóa kỳ không tự động xóa danh mục CBTD."
+        )
+        self.directory_info_label.setObjectName("MutedText")
+        self.directory_info_label.setWordWrap(True)
+        directory_info_layout.addWidget(self.directory_info_label, stretch=1)
+        self.directory_info_bar.hide()
+        layout.addWidget(self.directory_info_bar)
         self.state_banner = QueryStateBanner()
         self.state_banner.retryRequested.connect(lambda: self.refresh(use_cache=False))
         layout.addWidget(self.state_banner)
@@ -95,8 +113,10 @@ class OfficerManagementTab(QWidget):
                 for code in self.repository.distinct_branch_codes()
             ],
         )
+        self._refresh_directory_controls()
 
     def refresh(self, *args, use_cache: bool = True) -> None:
+        self._refresh_directory_controls()
         search_text = self.search_box.text()
         branch_code = current_data(self.branch_combo)
         status = current_data(self.status_combo)
@@ -163,6 +183,49 @@ class OfficerManagementTab(QWidget):
             return
         QMessageBox.information(self, "Xuất danh mục cán bộ", f"Đã xuất: {output}")
 
+    def delete_officer_directory(self) -> None:
+        if not self.repository.officer_directory_count():
+            return
+        if self.repository.has_period_data():
+            QMessageBox.warning(
+                self,
+                "Xóa danh mục CBTD",
+                "Không thể xóa toàn bộ danh mục CBTD khi còn dữ liệu kỳ. "
+                "Hãy xóa hết dữ liệu kỳ trước, hoặc chỉ ngừng sử dụng từng cán bộ không còn cần theo dõi.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Xóa danh mục CBTD",
+            "Danh mục CBTD có thể chứa các thông tin đã chỉnh sửa thủ công. "
+            "Thao tác này không thể hoàn tác nếu chưa có bản sao lưu.\n\n"
+            "Bạn có chắc muốn xóa toàn bộ danh mục CBTD và các ghi đè cán bộ không?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result = self.repository.delete_officer_directory(
+                user_name=_current_user(),
+                computer_name=os.environ.get("COMPUTERNAME", ""),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Xóa danh mục CBTD", str(exc))
+            return
+        self.invalidate_cache()
+        self._notify_parent_after_directory_delete()
+        self.model.set_rows([])
+        self.pager.set_state(page=1, page_size=self.page_size, total_rows=0)
+        self.refresh_filters()
+        self.refresh(use_cache=False)
+        QMessageBox.information(
+            self,
+            "Xóa danh mục CBTD",
+            "Đã xóa danh mục CBTD.\n"
+            f"Số cán bộ đã xóa: {int(result.get('deleted_officer_directory_count', 0)):,}".replace(",", "."),
+        )
+
     def _selected_row(self) -> dict[str, object]:
         indexes = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []
         if not indexes:
@@ -192,6 +255,7 @@ class OfficerManagementTab(QWidget):
         self.query_controller.wait_for_idle()
 
     def _apply_result(self, result) -> None:
+        self._refresh_directory_controls()
         self.model.set_rows(result.rows)
         self.pager.set_state(page=result.page, page_size=result.page_size, total_rows=result.total_rows)
         if result.total_rows:
@@ -212,10 +276,52 @@ class OfficerManagementTab(QWidget):
     def _notify_parent_cache_invalidated(self) -> None:
         parent = self.parent()
         while parent is not None:
+            if hasattr(parent, "invalidate_cache"):
+                parent.invalidate_cache()
+                return
             if hasattr(parent, "invalidate_customer_caches"):
                 parent.invalidate_customer_caches()
                 return
             parent = parent.parent()
+
+    def _notify_parent_after_directory_delete(self) -> None:
+        parent = self.parent()
+        while parent is not None:
+            if hasattr(parent, "invalidate_cache"):
+                parent.invalidate_cache()
+            if hasattr(parent, "invalidate_customer_caches"):
+                parent.invalidate_customer_caches()
+            if hasattr(parent, "refresh_filters"):
+                parent.refresh_filters()
+            if hasattr(parent, "refresh_all"):
+                try:
+                    parent.refresh_all(use_cache=False)
+                except TypeError:
+                    parent.refresh_all()
+            if hasattr(parent, "handle_customer_data_became_empty") and not self.repository.has_period_data():
+                parent.handle_customer_data_became_empty()
+            if hasattr(parent, "_refresh_open_related_windows"):
+                parent._refresh_open_related_windows()
+            parent = parent.parent()
+
+    def _refresh_directory_controls(self) -> None:
+        directory_count = self.repository.officer_directory_count()
+        has_period_data = self.repository.has_period_data()
+        self.directory_info_bar.setVisible(bool(directory_count and not has_period_data))
+        self.delete_directory_button.setEnabled(bool(directory_count))
+        if has_period_data:
+            self.delete_directory_button.setToolTip("Không xóa toàn bộ danh mục CBTD khi còn dữ liệu kỳ.")
+        elif directory_count:
+            self.delete_directory_button.setToolTip("Xóa danh mục CBTD độc lập và các ghi đè cán bộ.")
+        else:
+            self.delete_directory_button.setToolTip("Danh mục CBTD đang rỗng.")
+
+
+def _current_user() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:
+        return ""
 
 
 class OfficerDirectoryDialog(QDialog):

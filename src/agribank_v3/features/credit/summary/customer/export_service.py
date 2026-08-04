@@ -17,6 +17,7 @@ ColumnSpec = tuple[str, str, str]
 
 MONEY_FORMAT = "#,##0"
 PERCENT_FORMAT = '0.00"%"'
+PERCENT_POINT_FORMAT = '+0.00" đ.%";-0.00" đ.%";0.00" đ.%"'
 TEXT_FORMAT = "@"
 HEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
 
@@ -236,6 +237,98 @@ DETAIL_OFFICER_COLUMNS: tuple[ColumnSpec, ...] = (
     ("override_reason", "Lý do", "text"),
     ("override_created_by", "Người cập nhật", "text"),
     ("override_updated_at", "Thời gian cập nhật", "text"),
+)
+
+DEBT_GROUP_SUMMARY_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("debt_group", "Nhóm nợ", "text"),
+    ("balance", "Dư nợ", "money"),
+    ("share_ratio", "Tỷ trọng", "percent_or_blank"),
+    ("customer_count", "Số khách hàng có dư nợ", "integer"),
+    ("average_rate", "Lãi suất bình quân", "percent_or_blank"),
+    ("nim_before", "NIM trước ĐC", "percent_or_blank"),
+    ("nim_after", "NIM sau ĐC", "percent_or_blank"),
+)
+
+DEBT_GROUP_BRANCH_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("rank", "STT", "integer"),
+    ("branch_code", "Mã chi nhánh", "text"),
+    ("branch_name", "Tên chi nhánh", "text"),
+    ("total_balance", "Tổng dư nợ", "money"),
+    ("debt_group_1_balance", "Nhóm 1", "money"),
+    ("debt_group_2_balance", "Nhóm 2", "money"),
+    ("debt_group_3_balance", "Nhóm 3", "money"),
+    ("debt_group_4_balance", "Nhóm 4", "money"),
+    ("debt_group_5_balance", "Nhóm 5", "money"),
+    ("bad_debt_balance", "Nợ xấu 3-5", "money"),
+    ("attention_ratio", "Tỷ lệ nhóm 2", "percent_or_blank"),
+    ("bad_debt_ratio", "Tỷ lệ nợ xấu", "percent_or_blank"),
+    ("attention_customer_count", "Số KH có nhóm 2", "integer"),
+    ("bad_debt_customer_count", "Số KH có nợ xấu", "integer"),
+    ("average_rate", "Lãi suất bình quân", "percent_or_blank"),
+    ("nim_before", "NIM trước ĐC", "percent_or_blank"),
+    ("nim_after", "NIM sau ĐC", "percent_or_blank"),
+)
+
+DEBT_GROUP_OFFICER_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("rank", "STT", "integer"),
+    ("officer_code", "Mã cán bộ", "text"),
+    ("officer_name", "Tên cán bộ", "text"),
+    ("branch_name", "Chi nhánh", "text"),
+    ("transaction_office", "Phòng giao dịch", "text"),
+    ("total_balance", "Tổng dư nợ", "money"),
+    ("debt_group_1_balance", "Nhóm 1", "money"),
+    ("debt_group_2_balance", "Nhóm 2", "money"),
+    ("debt_group_3_balance", "Nhóm 3", "money"),
+    ("debt_group_4_balance", "Nhóm 4", "money"),
+    ("debt_group_5_balance", "Nhóm 5", "money"),
+    ("bad_debt_balance", "Nợ xấu", "money"),
+    ("attention_ratio", "Tỷ lệ nhóm 2", "percent_or_blank"),
+    ("bad_debt_ratio", "Tỷ lệ nợ xấu", "percent_or_blank"),
+    ("attention_customer_count", "Số KH nhóm 2", "integer"),
+    ("bad_debt_customer_count", "Số KH nợ xấu", "integer"),
+    ("average_rate", "Lãi suất bình quân", "percent_or_blank"),
+    ("nim_before", "NIM trước ĐC", "percent_or_blank"),
+    ("nim_after", "NIM sau ĐC", "percent_or_blank"),
+)
+
+DEBT_GROUP_CUSTOMER_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("rank", "STT", "integer"),
+    ("period", "Kỳ", "center"),
+    ("customer_code", "Mã KH", "text"),
+    ("customer_name", "Tên khách hàng", "text"),
+    ("customer_type", "Loại KH", "customer_type"),
+    ("branch_name", "Chi nhánh", "text"),
+    ("effective_officer_name", "Cán bộ hiệu lực", "text"),
+    ("total_balance", "Tổng dư nợ", "money"),
+    ("worst_debt_group_label", "Nhóm nợ cao nhất", "text"),
+    ("debt_group_1_balance", "Dư nợ nhóm 1", "money"),
+    ("debt_group_2_balance", "Dư nợ nhóm 2", "money"),
+    ("debt_group_3_balance", "Dư nợ nhóm 3", "money"),
+    ("debt_group_4_balance", "Dư nợ nhóm 4", "money"),
+    ("debt_group_5_balance", "Dư nợ nhóm 5", "money"),
+    ("debt_group_unknown_balance", "Dư nợ UNKNOWN", "money"),
+    ("attention_ratio", "Tỷ lệ nhóm 2", "percent_or_blank"),
+    ("bad_debt_ratio", "Tỷ lệ nợ xấu", "percent_or_blank"),
+    ("average_rate", "Lãi suất bình quân", "percent_or_blank"),
+    ("nim_before", "NIM trước ĐC", "percent_or_blank"),
+    ("nim_after", "NIM sau ĐC", "percent_or_blank"),
+)
+
+DETAIL_DEBT_GROUP_COLUMNS: tuple[ColumnSpec, ...] = (
+    ("period", "Kỳ", "center"),
+    ("worst_debt_group_label", "Nhóm nợ cao nhất", "text"),
+    ("total_balance", "Tổng dư nợ", "money"),
+    ("debt_group_1_balance", "Nhóm 1", "money"),
+    ("debt_group_2_balance", "Nhóm 2", "money"),
+    ("debt_group_3_balance", "Nhóm 3", "money"),
+    ("debt_group_4_balance", "Nhóm 4", "money"),
+    ("debt_group_5_balance", "Nhóm 5", "money"),
+    ("debt_group_unknown_balance", "UNKNOWN", "money"),
+    ("attention_ratio", "Tỷ lệ nhóm 2", "percent_or_blank"),
+    ("bad_debt_ratio", "Tỷ lệ nợ xấu", "percent_or_blank"),
+    ("average_rate", "Lãi suất bình quân", "percent_or_blank"),
+    ("nim_before", "NIM trước", "percent_or_blank"),
+    ("nim_after", "NIM sau", "percent_or_blank"),
 )
 
 
@@ -511,6 +604,91 @@ def export_cross_branch_customer_detail(
     return Path(destination)
 
 
+def export_debt_group_analysis(
+    repository: CustomerRepository,
+    filters: CustomerFilters,
+    destination: Path,
+    *,
+    report_period: str = "",
+    branch_sort_by: str = "bad_debt_ratio",
+    branch_sort_desc: bool = True,
+    officer_sort_by: str = "bad_debt_ratio",
+    officer_sort_desc: bool = True,
+    customer_sort_by: str = "bad_debt_ratio",
+    customer_sort_desc: bool = True,
+) -> Path:
+    report_period = str(report_period or filters.current_period or filters.period_to or "").strip()
+    workbook = Workbook()
+    overview = workbook.active
+    overview.title = "TongQuanNhomNo"
+    kpis = repository.get_debt_quality_kpis(report_period, filters)
+    overview_rows = [
+        {"metric": "Kỳ báo cáo", "value": report_period or "Tất cả"},
+        {"metric": "Có dữ liệu nhóm nợ", "value": "Có" if kpis.get("has_debt_group_data") else "Không"},
+        {"metric": "Tổng dư nợ", "value": kpis.get("total_balance", 0)},
+        {"metric": "Dư nợ nhóm 1", "value": kpis.get("debt_group_1_balance", 0)},
+        {"metric": "Nợ cần chú ý", "value": kpis.get("attention_balance", 0)},
+        {"metric": "Nợ xấu", "value": kpis.get("bad_debt_balance", 0)},
+        {"metric": "Dư nợ chưa xác định nhóm", "value": kpis.get("debt_group_unknown_balance", 0)},
+        {"metric": "Tỷ lệ nợ cần chú ý", "value": kpis.get("attention_ratio")},
+        {"metric": "Tỷ lệ nợ xấu", "value": kpis.get("bad_debt_ratio")},
+        {"metric": "KH có nợ cần chú ý", "value": kpis.get("attention_customer_count", 0)},
+        {"metric": "KH có nợ xấu", "value": kpis.get("bad_debt_customer_count", 0)},
+        {"metric": "KH có nhóm nợ UNKNOWN", "value": kpis.get("unknown_customer_count", 0)},
+    ]
+    _write_rows(overview, overview_rows, (("metric", "Chỉ tiêu", "text"), ("value", "Giá trị", "raw")))
+    start_row = overview.max_row + 3
+    overview.cell(start_row, 1, "Bảng tổng hợp nhóm nợ")
+    overview.cell(start_row, 1).font = Font(bold=True)
+    summary_rows = repository.get_debt_group_summary(report_period, filters)
+    for column_index, (_field, label, _kind) in enumerate(DEBT_GROUP_SUMMARY_COLUMNS, start=1):
+        overview.cell(start_row + 1, column_index, label)
+    for row_index, row in enumerate(summary_rows, start=start_row + 2):
+        for column_index, (field, _label, kind) in enumerate(DEBT_GROUP_SUMMARY_COLUMNS, start=1):
+            overview.cell(row_index, column_index, _excel_value(row.get(field), kind, row=row, repository=repository))
+    for cell in overview[start_row + 1]:
+        cell.font = Font(bold=True)
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    _style_sheet(overview)
+
+    branch_rows = _rank_rows(
+        _all_branch_debt_group_rows(repository, report_period, filters, branch_sort_by, branch_sort_desc)
+    )
+    _write_rows(workbook.create_sheet("NhomNoTheoChiNhanh"), branch_rows, DEBT_GROUP_BRANCH_COLUMNS, repository=repository)
+    officer_rows = _rank_rows(
+        _all_officer_debt_group_rows(repository, report_period, filters, officer_sort_by, officer_sort_desc)
+    )
+    _write_rows(workbook.create_sheet("NhomNoTheoCanBo"), officer_rows, DEBT_GROUP_OFFICER_COLUMNS, repository=repository)
+    customer_rows = _rank_rows(
+        _all_customer_debt_group_rows(repository, report_period, filters, customer_sort_by, customer_sort_desc)
+    )
+    _write_rows(workbook.create_sheet("KhachHangTheoNhomNo"), customer_rows, DEBT_GROUP_CUSTOMER_COLUMNS, repository=repository)
+    workbook.save(destination)
+    return Path(destination)
+
+
+def export_customer_debt_group_history(
+    repository: CustomerRepository,
+    customer_code: str,
+    destination: Path,
+    *,
+    period_from: str = "",
+    period_to: str = "",
+) -> Path:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "LichSuNhomNoKhachHang"
+    _write_rows(
+        worksheet,
+        repository.get_customer_debt_group_history(customer_code, period_from, period_to),
+        DETAIL_DEBT_GROUP_COLUMNS,
+        repository=repository,
+    )
+    workbook.save(destination)
+    return Path(destination)
+
+
 def export_import_history(repository: CustomerRepository, destination: Path) -> Path:
     runs = repository.import_runs(page=1, page_size=5000).rows
     workbook = Workbook()
@@ -543,6 +721,8 @@ def export_customer_detail(repository: CustomerRepository, customer_code: str, d
     _write_rows(nim_sheet, history, DETAIL_NIM_COLUMNS)
     officer_sheet = workbook.create_sheet("LichSuCanBo")
     _write_rows(officer_sheet, repository.customer_officer_history(customer_code), DETAIL_OFFICER_COLUMNS)
+    debt_sheet = workbook.create_sheet("LichSuNhomNoKhachHang")
+    _write_rows(debt_sheet, repository.get_customer_debt_group_history(customer_code), DETAIL_DEBT_GROUP_COLUMNS, repository=repository)
     compare_sheet = workbook.create_sheet("SoSanhCacKy")
     _write_rows(compare_sheet, _detail_compare_rows(history), DETAIL_BALANCE_COLUMNS)
     workbook.save(destination)
@@ -674,13 +854,32 @@ def _write_rows(
     for column_index, (_field, _label, kind) in enumerate(columns, start=1):
         letter = get_column_letter(column_index)
         for cell in worksheet[letter][1:]:
-            if kind in {"money", "money_or_blank"} and cell.value != "":
+            if kind in {"money", "money_or_blank", "money_signed", "term_money_or_dash"} and cell.value != "":
                 cell.number_format = MONEY_FORMAT
-            elif kind in {"percent", "percent_or_blank"} and cell.value != "":
+            elif kind in {"percent", "percent_or_blank", "percent_signed", "term_percent_or_dash"} and cell.value != "":
                 cell.number_format = PERCENT_FORMAT
+            elif kind == "percent_point_signed" and cell.value != "":
+                cell.number_format = PERCENT_POINT_FORMAT
             elif kind in {"text", "branch_display"}:
                 cell.number_format = TEXT_FORMAT
-        alignment = "right" if kind in {"money", "money_or_blank", "percent", "percent_or_blank", "integer", "raw"} else "left"
+        alignment = (
+            "right"
+            if kind
+            in {
+                "money",
+                "money_or_blank",
+                "money_signed",
+                "term_money_or_dash",
+                "percent",
+                "percent_or_blank",
+                "percent_signed",
+                "term_percent_or_dash",
+                "percent_point_signed",
+                "integer",
+                "raw",
+            }
+            else "left"
+        )
         if kind == "center":
             alignment = "center"
         for cell in worksheet[letter][1:]:
@@ -697,6 +896,81 @@ def _ensure_rank_rows(rows: Iterable[dict[str, object]]) -> list[dict[str, objec
     if all("rank" in row for row in output_rows):
         return output_rows
     return _rank_rows(output_rows)
+
+
+def _all_branch_debt_group_rows(
+    repository: CustomerRepository,
+    report_period: str,
+    filters: CustomerFilters,
+    sort_by: str,
+    sort_desc: bool,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    offset = 0
+    page_size = 1000
+    while True:
+        chunk = repository.get_debt_group_by_branch(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=offset,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            return rows
+        offset += page_size
+
+
+def _all_officer_debt_group_rows(
+    repository: CustomerRepository,
+    report_period: str,
+    filters: CustomerFilters,
+    sort_by: str,
+    sort_desc: bool,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    offset = 0
+    page_size = 1000
+    while True:
+        chunk = repository.get_debt_group_by_officer(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=offset,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            return rows
+        offset += page_size
+
+
+def _all_customer_debt_group_rows(
+    repository: CustomerRepository,
+    report_period: str,
+    filters: CustomerFilters,
+    sort_by: str,
+    sort_desc: bool,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    offset = 0
+    page_size = 1000
+    while True:
+        chunk = repository.get_debt_group_customers(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=offset,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            return rows
+        offset += page_size
 
 
 def _write_movement_metadata_sheet(
@@ -753,9 +1027,9 @@ def _excel_value(
         return "Đang sử dụng" if int(value or 0) == 1 else "Ngừng sử dụng"
     if kind == "yes_no":
         return "Có" if int(value or 0) == 1 else "Không"
-    if kind in {"money", "percent", "integer", "raw"}:
+    if kind in {"money", "money_signed", "percent", "percent_signed", "percent_point_signed", "integer", "raw"}:
         return _number(value)
-    if kind in {"money_or_blank", "percent_or_blank"}:
+    if kind in {"money_or_blank", "percent_or_blank", "term_money_or_dash", "term_percent_or_dash"}:
         return "" if value in (None, "") else _number(value)
     return "" if value is None else str(value)
 

@@ -10,7 +10,7 @@ from agribank_v3.runtime_paths import application_root
 
 
 CUSTOMER_DATABASE_NAME = "Customer.db"
-CUSTOMER_SCHEMA_VERSION = "0.1.3"
+CUSTOMER_SCHEMA_VERSION = "0.1.5"
 CUSTOMER_SCHEMA_MIGRATION_NAME = "customer-database-schema"
 CUSTOMER_SCHEMA_CHECKSUM = hashlib.sha256(
     CUSTOMER_SCHEMA_MIGRATION_NAME.encode("utf-8")
@@ -183,7 +183,12 @@ def ensure_customer_schema(connection: sqlite3.Connection) -> None:
             customer_code TEXT NOT NULL,
             officer_code TEXT NOT NULL DEFAULT '',
             officer_name TEXT NOT NULL DEFAULT '',
+            branch_code TEXT NOT NULL DEFAULT '',
+            transaction_office TEXT NOT NULL DEFAULT '',
             balance_managed REAL NOT NULL DEFAULT 0,
+            short_term_balance REAL NOT NULL DEFAULT 0,
+            medium_long_term_balance REAL NOT NULL DEFAULT 0,
+            other_balance REAL NOT NULL DEFAULT 0,
             source_loan_count INTEGER NOT NULL DEFAULT 0,
             interest_rate_numerator REAL NOT NULL DEFAULT 0,
             nim_before_numerator REAL NOT NULL DEFAULT 0,
@@ -280,6 +285,9 @@ def ensure_customer_schema(connection: sqlite3.Connection) -> None:
         """
     )
     _ensure_import_run_columns(connection)
+    _ensure_officer_period_context_columns(connection)
+    _ensure_debt_group_columns(connection)
+    _ensure_debt_group_indexes(connection)
     mark_customer_migration(
         connection,
         version=CUSTOMER_SCHEMA_VERSION,
@@ -301,12 +309,72 @@ def _ensure_import_run_columns(connection: sqlite3.Connection) -> None:
         "invalid_row_count": "INTEGER NOT NULL DEFAULT 0",
         "warning_count": "INTEGER NOT NULL DEFAULT 0",
         "duration_ms": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_valid_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_1_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_2_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_3_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_4_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_5_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_unknown_row_count": "INTEGER NOT NULL DEFAULT 0",
+        "debt_group_invalid_samples": "TEXT NOT NULL DEFAULT ''",
     }
     for column_name, definition in columns.items():
         if not _column_exists(connection, "customer_import_runs", column_name):
             connection.execute(
                 f"ALTER TABLE customer_import_runs ADD COLUMN {column_name} {definition}"
             )
+
+
+def _ensure_officer_period_context_columns(connection: sqlite3.Connection) -> None:
+    columns = {
+        "branch_code": "TEXT NOT NULL DEFAULT ''",
+        "transaction_office": "TEXT NOT NULL DEFAULT ''",
+        "short_term_balance": "REAL NOT NULL DEFAULT 0",
+        "medium_long_term_balance": "REAL NOT NULL DEFAULT 0",
+        "other_balance": "REAL NOT NULL DEFAULT 0",
+    }
+    for column_name, definition in columns.items():
+        if not _column_exists(connection, "customer_officer_period", column_name):
+            connection.execute(
+                f"ALTER TABLE customer_officer_period ADD COLUMN {column_name} {definition}"
+            )
+
+
+def _ensure_debt_group_columns(connection: sqlite3.Connection) -> None:
+    for table_name in ("customer_period_summary", "customer_officer_period", "customer_office_period"):
+        for column_name, definition in _debt_group_column_definitions().items():
+            if not _column_exists(connection, table_name, column_name):
+                connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _ensure_debt_group_indexes(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_customer_period_summary_period_branch_worst_debt
+            ON customer_period_summary(period, branch_code, worst_debt_group);
+        CREATE INDEX IF NOT EXISTS idx_customer_period_summary_period_officer_worst_debt
+            ON customer_period_summary(period, primary_officer_code, worst_debt_group);
+        CREATE INDEX IF NOT EXISTS idx_customer_officer_period_period_officer_branch
+            ON customer_officer_period(period, officer_code, branch_code);
+        """
+    )
+
+
+def _debt_group_column_definitions() -> dict[str, str]:
+    columns: dict[str, str] = {
+        "has_debt_group_data": "INTEGER NOT NULL DEFAULT 0",
+        "worst_debt_group": "TEXT NOT NULL DEFAULT ''",
+        "debt_group_unknown_row_count": "INTEGER NOT NULL DEFAULT 0",
+    }
+    for suffix in ("1", "2", "3", "4", "5", "unknown"):
+        columns[f"debt_group_{suffix}_balance"] = "REAL NOT NULL DEFAULT 0"
+    for suffix in ("1", "2", "3", "4", "5", "unknown"):
+        columns[f"debt_group_{suffix}_interest_numerator"] = "REAL NOT NULL DEFAULT 0"
+    for suffix in ("1", "2", "3", "4", "5", "unknown"):
+        columns[f"debt_group_{suffix}_nim_before_numerator"] = "REAL NOT NULL DEFAULT 0"
+    for suffix in ("1", "2", "3", "4", "5", "unknown"):
+        columns[f"debt_group_{suffix}_nim_after_numerator"] = "REAL NOT NULL DEFAULT 0"
+    return columns
 
 
 def _column_exists(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:

@@ -35,6 +35,20 @@ from agribank_v3.features.credit.summary.customer.services import (
     resolve_representative_office,
 )
 from agribank_v3.features.credit.summary.customer.filters import (
+    DEBT_GROUP_ALL,
+    DEBT_GROUP_ATTENTION,
+    DEBT_GROUP_BAD_DEBT,
+    DEBT_GROUP_HAS_GROUP_1,
+    DEBT_GROUP_HAS_GROUP_2,
+    DEBT_GROUP_HAS_GROUP_3,
+    DEBT_GROUP_HAS_GROUP_4,
+    DEBT_GROUP_HAS_GROUP_5,
+    DEBT_GROUP_UNKNOWN,
+    DEBT_GROUP_WORST_1,
+    DEBT_GROUP_WORST_2,
+    DEBT_GROUP_WORST_3,
+    DEBT_GROUP_WORST_4,
+    DEBT_GROUP_WORST_5,
     MOVEMENT_STATUS_DECREASE,
     MOVEMENT_STATUS_INCREASE,
     MOVEMENT_STATUS_NEW,
@@ -97,6 +111,53 @@ CUSTOMER_DIAGNOSTIC_TABLES = (
     *CUSTOMER_RETAINED_TABLES,
 )
 CUSTOMER_MOVEMENT_TEMP_TABLE = "temp_customer_movements"
+DEBT_GROUP_AGGREGATE_COLUMNS = (
+    "has_debt_group_data",
+    "worst_debt_group",
+    "debt_group_unknown_row_count",
+    "debt_group_1_balance",
+    "debt_group_2_balance",
+    "debt_group_3_balance",
+    "debt_group_4_balance",
+    "debt_group_5_balance",
+    "debt_group_unknown_balance",
+    "debt_group_1_interest_numerator",
+    "debt_group_2_interest_numerator",
+    "debt_group_3_interest_numerator",
+    "debt_group_4_interest_numerator",
+    "debt_group_5_interest_numerator",
+    "debt_group_unknown_interest_numerator",
+    "debt_group_1_nim_before_numerator",
+    "debt_group_2_nim_before_numerator",
+    "debt_group_3_nim_before_numerator",
+    "debt_group_4_nim_before_numerator",
+    "debt_group_5_nim_before_numerator",
+    "debt_group_unknown_nim_before_numerator",
+    "debt_group_1_nim_after_numerator",
+    "debt_group_2_nim_after_numerator",
+    "debt_group_3_nim_after_numerator",
+    "debt_group_4_nim_after_numerator",
+    "debt_group_5_nim_after_numerator",
+    "debt_group_unknown_nim_after_numerator",
+)
+DEBT_GROUP_SUFFIXES = ("1", "2", "3", "4", "5", "unknown")
+DEBT_GROUP_LABELS = {
+    "1": "Nợ nhóm 1",
+    "2": "Nợ nhóm 2",
+    "3": "Nợ nhóm 3",
+    "4": "Nợ nhóm 4",
+    "5": "Nợ nhóm 5",
+    "unknown": "Chưa xác định",
+}
+DEBT_GROUP_CODE_LABELS = {
+    "01": "Nợ nhóm 1",
+    "02": "Nợ nhóm 2",
+    "03": "Nợ nhóm 3",
+    "04": "Nợ nhóm 4",
+    "05": "Nợ nhóm 5",
+    "UNKNOWN": "Chưa xác định",
+    "": "",
+}
 
 
 class CustomerRepository:
@@ -121,11 +182,32 @@ class CustomerRepository:
 
     def ensure_schema(self) -> None:
         try:
+            if self.database_path.is_file() and self._needs_debt_group_migration_backup():
+                self.backup_database()
             with closing(self.connect()) as database:
                 ensure_customer_schema(database)
                 database.commit()
         except Exception as exc:
             raise CustomerDatabaseError(f"Khong the khoi tao {CUSTOMER_DATABASE_NAME}: {exc}") from exc
+
+    def _needs_debt_group_migration_backup(self) -> bool:
+        try:
+            with closing(sqlite3.connect(self.database_path, timeout=10)) as database:
+                tables = {
+                    str(row[0] or "")
+                    for row in database.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                }
+                if "customer_period_summary" not in tables:
+                    return False
+                required = {"has_debt_group_data", "worst_debt_group", "debt_group_1_balance"}
+                period_columns = _table_columns(database, "customer_period_summary")
+                officer_columns = _table_columns(database, "customer_officer_period")
+                return not required.issubset(period_columns) or not {"branch_code", "transaction_office"}.issubset(officer_columns)
+        except Exception:
+            LOGGER.exception("Could not inspect Customer.db before schema migration")
+            return False
 
     def maintenance_status(self) -> CustomerDatabaseStatus:
         with self._database() as database:
@@ -250,6 +332,7 @@ class CustomerRepository:
     ) -> int:
         self._validate_aggregation_balance(result)
         self._validate_office_aggregation_balance(result)
+        self._validate_debt_group_aggregation(result)
         periods = sorted({row.period for row in result.summaries if row.period})
         if not periods:
             raise CustomerDatabaseError("Khong co du lieu khach hang hop le de luu vao Customer.db.")
@@ -288,9 +371,13 @@ class CustomerRepository:
                     organization_customer_count, total_balance, short_term_balance,
                     medium_long_term_balance, other_balance,
                     multiple_officer_customer_count, unknown_ftp_code_count,
-                    invalid_row_count, warning_count, duration_ms
+                    invalid_row_count, warning_count, duration_ms,
+                    debt_group_valid_row_count, debt_group_1_row_count,
+                    debt_group_2_row_count, debt_group_3_row_count,
+                    debt_group_4_row_count, debt_group_5_row_count,
+                    debt_group_unknown_row_count, debt_group_invalid_samples
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, '', 'PENDING', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', 'PENDING', '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result.period,
@@ -313,6 +400,14 @@ class CustomerRepository:
                     result.invalid_row_count,
                     result.warning_count,
                     int(duration_ms),
+                    result.debt_group_valid_row_count,
+                    result.debt_group_1_row_count,
+                    result.debt_group_2_row_count,
+                    result.debt_group_3_row_count,
+                    result.debt_group_4_row_count,
+                    result.debt_group_5_row_count,
+                    result.debt_group_unknown_row_count,
+                    ", ".join(result.debt_group_invalid_samples),
                 ),
             )
             run_id = int(cursor.lastrowid)
@@ -496,6 +591,18 @@ class CustomerRepository:
                 """
             ).fetchone()
         return row is not None
+
+    def officer_directory_count(self) -> int:
+        with self._database() as database:
+            return self._count(database, "customer_officer_directory")
+
+    def officer_override_count(self) -> int:
+        with self._database() as database:
+            return self._count(database, "customer_officer_override")
+
+    def action_log_count(self) -> int:
+        with self._database() as database:
+            return self._count(database, "customer_action_log")
 
     def has_period(self, period: str) -> bool:
         clean_period = str(period or "").strip()
@@ -687,6 +794,458 @@ class CustomerRepository:
                 break
             page += 1
         return rows
+
+    def has_debt_group_data(self, period: str, filters: CustomerFilters | None = None) -> bool:
+        clean_period = str(period or "").strip()
+        if not clean_period:
+            return False
+        filters = replace(filters or CustomerFilters(), current_period=clean_period, debt_group="")
+        where, params = _summary_where(filters, exclude={"debt_group"})
+        with self._database() as database:
+            row = database.execute(
+                f"""
+                SELECT MAX(COALESCE(s.has_debt_group_data, 0)) AS has_data
+                FROM customer_period_summary s
+                {where}
+                """,
+                params,
+            ).fetchone()
+        return bool(row and int(row["has_data"] or 0))
+
+    def get_debt_quality_kpis(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+    ) -> dict[str, object]:
+        filters = _debt_report_filters(filters, report_period)
+        where, params = _summary_where(filters)
+        with self._database() as database:
+            row = database.execute(
+                f"""
+                SELECT
+                    MAX(COALESCE(s.has_debt_group_data, 0)) AS has_debt_group_data,
+                    COUNT(DISTINCT s.customer_code) AS customer_count,
+                    COALESCE(SUM(s.total_balance), 0) AS total_balance,
+                    COALESCE(SUM(s.debt_group_1_balance), 0) AS debt_group_1_balance,
+                    COALESCE(SUM(s.debt_group_2_balance), 0) AS debt_group_2_balance,
+                    COALESCE(SUM(s.debt_group_3_balance), 0) AS debt_group_3_balance,
+                    COALESCE(SUM(s.debt_group_4_balance), 0) AS debt_group_4_balance,
+                    COALESCE(SUM(s.debt_group_5_balance), 0) AS debt_group_5_balance,
+                    COALESCE(SUM(s.debt_group_unknown_balance), 0) AS debt_group_unknown_balance,
+                    COALESCE(SUM(s.interest_rate_numerator), 0) AS interest_rate_numerator,
+                    COALESCE(SUM(s.nim_before_numerator), 0) AS nim_before_numerator,
+                    COALESCE(SUM(s.nim_after_numerator), 0) AS nim_after_numerator,
+                    SUM(CASE WHEN s.debt_group_2_balance > 0 THEN 1 ELSE 0 END) AS attention_customer_count,
+                    SUM(CASE WHEN (
+                        s.debt_group_3_balance + s.debt_group_4_balance + s.debt_group_5_balance
+                    ) > 0 THEN 1 ELSE 0 END) AS bad_debt_customer_count,
+                    SUM(CASE WHEN s.debt_group_unknown_balance > 0 THEN 1 ELSE 0 END) AS unknown_customer_count,
+                    SUM(CASE WHEN s.worst_debt_group = '01' THEN 1 ELSE 0 END) AS worst_group_1_customer_count,
+                    SUM(CASE WHEN s.worst_debt_group = '02' THEN 1 ELSE 0 END) AS worst_group_2_customer_count,
+                    SUM(CASE WHEN s.worst_debt_group = '03' THEN 1 ELSE 0 END) AS worst_group_3_customer_count,
+                    SUM(CASE WHEN s.worst_debt_group = '04' THEN 1 ELSE 0 END) AS worst_group_4_customer_count,
+                    SUM(CASE WHEN s.worst_debt_group = '05' THEN 1 ELSE 0 END) AS worst_group_5_customer_count
+                FROM customer_period_summary s
+                {where}
+                """,
+                params,
+            ).fetchone()
+        output = dict(row) if row is not None else {}
+        return _finalize_debt_group_metrics(output)
+
+    def get_debt_group_summary(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+    ) -> list[dict[str, object]]:
+        filters = _debt_report_filters(filters, report_period)
+        where, params = _summary_where(filters)
+        select_parts = ["COALESCE(SUM(s.total_balance), 0) AS total_balance", "MAX(COALESCE(s.has_debt_group_data, 0)) AS has_debt_group_data"]
+        for suffix in DEBT_GROUP_SUFFIXES:
+            select_parts.extend(
+                [
+                    f"COALESCE(SUM(s.debt_group_{suffix}_balance), 0) AS debt_group_{suffix}_balance",
+                    f"COALESCE(SUM(s.debt_group_{suffix}_interest_numerator), 0) AS debt_group_{suffix}_interest_numerator",
+                    f"COALESCE(SUM(s.debt_group_{suffix}_nim_before_numerator), 0) AS debt_group_{suffix}_nim_before_numerator",
+                    f"COALESCE(SUM(s.debt_group_{suffix}_nim_after_numerator), 0) AS debt_group_{suffix}_nim_after_numerator",
+                    f"SUM(CASE WHEN s.debt_group_{suffix}_balance > 0 THEN 1 ELSE 0 END) AS debt_group_{suffix}_customer_count",
+                ]
+            )
+        with self._database() as database:
+            row = database.execute(
+                f"""
+                SELECT {", ".join(select_parts)}
+                FROM customer_period_summary s
+                {where}
+                """,
+                params,
+            ).fetchone()
+        data = dict(row) if row is not None else {}
+        total_balance = _number(data.get("total_balance"))
+        rows: list[dict[str, object]] = []
+        for suffix in DEBT_GROUP_SUFFIXES:
+            balance = _number(data.get(f"debt_group_{suffix}_balance"))
+            rows.append(
+                {
+                    "debt_group": DEBT_GROUP_LABELS[suffix],
+                    "debt_group_key": suffix,
+                    "balance": balance,
+                    "share_ratio": _ratio(balance * 100, total_balance) if total_balance else None,
+                    "customer_count": int(data.get(f"debt_group_{suffix}_customer_count") or 0),
+                    "average_rate": _ratio(
+                        _number(data.get(f"debt_group_{suffix}_interest_numerator")),
+                        balance,
+                    ) if balance else None,
+                    "nim_before": _ratio(
+                        _number(data.get(f"debt_group_{suffix}_nim_before_numerator")),
+                        balance,
+                    ) if balance else None,
+                    "nim_after": _ratio(
+                        _number(data.get(f"debt_group_{suffix}_nim_after_numerator")),
+                        balance,
+                    ) if balance else None,
+                    "has_debt_group_data": bool(data.get("has_debt_group_data")),
+                }
+            )
+        return rows
+
+    def get_debt_group_trend(
+        self,
+        period_from: str,
+        period_to: str,
+        filters: CustomerFilters | None = None,
+    ) -> list[dict[str, object]]:
+        filters = _trend_filters(replace(filters or CustomerFilters(), current_period=""), period_from, period_to)
+        where, params = _summary_where(filters)
+        with self._database() as database:
+            rows = database.execute(
+                f"""
+                SELECT
+                    s.period,
+                    MAX(COALESCE(s.has_debt_group_data, 0)) AS has_debt_group_data,
+                    COALESCE(SUM(s.total_balance), 0) AS total_balance,
+                    COALESCE(SUM(s.debt_group_2_balance), 0) AS attention_balance,
+                    COALESCE(SUM(s.debt_group_3_balance + s.debt_group_4_balance + s.debt_group_5_balance), 0) AS bad_debt_balance
+                FROM customer_period_summary s
+                {where}
+                GROUP BY s.period
+                ORDER BY s.period ASC
+                """,
+                params,
+            ).fetchall()
+        output: list[dict[str, object]] = []
+        for row in rows:
+            item = dict(row)
+            total_balance = _number(item.get("total_balance"))
+            attention_balance = _number(item.get("attention_balance"))
+            bad_debt_balance = _number(item.get("bad_debt_balance"))
+            item["attention_ratio"] = _ratio(attention_balance * 100, total_balance) if total_balance else None
+            item["bad_debt_ratio"] = _ratio(bad_debt_balance * 100, total_balance) if total_balance else None
+            output.append(item)
+        return output
+
+    def get_debt_group_by_branch(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> list[dict[str, object]]:
+        filters = _debt_report_filters(filters, report_period)
+        rows = self._debt_group_by_branch_page(filters, limit=limit, offset=offset, sort_by=sort_by, sort_desc=sort_desc)
+        _enrich_debt_group_branch_rows(rows, self.unit_directory)
+        return rows
+
+    def _debt_group_by_branch_page(
+        self,
+        filters: CustomerFilters,
+        *,
+        limit: int,
+        offset: int,
+        sort_by: str,
+        sort_desc: bool,
+    ) -> list[dict[str, object]]:
+        base_sql, params = _debt_group_by_branch_base_sql(filters)
+        order_sql = _debt_group_order_sql(sort_by, sort_desc, default="bad_debt_ratio")
+        with self._database() as database:
+            rows = [
+                dict(row)
+                for row in database.execute(
+                    f"SELECT * FROM ({base_sql}) q {order_sql} LIMIT ? OFFSET ?",
+                    (*params, max(1, int(limit or 100)), max(0, int(offset or 0))),
+                ).fetchall()
+            ]
+        _finalize_debt_group_rows(rows)
+        return rows
+
+    def count_debt_group_by_branch(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+    ) -> int:
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_by_branch_base_sql(filters)
+        with self._database() as database:
+            return int(database.execute(f"SELECT COUNT(*) FROM ({base_sql}) q", params).fetchone()[0] or 0)
+
+    def query_debt_group_by_branch(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> PageResult:
+        page = max(1, int(page or 1))
+        page_size = max(1, min(5000, int(page_size or 100)))
+        total_rows = self.count_debt_group_by_branch(report_period, filters)
+        rows = self.get_debt_group_by_branch(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        return PageResult(rows=rows, total_rows=total_rows, page=page, page_size=page_size)
+
+    def get_debt_group_by_officer(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> list[dict[str, object]]:
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_by_officer_base_sql(filters)
+        order_sql = _debt_group_order_sql(sort_by, sort_desc, default="bad_debt_ratio")
+        with self._database() as database:
+            rows = [
+                dict(row)
+                for row in database.execute(
+                    f"SELECT * FROM ({base_sql}) q {order_sql} LIMIT ? OFFSET ?",
+                    (*params, max(1, int(limit or 100)), max(0, int(offset or 0))),
+                ).fetchall()
+            ]
+        _finalize_debt_group_rows(rows)
+        _enrich_debt_group_branch_rows(rows, self.unit_directory)
+        return rows
+
+    def query_debt_group_by_officer(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> PageResult:
+        page = max(1, int(page or 1))
+        page_size = max(1, min(5000, int(page_size or 100)))
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_by_officer_base_sql(filters)
+        with self._database() as database:
+            total_rows = int(database.execute(f"SELECT COUNT(*) FROM ({base_sql}) q", params).fetchone()[0] or 0)
+        rows = self.get_debt_group_by_officer(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        return PageResult(rows=rows, total_rows=total_rows, page=page, page_size=page_size)
+
+    def get_officer_debt_group_history(
+        self,
+        *,
+        officer_code: str = "",
+        officer_name: str = "",
+        filters: CustomerFilters | None = None,
+    ) -> list[dict[str, object]]:
+        filters = filters or CustomerFilters()
+        clauses = ["1 = 1"]
+        params: list[object] = []
+        if filters.current_period:
+            clauses.append("op.period = ?")
+            params.append(filters.current_period)
+        else:
+            if filters.period_from:
+                clauses.append("op.period >= ?")
+                params.append(filters.period_from)
+            if filters.period_to:
+                clauses.append("op.period <= ?")
+                params.append(filters.period_to)
+        code = clean_filter_text(officer_code)
+        name = clean_filter_text(officer_name)
+        if code:
+            clauses.append("op.officer_code = ?")
+            params.append(code)
+        elif name:
+            clauses.append("(op.officer_name = ? OR op.officer_name LIKE ?)")
+            params.extend([name, f"%{name}%"])
+        if filters.branch_code:
+            clauses.append("(op.branch_code = ? OR s.branch_code = ?)")
+            params.extend([filters.branch_code, filters.branch_code])
+        if filters.customer_type:
+            clauses.append("s.customer_type = ?")
+            params.append(filters.customer_type)
+        if filters.loan_term:
+            if filters.loan_term == "SHORT_TERM":
+                clauses.append("s.short_term_balance > 0")
+            elif filters.loan_term == "MEDIUM_LONG_TERM":
+                clauses.append("s.medium_long_term_balance > 0")
+            elif filters.loan_term == "OTHER":
+                clauses.append("s.other_balance > 0")
+        if filters.debt_group:
+            _append_debt_group_filter(clauses, params, filters.debt_group, alias="op", total_column="balance_managed")
+        where = "WHERE " + " AND ".join(clauses)
+        with self._database() as database:
+            rows = [
+                dict(row)
+                for row in database.execute(
+                    f"""
+                    SELECT
+                        op.period,
+                        {_debt_group_aggregate_select_sql(alias="op", total_column="balance_managed", customer_count_expr="COUNT(DISTINCT {alias}.customer_code)")}
+                    FROM customer_officer_period op
+                    LEFT JOIN customer_period_summary s
+                        ON s.period = op.period AND s.customer_code = op.customer_code
+                    {where}
+                    GROUP BY op.period
+                    ORDER BY op.period ASC
+                    """,
+                    params,
+                ).fetchall()
+            ]
+        _finalize_debt_group_rows(rows)
+        return rows
+
+    def get_debt_group_by_office(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> list[dict[str, object]]:
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_by_office_base_sql(filters)
+        order_sql = _debt_group_order_sql(sort_by, sort_desc, default="bad_debt_ratio")
+        with self._database() as database:
+            rows = [
+                dict(row)
+                for row in database.execute(
+                    f"SELECT * FROM ({base_sql}) q {order_sql} LIMIT ? OFFSET ?",
+                    (*params, max(1, int(limit or 100)), max(0, int(offset or 0))),
+                ).fetchall()
+            ]
+        _finalize_debt_group_rows(rows)
+        _enrich_debt_group_branch_rows(rows, self.unit_directory)
+        return rows
+
+    def get_debt_group_customers(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        sort: str = "bad_debt_ratio",
+        sort_by: str | None = None,
+        sort_desc: bool = True,
+    ) -> list[dict[str, object]]:
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_customer_base_sql(filters)
+        order_sql = _debt_group_order_sql(sort_by or sort, sort_desc, default="bad_debt_ratio")
+        with self._database() as database:
+            rows = [
+                dict(row)
+                for row in database.execute(
+                    f"SELECT * FROM ({base_sql}) q {order_sql} LIMIT ? OFFSET ?",
+                    (*params, max(1, int(limit or 100)), max(0, int(offset or 0))),
+                ).fetchall()
+            ]
+        _finalize_debt_group_rows(rows)
+        _enrich_debt_group_branch_rows(rows, self.unit_directory)
+        return rows
+
+    def count_debt_group_customers(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+    ) -> int:
+        filters = _debt_report_filters(filters, report_period)
+        base_sql, params = _debt_group_customer_base_sql(filters)
+        with self._database() as database:
+            return int(database.execute(f"SELECT COUNT(*) FROM ({base_sql}) q", params).fetchone()[0] or 0)
+
+    def query_debt_group_customers(
+        self,
+        report_period: str,
+        filters: CustomerFilters | None = None,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        sort_by: str = "bad_debt_ratio",
+        sort_desc: bool = True,
+    ) -> PageResult:
+        page = max(1, int(page or 1))
+        page_size = max(1, min(5000, int(page_size or 100)))
+        total_rows = self.count_debt_group_customers(report_period, filters)
+        rows = self.get_debt_group_customers(
+            report_period,
+            filters,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+        )
+        return PageResult(rows=rows, total_rows=total_rows, page=page, page_size=page_size)
+
+    def get_customer_debt_group_history(
+        self,
+        customer_code: str,
+        period_from: str | None = None,
+        period_to: str | None = None,
+    ) -> list[dict[str, object]]:
+        code = str(customer_code or "").strip()
+        if not code:
+            return []
+        clauses = ["s.customer_code = ?"]
+        params: list[object] = [code]
+        if period_from:
+            clauses.append("s.period >= ?")
+            params.append(str(period_from))
+        if period_to:
+            clauses.append("s.period <= ?")
+            params.append(str(period_to))
+        where = "WHERE " + " AND ".join(clauses)
+        base_sql = _debt_group_customer_select_sql(where)
+        with self._database() as database:
+            rows = [dict(row) for row in database.execute(f"{base_sql} ORDER BY period ASC", params).fetchall()]
+        _finalize_debt_group_rows(rows)
+        _enrich_debt_group_branch_rows(rows, self.unit_directory)
+        return rows
+
+    def get_customer_debt_group_detail(
+        self,
+        customer_code: str,
+        report_period: str,
+    ) -> dict[str, object] | None:
+        rows = self.get_customer_debt_group_history(customer_code, report_period, report_period)
+        return rows[0] if rows else None
 
     def query_cross_branch_customers(
         self,
@@ -2133,6 +2692,7 @@ class CustomerRepository:
                 movement_status=movement_status,
                 multi_status=filters.multi_status,
                 override_status=filters.override_status,
+                debt_group=filters.debt_group,
             )
         sort_desc = movement_status not in {MOVEMENT_STATUS_DECREASE, MOVEMENT_STATUS_PAID_OFF}
         result = self.movement_rows(
@@ -2209,6 +2769,7 @@ class CustomerRepository:
                 movement_status=filters.movement_status,
                 multi_status="same_period",
                 override_status=filters.override_status,
+                debt_group=filters.debt_group,
             )
         page_result = self.query_customer_list(
             filters,
@@ -2429,6 +2990,7 @@ class CustomerRepository:
                 movement_status=filters.movement_status,
                 multi_status="same_period",
                 override_status=filters.override_status,
+                debt_group=filters.debt_group,
             )
             multi_where, multi_params = _summary_where(multi_filters)
             multi_base_sql = _customer_list_base_sql(multi_where)
@@ -2941,13 +3503,28 @@ class CustomerRepository:
         *,
         user_name: str = "",
         computer_name: str = "",
+        delete_officer_directory: bool = False,
+        delete_officer_overrides: bool = False,
+        delete_action_log: bool = False,
+        backup_before_full_delete: bool = True,
     ) -> dict[str, object]:
         clean_period = str(period or "").strip()
         if not clean_period:
             raise CustomerDatabaseError("Chưa chọn kỳ cần xóa.")
         self._assert_write_allowed()
         info = self.customer_period_info(clean_period)
+        periods_before_delete = self.distinct_periods()
+        is_last_period = periods_before_delete == [clean_period]
+        if (delete_officer_directory or delete_officer_overrides or delete_action_log) and not is_last_period:
+            raise CustomerDatabaseError("Chỉ được xóa danh mục/ghi đè/nhật ký khi xóa kỳ dữ liệu cuối cùng.")
+        delete_officer_overrides = bool(delete_officer_overrides or delete_officer_directory)
+        backup_path = ""
+        if is_last_period and backup_before_full_delete:
+            backup_path = str(self.backup_database())
         now = now_text()
+        deleted_officer_directory_count = 0
+        deleted_officer_override_count = 0
+        deleted_action_log_count = 0
         with self._database() as database:
             affected = [
                 str(row["customer_code"] or "")
@@ -2966,20 +3543,109 @@ class CustomerRepository:
             )
             if remaining_period_count == 0:
                 database.execute("DELETE FROM customer_master")
-            database.execute(
-                """
-                INSERT INTO customer_action_log(
-                    action_type, customer_code, period, old_value, new_value,
-                    reason, user_name, computer_name, created_at
+                if delete_officer_directory:
+                    deleted_officer_directory_count = self._count(database, "customer_officer_directory")
+                    database.execute("DELETE FROM customer_officer_directory")
+                if delete_officer_overrides:
+                    deleted_officer_override_count = self._count(database, "customer_officer_override")
+                    database.execute("DELETE FROM customer_officer_override")
+                if delete_action_log:
+                    deleted_action_log_count = self._count(database, "customer_action_log")
+                    database.execute("DELETE FROM customer_action_log")
+            if not delete_action_log:
+                database.execute(
+                    """
+                    INSERT INTO customer_action_log(
+                        action_type, customer_code, period, old_value, new_value,
+                        reason, user_name, computer_name, created_at
+                    )
+                    VALUES ('DELETE_PERIOD', '', ?, ?, ?, 'Xóa dữ liệu khách hàng theo kỳ', ?, ?, ?)
+                    """,
+                    (
+                        clean_period,
+                        json.dumps(info, ensure_ascii=False),
+                        json.dumps(
+                            {
+                                "delete_officer_directory": bool(delete_officer_directory),
+                                "delete_officer_overrides": bool(delete_officer_overrides),
+                                "deleted_officer_directory_count": deleted_officer_directory_count,
+                                "deleted_officer_override_count": deleted_officer_override_count,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        user_name,
+                        computer_name,
+                        now,
+                    ),
                 )
-                VALUES ('DELETE_PERIOD', '', ?, ?, '', 'Xóa dữ liệu khách hàng theo kỳ', ?, ?, ?)
-                """,
-                (clean_period, json.dumps(info, ensure_ascii=False), user_name, computer_name, now),
-            )
         info = dict(info)
         info["remaining_period_count"] = remaining_period_count
         info["vacuum_recommended"] = remaining_period_count == 0
+        info["backup_path"] = backup_path
+        info["delete_officer_directory"] = bool(delete_officer_directory)
+        info["delete_officer_overrides"] = bool(delete_officer_overrides)
+        info["delete_action_log"] = bool(delete_action_log)
+        info["deleted_officer_directory_count"] = deleted_officer_directory_count
+        info["deleted_officer_override_count"] = deleted_officer_override_count
+        info["deleted_action_log_count"] = deleted_action_log_count
         return info
+
+    def delete_officer_directory(
+        self,
+        *,
+        user_name: str = "",
+        computer_name: str = "",
+        delete_action_log: bool = False,
+        allow_with_period_data: bool = False,
+        backup_before_delete: bool = True,
+    ) -> dict[str, object]:
+        self._assert_write_allowed()
+        if self.has_period_data() and not allow_with_period_data:
+            raise CustomerDatabaseError("Không thể xóa toàn bộ danh mục CBTD khi còn dữ liệu kỳ.")
+        backup_path = str(self.backup_database()) if backup_before_delete else ""
+        now = now_text()
+        deleted_officer_directory_count = 0
+        deleted_officer_override_count = 0
+        deleted_action_log_count = 0
+        with self._database() as database:
+            period_count = self._count_distinct(database, "customer_period_summary", "period")
+            if period_count and not allow_with_period_data:
+                raise CustomerDatabaseError("Không thể xóa toàn bộ danh mục CBTD khi còn dữ liệu kỳ.")
+            deleted_officer_directory_count = self._count(database, "customer_officer_directory")
+            deleted_officer_override_count = self._count(database, "customer_officer_override")
+            database.execute("DELETE FROM customer_officer_directory")
+            database.execute("DELETE FROM customer_officer_override")
+            if delete_action_log:
+                deleted_action_log_count = self._count(database, "customer_action_log")
+                database.execute("DELETE FROM customer_action_log")
+            else:
+                database.execute(
+                    """
+                    INSERT INTO customer_action_log(
+                        action_type, customer_code, period, old_value, new_value,
+                        reason, user_name, computer_name, created_at
+                    )
+                    VALUES ('DELETE_OFFICER_DIRECTORY', '', '', '', ?, 'Xóa danh mục CBTD độc lập', ?, ?, ?)
+                    """,
+                    (
+                        json.dumps(
+                            {
+                                "deleted_officer_directory_count": deleted_officer_directory_count,
+                                "deleted_officer_override_count": deleted_officer_override_count,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        user_name,
+                        computer_name,
+                        now,
+                    ),
+                )
+        return {
+            "backup_path": backup_path,
+            "deleted_officer_directory_count": deleted_officer_directory_count,
+            "deleted_officer_override_count": deleted_officer_override_count,
+            "deleted_action_log_count": deleted_action_log_count,
+        }
 
     def _officer_list_for_customer_periods(self, keys: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
         output: dict[tuple[str, str], str] = {}
@@ -3178,6 +3844,26 @@ class CustomerRepository:
                 )
 
     @staticmethod
+    def _validate_debt_group_aggregation(result: CustomerAggregationResult) -> None:
+        for collection_name, rows, total_field in (
+            ("customer_period_summary", result.summaries, "total_balance"),
+            ("customer_officer_period", result.officer_rows, "balance_managed"),
+            ("customer_office_period", result.office_rows, "total_balance"),
+        ):
+            for row in rows:
+                if not bool(getattr(row, "has_debt_group_data", False)):
+                    continue
+                expected = float(getattr(row, total_field, 0) or 0)
+                actual = _debt_group_balance_total(row)
+                if abs(expected - actual) > 0.0001:
+                    raise CustomerDatabaseError(
+                        "Tong du no nhom no khong khop: "
+                        f"table={collection_name}, period={getattr(row, 'period', '')}, "
+                        f"customer_code={getattr(row, 'customer_code', '')}, "
+                        f"total={expected}, debt_groups={actual}, diff={expected - actual}."
+                    )
+
+    @staticmethod
     def _periods_with_data(database: sqlite3.Connection, periods: list[str]) -> list[str]:
         if not periods:
             return []
@@ -3296,8 +3982,10 @@ class CustomerRepository:
         result: CustomerAggregationResult,
         now: str,
     ) -> None:
+        debt_columns_sql = ", ".join(DEBT_GROUP_AGGREGATE_COLUMNS)
+        placeholders = ", ".join("?" for _item in range(25 + len(DEBT_GROUP_AGGREGATE_COLUMNS)))
         database.executemany(
-            """
+            f"""
             INSERT INTO customer_period_summary(
                 run_id, period, customer_code, branch_code, customer_sequence,
                 customer_name, customer_type, primary_officer_code,
@@ -3305,9 +3993,10 @@ class CustomerRepository:
                 total_balance, short_term_balance, medium_long_term_balance,
                 other_balance, medium_long_ratio, interest_rate_numerator,
                 nim_before_numerator, nim_after_numerator, average_rate,
-                nim_before, nim_after, source_loan_count, created_at, updated_at
+                nim_before, nim_after, source_loan_count, created_at, updated_at,
+                {debt_columns_sql}
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({placeholders})
             """,
             [
                 (
@@ -3336,6 +4025,7 @@ class CustomerRepository:
                     row.source_loan_count,
                     now,
                     now,
+                    *_debt_group_values(row),
                 )
                 for row in result.summaries
             ],
@@ -3347,14 +4037,19 @@ class CustomerRepository:
         result: CustomerAggregationResult,
         now: str,
     ) -> None:
+        debt_columns_sql = ", ".join(DEBT_GROUP_AGGREGATE_COLUMNS)
+        placeholders = ", ".join("?" for _item in range(16 + len(DEBT_GROUP_AGGREGATE_COLUMNS)))
         database.executemany(
-            """
+            f"""
             INSERT INTO customer_officer_period(
-                period, customer_code, officer_code, officer_name, balance_managed,
+                period, customer_code, officer_code, officer_name,
+                branch_code, transaction_office, balance_managed,
+                short_term_balance, medium_long_term_balance, other_balance,
                 source_loan_count, interest_rate_numerator, nim_before_numerator,
-                nim_after_numerator, is_primary, created_at
+                nim_after_numerator, is_primary, created_at,
+                {debt_columns_sql}
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({placeholders})
             """,
             [
                 (
@@ -3362,13 +4057,19 @@ class CustomerRepository:
                     row.customer_code,
                     row.officer_code,
                     row.officer_name,
+                    row.branch_code,
+                    row.transaction_office,
                     row.balance_managed,
+                    row.short_term_balance,
+                    row.medium_long_term_balance,
+                    row.other_balance,
                     row.source_loan_count,
                     row.interest_rate_numerator,
                     row.nim_before_numerator,
                     row.nim_after_numerator,
                     1 if row.is_primary else 0,
                     now,
+                    *_debt_group_values(row),
                 )
                 for row in result.officer_rows
             ],
@@ -3381,17 +4082,20 @@ class CustomerRepository:
         result: CustomerAggregationResult,
         now: str,
     ) -> None:
+        debt_columns_sql = ", ".join(DEBT_GROUP_AGGREGATE_COLUMNS)
+        placeholders = ", ".join("?" for _item in range(22 + len(DEBT_GROUP_AGGREGATE_COLUMNS)))
         database.executemany(
-            """
+            f"""
             INSERT INTO customer_office_period(
                 run_id, period, customer_code, customer_sequence, branch_code,
                 trctcd, office_code, office_name, office_type,
                 primary_officer_code, primary_officer_name, officer_count,
                 total_balance, short_term_balance, medium_long_term_balance,
                 other_balance, interest_rate_numerator, nim_before_numerator,
-                nim_after_numerator, source_loan_count, created_at, updated_at
+                nim_after_numerator, source_loan_count, created_at, updated_at,
+                {debt_columns_sql}
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({placeholders})
             """,
             [
                 (
@@ -3417,6 +4121,7 @@ class CustomerRepository:
                     row.source_loan_count,
                     now,
                     now,
+                    *_debt_group_values(row),
                 )
                 for row in result.office_rows
             ],
@@ -4219,6 +4924,31 @@ def _number(value: object) -> float:
         return 0.0
 
 
+def _table_columns(database: sqlite3.Connection, table_name: str) -> set[str]:
+    return {
+        str(row[1] or "")
+        for row in database.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+
+
+def _debt_group_values(row: object) -> tuple[object, ...]:
+    values: list[object] = []
+    for column in DEBT_GROUP_AGGREGATE_COLUMNS:
+        value = getattr(row, column, 0)
+        if column == "has_debt_group_data":
+            values.append(1 if bool(value) else 0)
+        else:
+            values.append(value)
+    return tuple(values)
+
+
+def _debt_group_balance_total(row: object) -> float:
+    return sum(
+        float(getattr(row, f"debt_group_{suffix}_balance", 0) or 0)
+        for suffix in ("1", "2", "3", "4", "5", "unknown")
+    )
+
+
 def _ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator if denominator else 0.0
 
@@ -4536,7 +5266,351 @@ def _summary_where(
                 )
                 """
             )
+    if filters.debt_group and "debt_group" not in exclude:
+        _append_debt_group_filter(
+            clauses,
+            params,
+            filters.debt_group,
+            alias="s",
+            total_column="total_balance",
+        )
     return "WHERE " + " AND ".join(clauses), params
+
+
+def _debt_report_filters(filters: CustomerFilters | None, report_period: str) -> CustomerFilters:
+    base = filters or CustomerFilters()
+    period = str(report_period or base.current_period or "").strip()
+    return replace(base, current_period=period) if period else base
+
+
+def _append_debt_group_filter(
+    clauses: list[str],
+    params: list[object],
+    filter_key: object,
+    *,
+    alias: str,
+    total_column: str,
+) -> None:
+    key = str(filter_key or "").strip().upper()
+    if key in {"", DEBT_GROUP_ALL}:
+        return
+    prefix = f"{alias}."
+    if key == DEBT_GROUP_HAS_GROUP_1:
+        clauses.append(f"COALESCE({prefix}debt_group_1_balance, 0) > 0")
+    elif key in {DEBT_GROUP_HAS_GROUP_2, DEBT_GROUP_ATTENTION}:
+        clauses.append(f"COALESCE({prefix}debt_group_2_balance, 0) > 0")
+    elif key == DEBT_GROUP_HAS_GROUP_3:
+        clauses.append(f"COALESCE({prefix}debt_group_3_balance, 0) > 0")
+    elif key == DEBT_GROUP_HAS_GROUP_4:
+        clauses.append(f"COALESCE({prefix}debt_group_4_balance, 0) > 0")
+    elif key == DEBT_GROUP_HAS_GROUP_5:
+        clauses.append(f"COALESCE({prefix}debt_group_5_balance, 0) > 0")
+    elif key == DEBT_GROUP_BAD_DEBT:
+        clauses.append(
+            f"(COALESCE({prefix}debt_group_3_balance, 0) "
+            f"+ COALESCE({prefix}debt_group_4_balance, 0) "
+            f"+ COALESCE({prefix}debt_group_5_balance, 0)) > 0"
+        )
+    elif key == DEBT_GROUP_UNKNOWN:
+        clauses.append(f"COALESCE({prefix}debt_group_unknown_balance, 0) > 0")
+    elif key in {
+        DEBT_GROUP_WORST_1,
+        DEBT_GROUP_WORST_2,
+        DEBT_GROUP_WORST_3,
+        DEBT_GROUP_WORST_4,
+        DEBT_GROUP_WORST_5,
+    }:
+        code = key.rsplit("_", 1)[-1]
+        clauses.append(f"{prefix}worst_debt_group = ?")
+        params.append(f"{int(code):02d}")
+    else:
+        clauses.append(f"COALESCE({prefix}{total_column}, 0) >= 0")
+
+
+def _debt_group_aggregate_select_sql(
+    *,
+    alias: str,
+    total_column: str,
+    customer_count_expr: str = "COUNT(DISTINCT {alias}.customer_code)",
+) -> str:
+    prefix = f"{alias}."
+    count_expr = customer_count_expr.format(alias=alias)
+    return f"""
+        MAX(COALESCE({prefix}has_debt_group_data, 0)) AS has_debt_group_data,
+        {count_expr} AS customer_count,
+        COALESCE(SUM({prefix}{total_column}), 0) AS total_balance,
+        COALESCE(SUM({prefix}debt_group_1_balance), 0) AS debt_group_1_balance,
+        COALESCE(SUM({prefix}debt_group_2_balance), 0) AS debt_group_2_balance,
+        COALESCE(SUM({prefix}debt_group_3_balance), 0) AS debt_group_3_balance,
+        COALESCE(SUM({prefix}debt_group_4_balance), 0) AS debt_group_4_balance,
+        COALESCE(SUM({prefix}debt_group_5_balance), 0) AS debt_group_5_balance,
+        COALESCE(SUM({prefix}debt_group_unknown_balance), 0) AS debt_group_unknown_balance,
+        COALESCE(SUM(
+            {prefix}debt_group_3_balance + {prefix}debt_group_4_balance + {prefix}debt_group_5_balance
+        ), 0) AS bad_debt_balance,
+        COALESCE(SUM({prefix}interest_rate_numerator), 0) AS interest_rate_numerator,
+        COALESCE(SUM({prefix}nim_before_numerator), 0) AS nim_before_numerator,
+        COALESCE(SUM({prefix}nim_after_numerator), 0) AS nim_after_numerator,
+        CASE WHEN COALESCE(SUM({prefix}{total_column}), 0) <> 0
+            THEN COALESCE(SUM({prefix}debt_group_2_balance), 0) / SUM({prefix}{total_column}) * 100
+            ELSE NULL
+        END AS attention_ratio,
+        CASE WHEN COALESCE(SUM({prefix}{total_column}), 0) <> 0
+            THEN COALESCE(SUM(
+                {prefix}debt_group_3_balance + {prefix}debt_group_4_balance + {prefix}debt_group_5_balance
+            ), 0) / SUM({prefix}{total_column}) * 100
+            ELSE NULL
+        END AS bad_debt_ratio,
+        CASE WHEN COALESCE(SUM({prefix}{total_column}), 0) <> 0
+            THEN COALESCE(SUM({prefix}interest_rate_numerator), 0) / SUM({prefix}{total_column})
+            ELSE NULL
+        END AS average_rate,
+        CASE WHEN COALESCE(SUM({prefix}{total_column}), 0) <> 0
+            THEN COALESCE(SUM({prefix}nim_before_numerator), 0) / SUM({prefix}{total_column})
+            ELSE NULL
+        END AS nim_before,
+        CASE WHEN COALESCE(SUM({prefix}{total_column}), 0) <> 0
+            THEN COALESCE(SUM({prefix}nim_after_numerator), 0) / SUM({prefix}{total_column})
+            ELSE NULL
+        END AS nim_after,
+        SUM(CASE WHEN {prefix}debt_group_2_balance > 0 THEN 1 ELSE 0 END) AS attention_customer_count,
+        SUM(CASE WHEN (
+            {prefix}debt_group_3_balance + {prefix}debt_group_4_balance + {prefix}debt_group_5_balance
+        ) > 0 THEN 1 ELSE 0 END) AS bad_debt_customer_count,
+        SUM(CASE WHEN {prefix}debt_group_unknown_balance > 0 THEN 1 ELSE 0 END) AS unknown_customer_count
+    """
+
+
+def _debt_group_by_branch_base_sql(filters: CustomerFilters) -> tuple[str, list[object]]:
+    where, params = _summary_where(filters)
+    sql = f"""
+        SELECT
+            s.branch_code,
+            {_debt_group_aggregate_select_sql(alias="s", total_column="total_balance")}
+        FROM customer_period_summary s
+        {where}
+        GROUP BY s.branch_code
+    """
+    return sql, params
+
+
+def _debt_group_by_officer_base_sql(filters: CustomerFilters) -> tuple[str, list[object]]:
+    clauses = ["1 = 1"]
+    params: list[object] = []
+    if filters.current_period:
+        clauses.append("op.period = ?")
+        params.append(filters.current_period)
+    else:
+        if filters.period_from:
+            clauses.append("op.period >= ?")
+            params.append(filters.period_from)
+        if filters.period_to:
+            clauses.append("op.period <= ?")
+            params.append(filters.period_to)
+    if filters.branch_code:
+        clauses.append("(op.branch_code = ? OR s.branch_code = ?)")
+        params.extend([filters.branch_code, filters.branch_code])
+    if filters.customer_type:
+        clauses.append("s.customer_type = ?")
+        params.append(filters.customer_type)
+    if filters.loan_term:
+        if filters.loan_term == "SHORT_TERM":
+            clauses.append("s.short_term_balance > 0")
+        elif filters.loan_term == "MEDIUM_LONG_TERM":
+            clauses.append("s.medium_long_term_balance > 0")
+        elif filters.loan_term == "OTHER":
+            clauses.append("s.other_balance > 0")
+    if filters.search_text:
+        pattern = f"%{clean_filter_text(filters.search_text)}%"
+        clauses.append("(s.customer_code LIKE ? OR s.customer_name LIKE ?)")
+        params.extend([pattern, pattern])
+    if filters.officer:
+        officer = clean_filter_text(filters.officer)
+        clauses.append("(op.officer_code = ? OR op.officer_name = ? OR op.officer_name LIKE ?)")
+        params.extend([officer, officer, f"%{officer}%"])
+    if filters.debt_group:
+        _append_debt_group_filter(clauses, params, filters.debt_group, alias="op", total_column="balance_managed")
+    where = "WHERE " + " AND ".join(clauses)
+    sql = f"""
+        SELECT
+            op.officer_code,
+            op.officer_name,
+            COALESCE(NULLIF(op.branch_code, ''), MIN(s.branch_code), '') AS branch_code,
+            op.transaction_office,
+            {_debt_group_aggregate_select_sql(alias="op", total_column="balance_managed", customer_count_expr="COUNT(DISTINCT {alias}.customer_code)")}
+        FROM customer_officer_period op
+        LEFT JOIN customer_period_summary s
+            ON s.period = op.period AND s.customer_code = op.customer_code
+        {where}
+        GROUP BY op.officer_code, op.officer_name, op.branch_code, op.transaction_office
+    """
+    return sql, params
+
+
+def _debt_group_by_office_base_sql(filters: CustomerFilters) -> tuple[str, list[object]]:
+    clauses = ["1 = 1"]
+    params: list[object] = []
+    if filters.current_period:
+        clauses.append("o.period = ?")
+        params.append(filters.current_period)
+    else:
+        if filters.period_from:
+            clauses.append("o.period >= ?")
+            params.append(filters.period_from)
+        if filters.period_to:
+            clauses.append("o.period <= ?")
+            params.append(filters.period_to)
+    if filters.branch_code:
+        clauses.append("o.branch_code = ?")
+        params.append(filters.branch_code)
+    if filters.customer_type:
+        clauses.append("s.customer_type = ?")
+        params.append(filters.customer_type)
+    if filters.loan_term:
+        if filters.loan_term == "SHORT_TERM":
+            clauses.append("o.short_term_balance > 0")
+        elif filters.loan_term == "MEDIUM_LONG_TERM":
+            clauses.append("o.medium_long_term_balance > 0")
+        elif filters.loan_term == "OTHER":
+            clauses.append("o.other_balance > 0")
+    if filters.search_text:
+        pattern = f"%{clean_filter_text(filters.search_text)}%"
+        clauses.append("(s.customer_code LIKE ? OR s.customer_name LIKE ?)")
+        params.extend([pattern, pattern])
+    if filters.officer:
+        officer = clean_filter_text(filters.officer)
+        clauses.append("(o.primary_officer_code = ? OR o.primary_officer_name = ? OR o.primary_officer_name LIKE ?)")
+        params.extend([officer, officer, f"%{officer}%"])
+    if filters.debt_group:
+        _append_debt_group_filter(clauses, params, filters.debt_group, alias="o", total_column="total_balance")
+    where = "WHERE " + " AND ".join(clauses)
+    sql = f"""
+        SELECT
+            o.branch_code,
+            o.office_code,
+            o.office_name,
+            o.office_type,
+            {_debt_group_aggregate_select_sql(alias="o", total_column="total_balance", customer_count_expr="COUNT(DISTINCT {alias}.customer_code)")}
+        FROM customer_office_period o
+        LEFT JOIN customer_period_summary s
+            ON s.period = o.period AND s.customer_code = o.customer_code
+        {where}
+        GROUP BY o.branch_code, o.office_code, o.office_name, o.office_type
+    """
+    return sql, params
+
+
+def _debt_group_customer_base_sql(filters: CustomerFilters) -> tuple[str, list[object]]:
+    where, params = _summary_where(filters)
+    return _debt_group_customer_select_sql(where), params
+
+
+def _debt_group_customer_select_sql(where: str) -> str:
+    code_expr = _override_value_sql("s", "officer_code", fallback="s.primary_officer_code")
+    name_expr = _override_value_sql("s", "officer_name", fallback="s.primary_officer_name", null_if_empty=True)
+    return f"""
+        SELECT
+            s.period,
+            s.customer_code,
+            s.customer_name,
+            s.customer_type,
+            s.branch_code,
+            {code_expr} AS effective_officer_code,
+            {name_expr} AS effective_officer_name,
+            s.total_balance,
+            s.has_debt_group_data,
+            s.worst_debt_group,
+            s.debt_group_unknown_row_count,
+            s.debt_group_1_balance,
+            s.debt_group_2_balance,
+            s.debt_group_3_balance,
+            s.debt_group_4_balance,
+            s.debt_group_5_balance,
+            s.debt_group_unknown_balance,
+            s.interest_rate_numerator,
+            s.nim_before_numerator,
+            s.nim_after_numerator,
+            s.average_rate,
+            s.nim_before,
+            s.nim_after,
+            CASE WHEN s.total_balance <> 0
+                THEN s.debt_group_2_balance / s.total_balance * 100
+                ELSE NULL
+            END AS attention_ratio,
+            CASE WHEN s.total_balance <> 0
+                THEN (s.debt_group_3_balance + s.debt_group_4_balance + s.debt_group_5_balance) / s.total_balance * 100
+                ELSE NULL
+            END AS bad_debt_ratio,
+            (s.debt_group_3_balance + s.debt_group_4_balance + s.debt_group_5_balance) AS bad_debt_balance
+        FROM customer_period_summary s
+        {where}
+    """
+
+
+def _debt_group_order_sql(sort_by: str, sort_desc: bool, *, default: str) -> str:
+    allowed = {
+        "period": "period",
+        "branch_code": "branch_code",
+        "branch_name": "branch_code",
+        "office_code": "office_code",
+        "officer_code": "officer_code",
+        "officer_name": "officer_name",
+        "customer_code": "customer_code",
+        "customer_name": "customer_name",
+        "total_balance": "total_balance",
+        "debt_group_1_balance": "debt_group_1_balance",
+        "debt_group_2_balance": "debt_group_2_balance",
+        "debt_group_3_balance": "debt_group_3_balance",
+        "debt_group_4_balance": "debt_group_4_balance",
+        "debt_group_5_balance": "debt_group_5_balance",
+        "bad_debt_balance": "bad_debt_balance",
+        "attention_ratio": "attention_ratio",
+        "bad_debt_ratio": "bad_debt_ratio",
+        "average_rate": "average_rate",
+        "nim_before": "nim_before",
+        "nim_after": "nim_after",
+        "customer_count": "customer_count",
+        "attention_customer_count": "attention_customer_count",
+        "bad_debt_customer_count": "bad_debt_customer_count",
+    }
+    column = allowed.get(str(sort_by or ""), allowed.get(default, "bad_debt_ratio"))
+    direction = "DESC" if sort_desc else "ASC"
+    return f"ORDER BY {column} {direction}, total_balance DESC"
+
+
+def _finalize_debt_group_metrics(row: dict[str, object]) -> dict[str, object]:
+    output = dict(row)
+    total_balance = _number(output.get("total_balance"))
+    attention_balance = _number(output.get("debt_group_2_balance"))
+    bad_debt_balance = (
+        _number(output.get("debt_group_3_balance"))
+        + _number(output.get("debt_group_4_balance"))
+        + _number(output.get("debt_group_5_balance"))
+    )
+    output["attention_balance"] = attention_balance
+    output["bad_debt_balance"] = bad_debt_balance
+    output["attention_ratio"] = _ratio(attention_balance * 100, total_balance) if total_balance else None
+    output["bad_debt_ratio"] = _ratio(bad_debt_balance * 100, total_balance) if total_balance else None
+    output["average_rate"] = _ratio(_number(output.get("interest_rate_numerator")), total_balance) if total_balance else None
+    output["nim_before"] = _ratio(_number(output.get("nim_before_numerator")), total_balance) if total_balance else None
+    output["nim_after"] = _ratio(_number(output.get("nim_after_numerator")), total_balance) if total_balance else None
+    output["has_debt_group_data"] = bool(output.get("has_debt_group_data"))
+    return output
+
+
+def _finalize_debt_group_rows(rows: list[dict[str, object]]) -> None:
+    for row in rows:
+        finalized = _finalize_debt_group_metrics(row)
+        row.update(finalized)
+        worst = str(row.get("worst_debt_group") or "")
+        row["worst_debt_group_label"] = DEBT_GROUP_CODE_LABELS.get(worst, worst)
+        row["debt_group_unknown_balance"] = _number(row.get("debt_group_unknown_balance"))
+
+
+def _enrich_debt_group_branch_rows(rows: list[dict[str, object]], unit_directory: UnitDirectoryService | None) -> None:
+    for row in rows:
+        branch_code = str(row.get("branch_code") or "")
+        row["branch_name"] = _branch_display(branch_code, unit_directory) if branch_code else ""
 
 
 def _trend_filters(filters: CustomerFilters, period_from: str = "", period_to: str = "") -> CustomerFilters:

@@ -18,7 +18,8 @@ from PySide6.QtCharts import QValueAxis
 from PySide6.QtCore import QEvent, QRect, Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QComboBox, QDialog, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyleOptionViewItem, QTableView, QTableWidget, QWidget
 
-from agribank_v3.features.catalog import SECTIONS
+from agribank_v3.features.catalog import FEATURE_GROUPS, SECTIONS
+from agribank_v3.features.credit.auto_interest.menu import AUTO_INTEREST_TITLE
 from agribank_v3.features.credit.summary.customer import chart_service
 from agribank_v3.features.credit.summary.customer.async_query import AsyncQueryController, LruQueryCache
 from agribank_v3.features.credit.summary.customer.charts import (
@@ -32,7 +33,15 @@ from agribank_v3.features.credit.summary.customer.charts.chart_formatters import
     format_money_full,
     format_percentage,
 )
-from agribank_v3.features.credit.summary.models import LOAN_COMPARE_TITLE, NIM_DN_CONFIG, SummaryDataType, SummaryError
+from agribank_v3.features.credit.summary.models import (
+    CREDIT_LIMIT_TITLE,
+    LOAN_COMPARE_TITLE,
+    NIM_DN_CONFIG,
+    NIM_DN_TITLE,
+    NIM_NV_TITLE,
+    SummaryDataType,
+    SummaryError,
+)
 from agribank_v3.features.credit.summary.repository import SummaryRepository
 from agribank_v3.features.credit.summary.services import _parse_nim_file, import_nim_dn
 from agribank_v3.features.credit.summary.customer.database import (
@@ -44,6 +53,7 @@ from agribank_v3.features.credit.summary.customer.database import (
     get_customer_database_connection,
 )
 from agribank_v3.features.credit.summary.customer.export_service import (
+    export_debt_group_analysis,
     export_all_customer_sheets,
     export_cross_branch_customers,
     export_cross_branch_customer_detail,
@@ -69,6 +79,7 @@ from agribank_v3.features.credit.summary.customer.models import LoanTerm
 from agribank_v3.features.credit.summary.customer.movement_tab import CustomerMovementTab
 from agribank_v3.features.credit.summary.customer.officer_lookup import OfficerLookupWidget
 from agribank_v3.features.credit.summary.customer.officer_management_tab import OfficerDirectoryDialog
+from agribank_v3.features.credit.summary.customer.officer_center_window import OFFICER_CENTER_TITLE
 from agribank_v3.features.credit.summary.customer.officer_override_dialog import OfficerOverrideDialog
 from agribank_v3.features.credit.summary.customer.period_validation import validate_dashboard_period_filters
 from agribank_v3.features.credit.summary.customer.repository import CustomerRepository, _cross_branch_candidate_sql, _movement_base_sql
@@ -79,6 +90,7 @@ from agribank_v3.features.credit.summary.customer.services import (
     classify_loan_term,
     classify_customer_movement,
     growth_rate,
+    normalize_debt_group,
     normalize_trctcd,
     normalize_customer_sequence,
     resolve_representative_office,
@@ -115,10 +127,11 @@ from agribank_v3.features.settings.unit_directory.models import (
     OfficeDirectoryEntry,
     TRANSACTION_OFFICE,
 )
-from agribank_v3.ui.main_window import MainWindow
+from agribank_v3.ui.main_window import MainWindow, ResponsiveFeatureGrid
 
 
 FTPLN_HEADER = "BRCD,FTP,INTRT,MUCFTPDC,CBTD,TRCTCD,LDRBAL,TRREF,CUSTTP,FTPCD,CUSTSEQ,CUSTNM"
+FTPLN_HEADER_WITH_DEBT_GROUP = FTPLN_HEADER + ",AQCCDFIN"
 
 
 def _wait_until(predicate, timeout: float = 3.0) -> bool:
@@ -904,6 +917,403 @@ class CustomerDatabaseTests(unittest.TestCase):
         self.assertIn("Customer.db chưa cập nhật", result.message)
         self.assertEqual(self._count("customer_period_summary"), 0)
 
+    def test_aqccdfin_header_detected(self) -> None:
+        path = self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+
+        parsed = _parse_nim_file(path, NIM_DN_CONFIG, credit_card_rate=0)
+
+        self.assertTrue(parsed.debt_group_header_present)
+        self.assertEqual(parsed.debt_group_1_row_count, 1)
+        self.assertEqual(parsed.customer_rows[0].debt_group_code, "01")
+
+    def test_debt_group_01(self) -> None:
+        self.assertEqual(normalize_debt_group("01"), ("01", 1, "NORMAL", True))
+
+    def test_debt_group_02(self) -> None:
+        self.assertEqual(normalize_debt_group("02"), ("02", 2, "ATTENTION", True))
+
+    def test_debt_group_03(self) -> None:
+        self.assertEqual(normalize_debt_group("03"), ("03", 3, "BAD_DEBT", True))
+
+    def test_debt_group_04(self) -> None:
+        self.assertEqual(normalize_debt_group("04"), ("04", 4, "BAD_DEBT", True))
+
+    def test_debt_group_05(self) -> None:
+        self.assertEqual(normalize_debt_group("05"), ("05", 5, "BAD_DEBT", True))
+
+    def test_debt_group_excel_numeric_1_0(self) -> None:
+        self.assertEqual(normalize_debt_group("1.0")[0], "01")
+
+    def test_debt_group_preserves_leading_zero(self) -> None:
+        self.assertEqual(normalize_debt_group("'01")[0], "01")
+
+    def test_invalid_debt_group_unknown(self) -> None:
+        for value in ("", "NULL", "N/A", "abc", "00", "-1", "6"):
+            self.assertEqual(normalize_debt_group(value)[0], "UNKNOWN")
+
+    def test_missing_debt_group_unknown(self) -> None:
+        parsed = _parse_nim_file(
+            self._write_ftpln("5491_FTPLN_20260331.csv", [self._row("001", "Khach A", 1000, "DN1")]),
+            NIM_DN_CONFIG,
+            credit_card_rate=0,
+        )
+
+        self.assertFalse(parsed.debt_group_header_present)
+        self.assertEqual(parsed.customer_rows[0].debt_group_code, "UNKNOWN")
+
+    def test_debt_group_category_normal(self) -> None:
+        self.assertEqual(normalize_debt_group("1")[2], "NORMAL")
+
+    def test_debt_group_category_attention(self) -> None:
+        self.assertEqual(normalize_debt_group("2")[2], "ATTENTION")
+
+    def test_debt_group_category_bad_debt(self) -> None:
+        self.assertEqual(normalize_debt_group("5")[2], "BAD_DEBT")
+
+    def test_file_read_once_with_debt_group(self) -> None:
+        path = self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+        calls = {"count": 0}
+        original = Path.read_bytes
+
+        def counted_read_bytes(item):
+            if Path(item) == path:
+                calls["count"] += 1
+            return original(item)
+
+        with patch.object(Path, "read_bytes", counted_read_bytes):
+            _parse_nim_file(path, NIM_DN_CONFIG, credit_card_rate=0)
+
+        self.assertEqual(calls["count"], 1)
+
+    def test_customer_one_row_with_multiple_debt_groups(self) -> None:
+        self._import_debt_group_fixture()
+
+        self.assertEqual(
+            self._count_where("customer_period_summary", "period = '2026-03' AND customer_code = '5491001'"),
+            1,
+        )
+
+    def test_customer_debt_group_balances_sum_to_total(self) -> None:
+        self._import_debt_group_fixture()
+        row = self._customer_summary("5491001", "2026-03")
+
+        total = sum(float(row[f"debt_group_{suffix}_balance"] or 0) for suffix in ("1", "2", "3", "4", "5", "unknown"))
+        self.assertAlmostEqual(float(row["total_balance"]), total)
+
+    def test_officer_debt_group_balances_sum_to_officer_total(self) -> None:
+        self._import_debt_group_fixture()
+        with closing(self.repository.connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM customer_officer_period WHERE period = '2026-03' AND customer_code = '5491001' AND officer_code = '540000321'"
+            ).fetchone()
+
+        total = sum(float(row[f"debt_group_{suffix}_balance"] or 0) for suffix in ("1", "2", "3", "4", "5", "unknown"))
+        self.assertAlmostEqual(float(row["balance_managed"]), total)
+
+    def test_office_debt_group_balances_sum_to_office_total(self) -> None:
+        self._import_debt_group_fixture()
+        with closing(self.repository.connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM customer_office_period WHERE period = '2026-03' AND customer_code = '5491001' AND office_code = '5491-00'"
+            ).fetchone()
+
+        total = sum(float(row[f"debt_group_{suffix}_balance"] or 0) for suffix in ("1", "2", "3", "4", "5", "unknown"))
+        self.assertAlmostEqual(float(row["total_balance"]), total)
+
+    def test_worst_debt_group(self) -> None:
+        self._import_debt_group_fixture()
+
+        self.assertEqual(self._customer_summary("5491001", "2026-03")["worst_debt_group"], "04")
+
+    def test_unknown_balance_not_assigned_to_group_1(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="")],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+
+        row = self._customer_summary("5491001", "2026-03")
+        self.assertEqual(int(row["has_debt_group_data"]), 1)
+        self.assertEqual(float(row["debt_group_1_balance"]), 0)
+        self.assertEqual(float(row["debt_group_unknown_balance"]), 1000)
+
+    def test_attention_balance(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters())
+
+        self.assertEqual(float(kpis["attention_balance"]), 2000)
+
+    def test_bad_debt_balance_groups_3_to_5(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters())
+
+        self.assertEqual(float(kpis["bad_debt_balance"]), 1000)
+
+    def test_attention_ratio(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters(search_text="5491001"))
+
+        self.assertAlmostEqual(float(kpis["attention_ratio"]), 2000 / 11000 * 100)
+
+    def test_bad_debt_ratio(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters(search_text="5491001"))
+
+        self.assertAlmostEqual(float(kpis["bad_debt_ratio"]), 1000 / 11000 * 100)
+
+    def test_zero_total_ratio_na(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 0, "DN1", debt_group="02")],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters())
+        self.assertIsNone(kpis["attention_ratio"])
+
+    def test_group_weighted_average_rate(self) -> None:
+        self._import_debt_group_fixture()
+        rows = {row["debt_group_key"]: row for row in self.repository.get_debt_group_summary("2026-03", CustomerFilters(search_text="5491001"))}
+
+        self.assertAlmostEqual(float(rows["1"]["average_rate"]), 10)
+        self.assertAlmostEqual(float(rows["2"]["average_rate"]), 8)
+
+    def test_group_weighted_nim_before(self) -> None:
+        self._import_debt_group_fixture()
+        rows = {row["debt_group_key"]: row for row in self.repository.get_debt_group_summary("2026-03", CustomerFilters(search_text="5491001"))}
+
+        self.assertAlmostEqual(float(rows["1"]["nim_before"]), 8)
+        self.assertAlmostEqual(float(rows["2"]["nim_before"]), 4)
+
+    def test_group_weighted_nim_after(self) -> None:
+        self._import_debt_group_fixture()
+        rows = {row["debt_group_key"]: row for row in self.repository.get_debt_group_summary("2026-03", CustomerFilters(search_text="5491001"))}
+
+        self.assertAlmostEqual(float(rows["1"]["nim_after"]), 7)
+        self.assertAlmostEqual(float(rows["2"]["nim_after"]), 3)
+
+    def test_bad_debt_weighted_nim(self) -> None:
+        self._import_debt_group_fixture()
+        rows = {row["debt_group_key"]: row for row in self.repository.get_debt_group_summary("2026-03", CustomerFilters(search_text="5491001"))}
+
+        self.assertAlmostEqual(float(rows["4"]["nim_after"]), 7)
+
+    def test_customer_count_has_group_can_overlap(self) -> None:
+        self._import_debt_group_fixture()
+        summary = {row["debt_group_key"]: row for row in self.repository.get_debt_group_summary("2026-03", CustomerFilters(search_text="5491001"))}
+
+        self.assertEqual(int(summary["1"]["customer_count"]), 1)
+        self.assertEqual(int(summary["2"]["customer_count"]), 1)
+        self.assertEqual(int(summary["4"]["customer_count"]), 1)
+
+    def test_customer_count_by_worst_group_is_exclusive(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters(search_text="5491001"))
+
+        self.assertEqual(int(kpis["worst_group_4_customer_count"]), 1)
+        self.assertEqual(int(kpis["worst_group_2_customer_count"]), 0)
+
+    def test_debt_group_migration(self) -> None:
+        with closing(self.repository.connect()) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(customer_period_summary)").fetchall()}
+
+        self.assertIn("debt_group_1_balance", columns)
+        self.assertIn("has_debt_group_data", columns)
+
+    def test_debt_group_migration_idempotent(self) -> None:
+        self.repository.ensure_schema()
+        self.repository.ensure_schema()
+
+        with closing(self.repository.connect()) as connection:
+            columns = [row[1] for row in connection.execute("PRAGMA table_info(customer_period_summary)").fetchall()]
+        self.assertEqual(columns.count("debt_group_1_balance"), 1)
+
+    def test_old_period_marked_without_debt_group_data(self) -> None:
+        self._write_ftpln("5491_FTPLN_20260331.csv", [self._row("001", "Khach A", 1000, "DN1")])
+        import_nim_dn(self.summary_repository, self.root)
+
+        self.assertEqual(int(self._customer_summary("5491001", "2026-03")["has_debt_group_data"]), 0)
+
+    def test_old_period_not_backfilled_as_group_1(self) -> None:
+        self._write_ftpln("5491_FTPLN_20260331.csv", [self._row("001", "Khach A", 1000, "DN1")])
+        import_nim_dn(self.summary_repository, self.root)
+
+        self.assertEqual(float(self._customer_summary("5491001", "2026-03")["debt_group_1_balance"]), 0)
+
+    def test_reimport_period_creates_debt_group_data(self) -> None:
+        self._write_ftpln("5491_FTPLN_20260331.csv", [self._row("001", "Khach A", 1000, "DN1")])
+        import_nim_dn(self.summary_repository, self.root)
+        folder = self.root / "replace"
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+            folder=folder,
+        )
+        import_nim_dn(self.summary_repository, folder, replace_existing_periods=True)
+
+        self.assertEqual(int(self._customer_summary("5491001", "2026-03")["has_debt_group_data"]), 1)
+
+    def test_reimport_without_aqccdfin_clears_old_group_data_after_confirmation(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+        folder = self.root / "replace_no_debt"
+        self._write_ftpln("5491_FTPLN_20260331.csv", [self._row("001", "Khach A", 1000, "DN1")], folder=folder)
+        import_nim_dn(self.summary_repository, folder, replace_existing_periods=True)
+
+        row = self._customer_summary("5491001", "2026-03")
+        self.assertEqual(int(row["has_debt_group_data"]), 0)
+        self.assertEqual(float(row["debt_group_1_balance"]), 0)
+
+    def test_import_rollback_restores_debt_group_data(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+        folder = self.root / "replace_fail"
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 2000, "DN1", debt_group="02")],
+            folder=folder,
+        )
+
+        with patch.object(CustomerRepository, "_insert_period_summaries", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                import_nim_dn(self.summary_repository, folder, replace_existing_periods=True)
+
+        row = self._customer_summary("5491001", "2026-03")
+        self.assertEqual(float(row["debt_group_1_balance"]), 1000)
+        self.assertEqual(float(row["debt_group_2_balance"]), 0)
+
+    def test_credit_summary_rollback_when_customer_group_write_fails(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+
+        with patch.object(CustomerRepository, "save_aggregation", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                import_nim_dn(self.summary_repository, self.root)
+
+        with closing(self.summary_repository.connect()) as connection:
+            self.assertEqual(int(connection.execute("SELECT COUNT(*) FROM nim_period_summary").fetchone()[0]), 0)
+        self.assertEqual(self._count("customer_period_summary"), 0)
+
+    def test_customer_row_count_unchanged(self) -> None:
+        self._import_debt_group_fixture()
+
+        self.assertEqual(self._count("customer_period_summary"), 2)
+
+    def test_debt_group_kpis(self) -> None:
+        self._import_debt_group_fixture()
+        kpis = self.repository.get_debt_quality_kpis("2026-03", CustomerFilters())
+
+        self.assertEqual(float(kpis["total_balance"]), 16000)
+        self.assertEqual(int(kpis["attention_customer_count"]), 1)
+
+    def test_debt_group_filter_group_2(self) -> None:
+        self._import_debt_group_fixture()
+        rows = self.repository.get_debt_group_customers("2026-03", CustomerFilters(debt_group="HAS_GROUP_2"))
+
+        self.assertEqual([row["customer_code"] for row in rows], ["5491001"])
+
+    def test_debt_group_filter_bad_debt(self) -> None:
+        self._import_debt_group_fixture()
+        rows = self.repository.get_debt_group_customers("2026-03", CustomerFilters(debt_group="BAD_DEBT"))
+
+        self.assertEqual([row["customer_code"] for row in rows], ["5491001"])
+
+    def test_debt_group_filter_worst_group(self) -> None:
+        self._import_debt_group_fixture()
+        rows = self.repository.get_debt_group_customers("2026-03", CustomerFilters(debt_group="WORST_4"))
+
+        self.assertEqual([row["customer_code"] for row in rows], ["5491001"])
+
+    def test_debt_group_by_branch(self) -> None:
+        self._import_debt_group_fixture()
+        rows = self.repository.get_debt_group_by_branch("2026-03", CustomerFilters())
+
+        self.assertEqual(rows[0]["branch_code"], "5491")
+        self.assertEqual(float(rows[0]["total_balance"]), 16000)
+
+    def test_debt_group_by_officer_uses_officer_period(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [
+                self._row_with_debt_group("001", "Khach A", 8000, "DN1", officer="[A] Can Bo A", debt_group="01"),
+                self._row_with_debt_group("001", "Khach A", 2000, "DN1", officer="[B] Can Bo B", debt_group="02"),
+            ],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+
+        rows = {row["officer_code"]: row for row in self.repository.get_debt_group_by_officer("2026-03", CustomerFilters())}
+        self.assertEqual(float(rows["A"]["debt_group_1_balance"]), 8000)
+        self.assertEqual(float(rows["B"]["debt_group_2_balance"]), 2000)
+
+    def test_debt_group_by_office(self) -> None:
+        self._import_debt_group_fixture()
+        rows = self.repository.get_debt_group_by_office("2026-03", CustomerFilters())
+
+        self.assertEqual(rows[0]["office_code"], "5491-00")
+        self.assertEqual(float(rows[0]["total_balance"]), 16000)
+
+    def test_customer_debt_group_history_all_periods(self) -> None:
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [self._row_with_debt_group("001", "Khach A", 1000, "DN1", debt_group="01")],
+        )
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260430.csv",
+            [self._row_with_debt_group("001", "Khach A", 2000, "DN1", debt_group="02")],
+        )
+        import_nim_dn(self.summary_repository, self.root)
+
+        rows = self.repository.get_customer_debt_group_history("5491001")
+        self.assertEqual([row["period"] for row in rows], ["2026-03", "2026-04"])
+
+    def test_debt_group_pagination(self) -> None:
+        self._import_debt_group_fixture()
+        result = self.repository.query_debt_group_customers("2026-03", CustomerFilters(), page=2, page_size=1)
+
+        self.assertEqual(result.total_rows, 2)
+        self.assertEqual(len(result.rows), 1)
+
+    def test_debt_group_export_all_filtered_rows(self) -> None:
+        self._import_debt_group_fixture()
+        path = self.root / "debt_group.xlsx"
+        export_debt_group_analysis(self.repository, CustomerFilters(), path, report_period="2026-03")
+
+        workbook = load_workbook(path)
+        self.assertEqual(workbook["KhachHangTheoNhomNo"].max_row, 3)
+
+    def test_debt_group_export_numeric_values(self) -> None:
+        self._import_debt_group_fixture()
+        path = self.root / "debt_group_numeric.xlsx"
+        export_debt_group_analysis(self.repository, CustomerFilters(), path, report_period="2026-03")
+
+        workbook = load_workbook(path, data_only=True)
+        self.assertIsInstance(workbook["KhachHangTheoNhomNo"]["H2"].value, (int, float))
+
+    def test_debt_group_button_opens_correct_tab(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        tab = NimTab(self.summary_repository, SummaryDataType.NIM_DN)
+
+        window = tab.open_debt_group_analysis()
+        app.processEvents()
+
+        self.assertEqual(window.tabs.tabText(window.tabs.currentIndex()), "Phân tích nhóm nợ")
+        window.close()
+        tab.deleteLater()
+
     def _import_basic_customer_fixture(self):
         self._write_ftpln(
             "5491_FTPLN_20260331.csv",
@@ -920,6 +1330,13 @@ class CustomerDatabaseTests(unittest.TestCase):
         target_folder.mkdir(parents=True, exist_ok=True)
         path = target_folder / filename
         path.write_text("\n".join([FTPLN_HEADER, *rows]), encoding="utf-8")
+        return path
+
+    def _write_ftpln_with_debt_group(self, filename: str, rows: list[str], *, folder: Path | None = None) -> Path:
+        target_folder = folder or self.root
+        target_folder.mkdir(parents=True, exist_ok=True)
+        path = target_folder / filename
+        path.write_text("\n".join([FTPLN_HEADER_WITH_DEBT_GROUP, *rows]), encoding="utf-8")
         return path
 
     def _row(
@@ -942,9 +1359,28 @@ class CustomerDatabaseTests(unittest.TestCase):
             f"{customer_type},{ftp_code},{customer_sequence},{customer_name}"
         )
 
+    def _row_with_debt_group(self, *args, debt_group: str, **kwargs) -> str:
+        return f"{self._row(*args, **kwargs)},{debt_group}"
+
+    def _import_debt_group_fixture(self):
+        self._write_ftpln_with_debt_group(
+            "5491_FTPLN_20260331.csv",
+            [
+                self._row_with_debt_group("001", "Khach A", 8000, "DN1", ftp=2, intrt=10, adjustment=1, debt_group="01"),
+                self._row_with_debt_group("001", "Khach A", 2000, "DN7", ftp=4, intrt=8, adjustment=1, debt_group="02"),
+                self._row_with_debt_group("001", "Khach A", 1000, "DN1", ftp=2, intrt=10, adjustment=1, debt_group="04"),
+                self._row_with_debt_group("002", "Khach B", 5000, "DN1", ftp=2, intrt=9, adjustment=1, customer_type="TC", debt_group="01"),
+            ],
+        )
+        return import_nim_dn(self.summary_repository, self.root)
+
     def _count(self, table_name: str) -> int:
         with closing(self.repository.connect()) as connection:
             return int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0)
+
+    def _count_where(self, table_name: str, where: str) -> int:
+        with closing(self.repository.connect()) as connection:
+            return int(connection.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {where}").fetchone()[0] or 0)
 
     def _customer_summary(self, customer_code: str, period: str):
         with closing(self.repository.connect()) as connection:
@@ -1122,7 +1558,11 @@ class CustomerPhaseCTests(unittest.TestCase):
         app = QApplication.instance() or QApplication([])
         window = CustomerManagementWindow(self.main_database_path)
         self.assertEqual(window.windowTitle(), "Quản lý dữ liệu khách hàng - AgribankV3")
-        self.assertEqual(window.tabs.count(), 7)
+        self.assertEqual(window.tabs.count(), 8)
+        self.assertIn(
+            "Phân tích nhóm nợ",
+            [window.tabs.tabText(index) for index in range(window.tabs.count())],
+        )
         window.close()
 
     def test_customer_maintenance_window_opens(self) -> None:
@@ -1243,19 +1683,19 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertLessEqual(window.minimumWidth(), min(850, window.screen().availableGeometry().width()))
         window.close()
 
-    def test_customer_detail_officer_double_click_uses_clicked_period_primary_import(self) -> None:
+    def test_customer_detail_officer_double_click_opens_shared_officer_detail(self) -> None:
         app = QApplication.instance() or QApplication([])
         window = CustomerDetailWindow(self.repository, "5491001", period="2026-04")
         window.query_controller.cancel_pending()
         window.wait_for_queries()
         captured: dict[str, object] = {}
 
-        class FakeOfficerDialog:
-            def __init__(self, repository, **kwargs) -> None:
-                captured.update(kwargs)
-
-            def exec(self):
-                return QDialog.DialogCode.Rejected
+        def fake_open(owner, main_database_path, row, **kwargs):
+            captured["owner"] = owner
+            captured["main_database_path"] = main_database_path
+            captured["row"] = row
+            captured.update(kwargs)
+            return None
 
         window.officer_model.set_rows(
             [
@@ -1266,11 +1706,14 @@ class CustomerPhaseCTests(unittest.TestCase):
                 }
             ]
         )
-        with patch("agribank_v3.features.credit.summary.customer.customer_detail_window.OfficerOverrideDialog", FakeOfficerDialog):
+        with patch("agribank_v3.features.credit.summary.customer.customer_detail_window.open_shared_officer_detail", fake_open):
             window._officer_row_double_clicked(window.officer_model.index(0, 0))
-        self.assertEqual(captured["period"], "2026-03")
-        self.assertEqual(captured["imported_officer_code"], "001")
-        self.assertEqual(captured["imported_officer_name"], "Officer A")
+        self.assertIs(captured["owner"], window)
+        self.assertEqual(captured["row"]["period"], "2026-03")
+        self.assertEqual(captured["row"]["imported_officer_code"], "ROW_SECONDARY")
+        self.assertEqual(captured["row"]["imported_officer_name"], "Row Secondary")
+        self.assertEqual(captured["filters"].report_period, "2026-03")
+        self.assertEqual(captured["initial_tab"], 7)
         window.close()
 
     def test_customer_management_table_allows_horizontal_scroll(self) -> None:
@@ -1366,6 +1809,85 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertIn(CUSTOMER_DATA_TITLE, titles)
         self.assertEqual(CUSTOMER_DATA_ROUTE, "credit.customer_data")
 
+    def test_credit_menu_has_group_01(self) -> None:
+        self.assertIn("NHÓM 01 – NGHIỆP VỤ TÍN DỤNG", self._credit_group_titles())
+
+    def test_credit_menu_has_group_02(self) -> None:
+        self.assertIn("NHÓM 02 – PHÂN TÍCH SỐ LIỆU", self._credit_group_titles())
+
+    def test_credit_menu_has_group_03(self) -> None:
+        self.assertIn("NHÓM 03 – QUẢN LÝ", self._credit_group_titles())
+
+    def test_group_01_card_order(self) -> None:
+        self.assertEqual(
+            self._credit_group("NHÓM 01 – NGHIỆP VỤ TÍN DỤNG"),
+            [
+                AUTO_INTEREST_TITLE,
+                "Danh sách nợ đến hạn",
+                CREDIT_LIMIT_TITLE,
+                "Sao kê tín dụng",
+            ],
+        )
+
+    def test_group_02_card_order(self) -> None:
+        self.assertEqual(
+            self._credit_group("NHÓM 02 – PHÂN TÍCH SỐ LIỆU"),
+            [
+                NIM_DN_TITLE,
+                NIM_NV_TITLE,
+                CUSTOMER_DATA_TITLE,
+                LOAN_COMPARE_TITLE,
+            ],
+        )
+
+    def test_group_03_contains_officer_management(self) -> None:
+        self.assertEqual(self._credit_group("NHÓM 03 – QUẢN LÝ"), [OFFICER_CENTER_TITLE])
+
+    def test_credit_menu_preserves_loan_group_card(self) -> None:
+        loan_group = FEATURE_GROUPS["Tín dụng"][0]
+        self.assertEqual(loan_group.title, "Tổ vay vốn")
+        self.assertEqual([feature.title for feature in loan_group.features], ["Tổ vay vốn"])
+
+    def test_credit_menu_routes_unchanged(self) -> None:
+        feature_by_title = {feature.title: feature for feature in SECTIONS["Tín dụng"]}
+        for group in FEATURE_GROUPS["Tín dụng"]:
+            for feature in group.features:
+                self.assertIs(feature, feature_by_title[feature.title])
+
+    def test_credit_menu_no_duplicate_cards(self) -> None:
+        grouped_titles = [
+            feature.title
+            for group in FEATURE_GROUPS["Tín dụng"]
+            for feature in group.features
+        ]
+        self.assertEqual(len(grouped_titles), len(set(grouped_titles)))
+        self.assertEqual(set(grouped_titles), {feature.title for feature in SECTIONS["Tín dụng"]})
+
+    def test_credit_menu_responsive_wrap(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        grid = ResponsiveFeatureGrid(FEATURE_GROUPS["Tín dụng"][1].features)
+        self.assertEqual(grid._column_count_for_width(2000), 4)
+        self.assertEqual(grid._column_count_for_width(520), 1)
+        grid.close()
+
+    def test_credit_menu_no_horizontal_scroll(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        page = window._build_feature_page("Tín dụng", SECTIONS["Tín dụng"])
+        self.assertIsInstance(page, QScrollArea)
+        self.assertEqual(page.horizontalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        page.close()
+        window.close()
+
+    def test_credit_menu_uses_shared_group_component(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        page = window._build_feature_page("Tín dụng", SECTIONS["Tín dụng"])
+        grids = page.findChildren(ResponsiveFeatureGrid)
+        self.assertEqual(len(grids), len(FEATURE_GROUPS["Tín dụng"]))
+        page.close()
+        window.close()
+
     def test_customer_data_card_route_opens_management_window(self) -> None:
         app = QApplication.instance() or QApplication([])
         window = MainWindow()
@@ -1382,6 +1904,17 @@ class CustomerPhaseCTests(unittest.TestCase):
             tab.open_customer_management()
         self.assertTrue(opener.called)
         tab.close()
+
+    @staticmethod
+    def _credit_group_titles() -> list[str]:
+        return [group.title for group in FEATURE_GROUPS["Tín dụng"]]
+
+    @staticmethod
+    def _credit_group(title: str) -> list[str]:
+        for group in FEATURE_GROUPS["Tín dụng"]:
+            if group.title == title:
+                return [feature.title for feature in group.features]
+        return []
 
     def test_customer_window_single_instance(self) -> None:
         app = QApplication.instance() or QApplication([])
@@ -4825,6 +5358,174 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertEqual(ws.max_row - 1, 1)
         self.assertEqual(ws.cell(2, 2).value, "5491002")
 
+    def test_delete_last_period_preserves_officer_directory_by_default(self) -> None:
+        before_count = self.repository.officer_directory_count()
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        self.assertEqual(self.repository.officer_directory_count(), before_count)
+
+    def test_delete_last_period_clears_period_tables(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        for table_name in (
+            "customer_period_summary",
+            "customer_officer_period",
+            "customer_office_period",
+            "customer_import_runs",
+            "customer_import_files",
+        ):
+            self.assertEqual(self._customer_table_count(table_name), 0, table_name)
+
+    def test_delete_last_period_clears_customer_master(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        self.assertEqual(self._customer_table_count("customer_master"), 0)
+
+    def test_delete_last_period_ui_shows_directory_preserved_message(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        window = CustomerManagementWindow(self.main_database_path)
+        window.show()
+        window.select_tab("officer")
+        self.assertIn("Danh mục CBTD vẫn được giữ lại", window.empty_data_message.text())
+        self.assertTrue(_wait_until(lambda: window.officer_tab.model.rowCount() > 0))
+        self.assertTrue(window.officer_tab.directory_info_bar.isVisible())
+        self.assertIn("lưu độc lập", window.officer_tab.directory_info_label.text())
+        window.close()
+
+    def test_delete_last_period_with_delete_directory_option(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        info = self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertTrue(info["delete_officer_directory"])
+        self.assertTrue(info["delete_officer_overrides"])
+        self.assertGreater(int(info["deleted_officer_directory_count"]), 0)
+
+    def test_delete_directory_option_clears_officer_directory(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertEqual(self.repository.officer_directory_count(), 0)
+
+    def test_delete_directory_also_clears_override(self) -> None:
+        self.repository.create_officer_override(
+            customer_code="5491001",
+            effective_from_period="2026-04",
+            officer_code="909",
+            officer_name="Officer Override",
+            reason="clear orphan override",
+        )
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertEqual(self.repository.officer_override_count(), 0)
+
+    def test_delete_directory_preserves_action_log_by_default(self) -> None:
+        self.repository.create_officer_override(
+            customer_code="5491001",
+            effective_from_period="2026-04",
+            officer_code="909",
+            officer_name="Officer Log",
+            reason="preserve action log",
+        )
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertGreater(self.repository.action_log_count(), 0)
+
+    def test_delete_directory_preserves_unit_directory(self) -> None:
+        self.repository.unit_directory.save_branch(
+            BranchDirectoryEntry(branch_code="6501", branch_name="Chi nhánh kiểm thử", short_name="CN test")
+        )
+        self.repository.unit_directory.save_office(
+            OfficeDirectoryEntry(
+                id=None,
+                branch_code="6501",
+                trctcd="03",
+                office_code="6501-03",
+                office_name="Phòng giao dịch kiểm thử",
+                short_name="PGD test",
+                office_type=TRANSACTION_OFFICE,
+            )
+        )
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertEqual(self.repository.unit_directory.get_branch_display_name("6501"), "6501 - CN test")
+        self.assertEqual(self.repository.unit_directory.get_office("6501", "03").office_name, "Phòng giao dịch kiểm thử")
+
+    def test_delete_last_period_refreshes_officer_tab(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        window = CustomerManagementWindow(self.main_database_path)
+        window.show()
+        window.select_tab("officer")
+        self.assertTrue(_wait_until(lambda: window.officer_tab.model.rowCount() > 0))
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        window.refresh_all()
+        window.select_tab("officer")
+        self.assertTrue(_wait_until(lambda: window.officer_tab.model.rowCount() > 0))
+        self.assertTrue(window.officer_tab.directory_info_bar.isVisible())
+        window.close()
+
+    def test_delete_last_period_clears_stale_models(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        window = CustomerManagementWindow(self.main_database_path)
+        window.list_tab.refresh(use_cache=False)
+        self.assertTrue(_wait_until(lambda: window.list_tab.model.rowCount() > 0))
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        window.refresh_all()
+        self.assertEqual(window.list_tab.model.rowCount(), 0)
+        self.assertEqual(window.list_tab.pager.total_rows, 0)
+        window.close()
+
+    def test_delete_last_period_invalidates_officer_center_cache(self) -> None:
+        app = QApplication.instance() or QApplication([])
+
+        class FakeOfficerCenter:
+            def __init__(self) -> None:
+                self.invalidated = False
+                self.refreshed = False
+
+            def invalidate_cache(self) -> None:
+                self.invalidated = True
+
+            def refresh_all(self, *, use_cache: bool = True) -> None:
+                self.refreshed = not use_cache
+
+        host = QWidget()
+        center = FakeOfficerCenter()
+        host._officer_center_window = center
+        window = CustomerManagementWindow(self.main_database_path, parent=host)
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        window._refresh_open_related_windows()
+        self.assertTrue(center.invalidated)
+        self.assertTrue(center.refreshed)
+        window.close()
+        host.close()
+
+    def test_delete_all_transaction_rollback(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        before_summary_count = self._customer_table_count("customer_period_summary")
+        before_directory_count = self.repository.officer_directory_count()
+        with patch.object(CustomerRepository, "_refresh_customer_master_after_period_delete", side_effect=RuntimeError("rollback")):
+            with self.assertRaises(RuntimeError):
+                self.repository.delete_customer_period("2026-04", delete_officer_directory=True)
+        self.assertEqual(self._customer_table_count("customer_period_summary"), before_summary_count)
+        self.assertEqual(self.repository.officer_directory_count(), before_directory_count)
+
+    def test_delete_all_backup_created(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        info = self.repository.delete_customer_period("2026-04")
+        self.assertTrue(Path(str(info["backup_path"])).is_file())
+
+    def test_vacuum_runs_outside_ui_thread(self) -> None:
+        self.repository.delete_customer_period("2026-03")
+        self.repository.delete_customer_period("2026-04")
+        _controller, payload = self._worker_probe(
+            "customer_vacuum_worker",
+            lambda: self.repository.optimize_database(vacuum=True)["vacuum"],
+        )
+        self.assertTrue(payload["value"])
+
     def test_delete_customer_period(self) -> None:
         info = self.repository.delete_customer_period("2026-04")
         self.assertEqual(int(info["customer_count"]), 5)
@@ -5684,6 +6385,10 @@ class CustomerPhaseCTests(unittest.TestCase):
     def _delete_all_customer_periods(self, repository: CustomerRepository) -> None:
         for period in list(repository.distinct_periods()):
             repository.delete_customer_period(period)
+
+    def _customer_table_count(self, table_name: str) -> int:
+        with closing(self.repository.connect()) as connection:
+            return int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0] or 0)
 
     def _write_single_customer_ftpln(self, folder: Path, date_suffix: str) -> Path:
         folder.mkdir(parents=True, exist_ok=True)

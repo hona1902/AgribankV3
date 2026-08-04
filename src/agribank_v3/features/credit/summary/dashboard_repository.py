@@ -111,13 +111,25 @@ class NimDashboardRepository:
             ).fetchall()
         return [self._dynamic_unit_row(dict(row)) for row in rows]
 
-    def detail_summary(self, data_type: SummaryDataType, filters: Mapping[str, object]) -> list[dict[str, object]]:
+    def detail_summary(
+        self,
+        data_type: SummaryDataType,
+        filters: Mapping[str, object],
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
         where, params = self._where(data_type, filters)
         has_customer_type = bool(str(filters.get("customer_type") or "").strip())
         customer_select = "customer_type" if has_customer_type else "'Tất cả' AS customer_type"
         group_by = "period, branch_code, trctcd"
         if has_customer_type:
             group_by += ", customer_type"
+        query_params = list(params)
+        paging_sql = ""
+        if limit is not None:
+            paging_sql = " LIMIT ? OFFSET ?"
+            query_params.extend([max(0, int(limit)), max(0, int(offset))])
         with closing(self.repository.connect()) as database:
             rows = database.execute(
                 f"""
@@ -136,10 +148,32 @@ class NimDashboardRepository:
                 {where}
                 GROUP BY {group_by}
                 ORDER BY period, branch_code COLLATE NOCASE, trctcd COLLATE NOCASE, customer_type COLLATE NOCASE
+                {paging_sql}
                 """,
-                params,
+                query_params,
             ).fetchall()
         return [self._dynamic_unit_row(dict(row)) for row in rows]
+
+    def detail_summary_count(self, data_type: SummaryDataType, filters: Mapping[str, object]) -> int:
+        where, params = self._where(data_type, filters)
+        has_customer_type = bool(str(filters.get("customer_type") or "").strip())
+        group_by = "period, branch_code, trctcd"
+        if has_customer_type:
+            group_by += ", customer_type"
+        with closing(self.repository.connect()) as database:
+            row = database.execute(
+                f"""
+                SELECT COUNT(*) AS count_rows
+                FROM (
+                    SELECT 1
+                    FROM nim_period_summary
+                    {where}
+                    GROUP BY {group_by}
+                ) AS grouped_detail
+                """,
+                params,
+            ).fetchone()
+        return int(row["count_rows"] if row else 0)
 
     def _where(
         self,
@@ -193,8 +227,6 @@ class NimDashboardRepository:
             row["branch"] = self.unit_directory.get_branch_display_name(branch_code)
         if branch_code and trctcd:
             row["transaction_office"] = self.unit_directory.get_office_name(branch_code, trctcd)
-        row.pop("branch_code", None)
-        row.pop("trctcd", None)
         return row
 
     @staticmethod

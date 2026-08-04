@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <!-- Target -->
+  <circle cx="256" cy="128" r="111" fill="#FF2233"/>
+  <circle cx="256" cy="128" r="68" fill="#E4E7EB"/>
+  <circle cx="256" cy="128" r="28" fill="#D51E2B"/>
+  <circle cx="256" cy="128" r="13" fill="#FF2233"/>
+
+  <!-- Arrow -->
+  <g transform="translate(288 127) rotate(-40)">
+    <rect x="0" y="-6" width="112" height="12" rx="4" fill="#B4BCC6"/>
+    <path d="M112 -18 L145 0 L112 18 L120 6 L101 6 L101 -6 L120 -6 Z" fill="#FF2233"/>
+  </g>
+
+  <!-- Helper person definitions are composed manually -->
+  <!-- Left middle person -->
+  <g>
+    <path d="M9 350H183V311C183 281 145 257 96 257C47 257 9 281 9 311V350Z" fill="#3F89C5"/>
+    <path d="M30 350H183V311C183 281 145 257 96 257C47 257 30 281 30 311V350Z" fill="#418ACA" opacity="0.9"/>
+    <circle cx="96" cy="214" r="46" fill="#E5C0A4"/>
+    <path d="M96 168C70.6 168 50 188.6 50 214C50 239.4 70.6 260 96 260C74.3 260 65 237.2 65 214C65 190.8 74.3 168 96 168Z" fill="#F0CCB0" opacity="0.55"/>
+  </g>
+
+  <!-- Right middle person -->
+  <g>
+    <path d="M329 350H503V311C503 281 465 257 416 257C367 257 329 281 329 311V350Z" fill="#42BC49"/>
+    <path d="M350 350H503V311C503 281 465 257 416 257C367 257 350 281 350 311V350Z" fill="#3FB748" opacity="0.95"/>
+    <circle cx="416" cy="214" r="46" fill="#E5C0A4"/>
+    <path d="M416 168C390.6 168 370 188.6 370 214C370 239.4 390.6 260 416 260C394.3 260 385 237.2 385 214C385 190.8 394.3 168 416 168Z" fill="#F0CCB0" opacity="0.55"/>
+  </g>
+
+  <!-- Bottom center person -->
+  <g>
+    <path d="M169 454H343V414C343 385 305 360 256 360C207 360 169 385 169 414V454Z" fill="#28AFE1"/>
+    <path d="M190 454H343V414C343 385 305 360 256 360C207 360 190 385 190 414V454Z" fill="#26A9DA" opacity="0.98"/>
+    <circle cx="256" cy="317" r="46" fill="#E5C0A4"/>
+    <path d="M256 271C230.6 271 210 291.6 210 317C210 342.4 230.6 363 256 363C234.3 363 225 340.2 225 317C225 293.8 234.3 271 256 271Z" fill="#F0CCB0" opacity="0.55"/>
+  </g>
+
+  <!-- Bottom left person -->
+  <g>
+    <path d="M9 502H183V463C183 433 145 409 96 409C47 409 9 433 9 463V502Z" fill="#F7C956"/>
+    <path d="M30 502H183V463C183 433 145 409 96 409C47 409 30 433 30 463V502Z" fill="#F1C552" opacity="0.98"/>
+    <circle cx="96" cy="366" r="45" fill="#E5C0A4"/>
+    <path d="M96 321C71.1 321 51 341.1 51 366C51 390.9 71.1 411 96 411C74.8 411 66 388.4 66 366C66 343.6 74.8 321 96 321Z" fill="#F0CCB0" opacity="0.55"/>
+  </g>
+
+  <!-- Bottom right person -->
+  <g>
+    <path d="M329 502H503V463C503 433 465 409 416 409C367 409 329 433 329 463V502Z" fill="#FF2032"/>
+    <path d="M350 502H503V463C503 433 465 409 416 409C367 409 350 433 350 463V502Z" fill="#F72234" opacity="0.98"/>
+    <circle cx="416" cy="366" r="45" fill="#E5C0A4"/>
+    <path d="M416 321C391.1 321 371 341.1 371 366C371 390.9 391.1 411 416 411C394.8 411 386 388.4 386 366C386 343.6 394.8 321 416 321Z" fill="#F0CCB0" opacity="0.55"/>
+  </g>
+</svg>

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from contextlib import closing, contextmanager
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,11 @@ from agribank_v3.features.credit.summary.models import (
     SummaryDataType,
     SummaryError,
     now_text,
+)
+from agribank_v3.features.credit.summary.credit_limit import (
+    CreditLimitBatchMetadata,
+    CreditLimitExcelBatchStore,
+    CreditLimitStorageStatus,
 )
 from agribank_v3.features.credit.summary.database import (
     CREDIT_SUMMARY_DATABASE_NAME,
@@ -73,6 +79,7 @@ class SummaryRepository:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._memory_cache: dict[str, object] = {}
         self.unit_directory = get_unit_directory_service(self.main_database_path)
+        self.credit_limit_store = CreditLimitExcelBatchStore(self.main_database_path)
         self.ensure_schema()
         if self.main_database_path.resolve() != self.database_path.resolve():
             try:
@@ -481,6 +488,160 @@ class SummaryRepository:
                 ],
             )
         self.clear_cache()
+
+    def save_credit_limit_excel_batch(
+        self,
+        *,
+        source_path: Path,
+        rows: Sequence[CreditLimitRow],
+        accepted_rows: Sequence[CreditLimitRow],
+        reference_date: date | str,
+        warn_days: int,
+        min_limit: float,
+        source_file_sha256: str,
+        source_file_size: int,
+        imported_by: str = "",
+        source_row_count: int = 0,
+        duplicate_policy: str = "error",
+        progress=None,
+    ) -> CreditLimitBatchMetadata:
+        metadata = self.credit_limit_store.create_batch(
+            source_path=Path(source_path),
+            rows=rows,
+            accepted_rows=accepted_rows,
+            reference_date=_coerce_date(reference_date) or date.today(),
+            min_limit=float(min_limit or 0),
+            warn_days=int(warn_days),
+            source_file_sha256=source_file_sha256,
+            source_file_size=int(source_file_size or 0),
+            imported_by=imported_by,
+            source_row_count=int(source_row_count or len(rows)),
+            duplicate_policy=duplicate_policy,
+            progress=progress,
+        )
+        self._memory_cache.clear()
+        return metadata
+
+    def list_credit_limit_batches(self) -> list[CreditLimitBatchMetadata]:
+        return self.credit_limit_store.list_batches()
+
+    def credit_limit_duplicate_batches(self, source_path: Path) -> list[CreditLimitBatchMetadata]:
+        digest = _file_hash(Path(source_path))
+        return self.credit_limit_store.find_duplicate_by_sha(digest)
+
+    def delete_credit_limit_batch(self, batch_id: str | int) -> Path | dict[str, object]:
+        if _looks_like_int(batch_id):
+            return self.delete_batch(int(batch_id))
+        deleted_path = self.credit_limit_store.delete_batch(batch_id)
+        self._memory_cache.clear()
+        return deleted_path
+
+    def backup_credit_limit_storage(self, destination: Path | None = None, *, progress=None) -> Path:
+        return self.credit_limit_store.backup_storage(destination, progress=progress)
+
+    def restore_credit_limit_storage(
+        self,
+        source_path: Path,
+        *,
+        conflict_policy: str = "skip",
+        progress=None,
+    ) -> dict[str, int]:
+        result = self.credit_limit_store.restore_storage(
+            source_path,
+            conflict_policy=conflict_policy,
+            progress=progress,
+        )
+        self._memory_cache.clear()
+        return result
+
+    def credit_limit_storage_status(self) -> CreditLimitStorageStatus:
+        return self.credit_limit_store.maintenance_status()
+
+    def migrate_legacy_credit_limit_batches(self, *, progress=None) -> dict[str, int]:
+        migrated = skipped = 0
+        with self._database() as database:
+            batches = database.execute(
+                """
+                SELECT *
+                FROM summary_import_history
+                WHERE data_type = ?
+                ORDER BY id
+                """,
+                (SummaryDataType.CREDIT_LIMIT.value,),
+            ).fetchall()
+            for batch in batches:
+                source_hash = str(batch["source_hash"] or "").strip()
+                if not source_hash:
+                    source_hash = _legacy_credit_limit_hash(int(batch["id"]))
+                if self.credit_limit_store.find_duplicate_by_sha(source_hash):
+                    skipped += 1
+                    continue
+                detail_rows = database.execute(
+                    """
+                    SELECT *
+                    FROM credit_limit_details
+                    WHERE batch_id = ?
+                    ORDER BY expiry_date, approved_amount DESC, customer_code COLLATE NOCASE
+                    """,
+                    (int(batch["id"]),),
+                ).fetchall()
+                if not detail_rows:
+                    skipped += 1
+                    continue
+                first = detail_rows[0]
+                rows = [
+                    CreditLimitRow(
+                        customer_code=str(item["customer_code"] or ""),
+                        customer_name=str(item["customer_name"] or ""),
+                        contract_number=str(item["contract_number"] or ""),
+                        approved_date=_coerce_date(item["approved_date"]),
+                        approved_amount=float(item["approved_amount"] or 0),
+                        outstanding_balance=float(item["outstanding_balance"] or 0),
+                        expiry_date=_coerce_date(item["expiry_date"]),
+                        address=str(item["address"] or ""),
+                        officer=str(item["officer"] or ""),
+                        note="",
+                        days_to_expiry=None,
+                        status="",
+                    )
+                    for item in detail_rows
+                ]
+                accepted_rows = [
+                    CreditLimitRow(
+                        customer_code=str(item["customer_code"] or ""),
+                        customer_name=str(item["customer_name"] or ""),
+                        contract_number=str(item["contract_number"] or ""),
+                        approved_date=_coerce_date(item["approved_date"]),
+                        approved_amount=float(item["approved_amount"] or 0),
+                        outstanding_balance=float(item["outstanding_balance"] or 0),
+                        expiry_date=_coerce_date(item["expiry_date"]),
+                        address=str(item["address"] or ""),
+                        officer=str(item["officer"] or ""),
+                        note=str(item["note"] or ""),
+                        days_to_expiry=int(item["days_to_expiry"]) if item["days_to_expiry"] is not None else None,
+                        status=str(item["status"] or ""),
+                    )
+                    for item in detail_rows
+                ]
+                if progress:
+                    progress(f"Đang chuyển batch legacy {batch['id']} sang file Excel...")
+                self.credit_limit_store.create_batch(
+                    source_path=Path(str(batch["source_path"] or batch["file_name"] or f"legacy_{batch['id']}.csv")),
+                    rows=rows,
+                    accepted_rows=accepted_rows,
+                    reference_date=_coerce_date(first["reference_date"]) or _coerce_date(batch["period"]) or date.today(),
+                    min_limit=float(first["min_limit"] or 0),
+                    warn_days=int(first["warn_days"] or 30),
+                    source_file_sha256=source_hash,
+                    source_file_size=0,
+                    imported_by=str(batch["imported_by"] or ""),
+                    source_row_count=int(batch["row_count"] or len(rows)),
+                    duplicate_policy="new",
+                    progress=progress,
+                )
+                migrated += 1
+        self._memory_cache.clear()
+        return {"migrated": migrated, "skipped": skipped}
 
     def list_batches(self, data_type: SummaryDataType | None = None, limit: int = 80) -> list[ImportBatch]:
         sql = "SELECT * FROM summary_import_history"
@@ -959,13 +1120,28 @@ class SummaryRepository:
     def query_credit_limits(
         self,
         *,
-        batch_id: int | None = None,
+        batch_id: str | int | None = None,
         search: str = "",
         status: str = "",
         officer: str = "",
         page: int = 1,
         page_size: int = 200,
+        min_limit: float | None = None,
+        warn_days: int | None = None,
+        reference_date: date | None = None,
     ) -> PageResult:
+        if self.list_credit_limit_batches() or (batch_id and not _looks_like_int(batch_id)):
+            return self.credit_limit_store.query_credit_limits(
+                batch_id=batch_id,
+                search=search,
+                status=status,
+                officer=officer,
+                page=page,
+                page_size=page_size,
+                min_limit=min_limit,
+                warn_days=warn_days,
+                reference_date=reference_date,
+            )
         clauses = ["1 = 1"]
         params: list[object] = []
         if batch_id:
@@ -997,12 +1173,42 @@ class SummaryRepository:
             page_size=page_size,
         )
 
-    def dashboard_credit_limits(self, batch_id: int | None = None) -> DashboardData:
+    def dashboard_credit_limits(
+        self,
+        batch_id: str | int | None = None,
+        *,
+        search: str = "",
+        status: str = "",
+        officer: str = "",
+        min_limit: float | None = None,
+        warn_days: int | None = None,
+        reference_date: date | None = None,
+    ) -> DashboardData:
+        if self.list_credit_limit_batches() or (batch_id and not _looks_like_int(batch_id)):
+            return self.credit_limit_store.dashboard_credit_limits(
+                batch_id=batch_id,
+                search=search,
+                status=status,
+                officer=officer,
+                min_limit=min_limit,
+                warn_days=warn_days,
+                reference_date=reference_date,
+            )
         clauses = ["1 = 1"]
         params: list[object] = []
         if batch_id:
             clauses.append("batch_id = ?")
             params.append(int(batch_id))
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if officer:
+            clauses.append("officer = ?")
+            params.append(officer)
+        if search.strip():
+            needle = f"%{search.strip()}%"
+            clauses.append("(customer_code LIKE ? OR customer_name LIKE ? OR contract_number LIKE ? OR officer LIKE ?)")
+            params.extend([needle, needle, needle, needle])
         where = "WHERE " + " AND ".join(clauses)
         with self._database() as database:
             status_rows = database.execute(
@@ -1047,6 +1253,25 @@ class SummaryRepository:
             lines=tuple((str(row["month_key"] or "Không rõ"), float(row["count_rows"] or 0)) for row in by_month),
             pies=tuple((str(row["status"]), float(row["count_rows"] or 0)) for row in status_rows),
         )
+
+    def distinct_credit_limit_values(
+        self,
+        column_name: str,
+        *,
+        batch_id: str | int | None = None,
+        min_limit: float | None = None,
+        warn_days: int | None = None,
+        reference_date: date | None = None,
+    ) -> list[str]:
+        if self.list_credit_limit_batches() or (batch_id and not _looks_like_int(batch_id)):
+            return self.credit_limit_store.distinct_values(
+                column_name,
+                batch_id=batch_id,
+                min_limit=min_limit,
+                warn_days=warn_days,
+                reference_date=reference_date,
+            )
+        return self.distinct_values("credit_limit_details", column_name)
 
     def distinct_values(self, table_name: str, column_name: str, *, data_type: SummaryDataType | None = None) -> list[str]:
         allowed = {
@@ -1226,6 +1451,7 @@ class SummaryRepository:
                 ).fetchone()[0]
                 or 0
             )
+        credit_limit_files = self.credit_limit_store.maintenance_status()
         return {
             "database_path": self.database_path,
             "size_bytes": self.database_path.stat().st_size if self.database_path.is_file() else 0,
@@ -1234,6 +1460,10 @@ class SummaryRepository:
             "raw_nim_rows": raw_nim_rows,
             "loan_compare_batches": loan_batches,
             "credit_limit_batches": limit_batches,
+            "credit_limit_file_path": credit_limit_files.storage_path,
+            "credit_limit_file_batches": credit_limit_files.valid_files,
+            "credit_limit_invalid_files": credit_limit_files.invalid_files,
+            "credit_limit_file_size_bytes": credit_limit_files.total_size_bytes,
         }
 
     def optimize_database(self, *, vacuum: bool = False) -> dict[str, object]:
@@ -1749,3 +1979,36 @@ def _date_text(value: object) -> str | None:
         return value.isoformat()
     text = str(value).strip()
     return text or None
+
+
+def _coerce_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _looks_like_int(value: object) -> bool:
+    text = str(value or "").strip()
+    return text.isdigit()
+
+
+def _file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _legacy_credit_limit_hash(batch_id: int) -> str:
+    return hashlib.sha256(f"legacy-credit-limit:{batch_id}".encode("utf-8")).hexdigest()

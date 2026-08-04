@@ -12,6 +12,7 @@ from agribank_v3.features.credit.summary.customer.async_query import AsyncQueryC
 from agribank_v3.features.credit.summary.customer.charts import CustomerBarChart, CustomerLineChart
 from agribank_v3.features.credit.summary.customer.export_service import (
     DETAIL_BALANCE_COLUMNS,
+    DETAIL_DEBT_GROUP_COLUMNS,
     DETAIL_NIM_COLUMNS,
     DETAIL_OFFICER_COLUMNS,
     export_customer_detail,
@@ -22,6 +23,8 @@ from agribank_v3.features.credit.summary.customer.formatters import (
     format_money_vn,
     format_percent_vn,
 )
+from agribank_v3.features.credit.summary.customer.officer_center_repository import OFFICER_MODE_IMPORTED, OfficerCenterFilters
+from agribank_v3.features.credit.summary.customer.officer_detail_registry import open_shared_officer_detail
 from agribank_v3.features.credit.summary.customer.officer_override_dialog import OfficerOverrideDialog
 from agribank_v3.features.credit.summary.customer.repository import CustomerRepository
 from agribank_v3.features.credit.summary.customer.table_models import CustomerTableModel
@@ -57,6 +60,11 @@ DETAIL_SECONDARY_KPI_LABELS = (
     "Dư nợ trung/dài hạn",
     "Dư nợ chưa phân loại",
     "Tỷ lệ trung/dài hạn",
+    "Nhóm nợ cao nhất",
+    "Nợ cần chú ý",
+    "Nợ xấu",
+    "Tỷ lệ nhóm 2",
+    "Tỷ lệ nợ xấu",
 )
 
 DETAIL_METRIC_LABELS = DETAIL_MAIN_KPI_LABELS + DETAIL_SECONDARY_KPI_LABELS
@@ -115,6 +123,7 @@ class CustomerDetailWindow(QDialog):
         self.nim_model = CustomerTableModel(DETAIL_NIM_COLUMNS, self)
         self.officer_model = CustomerTableModel(DETAIL_OFFICER_COLUMNS, self)
         self.compare_model = CustomerTableModel(DETAIL_BALANCE_COLUMNS, self)
+        self.debt_group_model = CustomerTableModel(DETAIL_DEBT_GROUP_COLUMNS, self)
         self.balance_chart = CustomerLineChart("Xu hướng dư nợ", value_kind="money")
         self.term_money_chart = CustomerBarChart("Cơ cấu kỳ hạn theo kỳ", value_kind="money")
         self.term_ratio_chart = CustomerLineChart("Tỷ lệ trung/dài hạn", value_kind="percent")
@@ -128,6 +137,7 @@ class CustomerDetailWindow(QDialog):
         self.officer_table = self._add_table_tab("Cán bộ quản lý", self.officer_model)
         self.officer_table.doubleClicked.connect(self._officer_row_double_clicked)
         self._add_dual_chart_table_tab("So sánh các kỳ", self.compare_money_chart, self.compare_percent_chart, self.compare_model)
+        self._add_table_tab("Nhóm nợ", self.debt_group_model)
         self.tabs.setCurrentIndex(max(0, min(initial_tab, self.tabs.count() - 1)))
         self.refresh()
 
@@ -223,11 +233,13 @@ class CustomerDetailWindow(QDialog):
         if history and not detail:
             detail = history[-1]
         officer_history = self.repository.customer_officer_history(customer_code)
+        debt_group_history = self.repository.get_customer_debt_group_history(customer_code)
         compare_rows = [row for row in history if row.get("difference") != ""]
         return {
             "detail": detail,
             "history": history,
             "officer_history": officer_history,
+            "debt_group_history": debt_group_history,
             "compare_rows": compare_rows,
             "charts": chart_service.customer_detail_chart_datasets(history),
         }
@@ -240,6 +252,9 @@ class CustomerDetailWindow(QDialog):
         total_balance = detail.get("total_balance", 0)
         medium_long_balance = detail.get("medium_long_term_balance", 0)
         medium_long_ratio = detail.get("medium_long_ratio", 0)
+        debt_group_history = list(payload.get("debt_group_history") or [])
+        debt_detail = _matching_debt_group_detail(debt_group_history, str(detail.get("period") or self.period))
+        has_debt_group_data = bool(debt_detail.get("has_debt_group_data"))
         self.metrics.set_metrics(
             [
                 KpiMetric("Mã khách hàng", str(detail.get("customer_code") or self.customer_code), "text"),
@@ -268,6 +283,11 @@ class CustomerDetailWindow(QDialog):
                         f"{format_percent_vn(medium_long_ratio, empty='—')}"
                     ),
                 ),
+                KpiMetric("Nhóm nợ cao nhất", debt_detail.get("worst_debt_group_label") or ("Chưa có dữ liệu" if not has_debt_group_data else ""), "text", group="secondary"),
+                KpiMetric("Nợ cần chú ý", debt_detail.get("debt_group_2_balance", 0), "money", group="secondary"),
+                KpiMetric("Nợ xấu", debt_detail.get("bad_debt_balance", 0), "money", group="secondary"),
+                KpiMetric("Tỷ lệ nhóm 2", debt_detail.get("attention_ratio"), "percentage", group="secondary"),
+                KpiMetric("Tỷ lệ nợ xấu", debt_detail.get("bad_debt_ratio"), "percentage", group="secondary"),
             ]
         )
         officer_history = list(payload.get("officer_history") or [])
@@ -277,6 +297,7 @@ class CustomerDetailWindow(QDialog):
         self.nim_model.set_rows(history)
         self.officer_model.set_rows(officer_history)
         self.compare_model.set_rows(compare_rows)
+        self.debt_group_model.set_rows(debt_group_history)
         charts = dict(payload.get("charts") or {})
         self.balance_chart.set_series(charts.get("balance", ()))
         self.term_money_chart.set_series(charts.get("term_money", ()))
@@ -296,6 +317,7 @@ class CustomerDetailWindow(QDialog):
         self.nim_model.set_rows([])
         self.officer_model.set_rows([])
         self.compare_model.set_rows([])
+        self.debt_group_model.set_rows([])
         for chart in (
             self.balance_chart,
             self.term_money_chart,
@@ -358,7 +380,13 @@ class CustomerDetailWindow(QDialog):
     def _officer_row_double_clicked(self, index) -> None:
         row = self.officer_model.raw_row(index.row())
         period = str(row.get("period") or self.period).strip()
-        self.open_officer_override_dialog(period)
+        open_shared_officer_detail(
+            self,
+            self.repository.main_database_path,
+            row,
+            filters=OfficerCenterFilters(report_period=period, mode=OFFICER_MODE_IMPORTED),
+            initial_tab=7,
+        )
 
     def _notify_parent_cache_invalidated(self) -> None:
         parent = self.parent()
@@ -390,6 +418,14 @@ def _detail_placeholder_metrics(value: object, *, value_type: str = "text") -> l
         KpiMetric(label, value, value_type, group="secondary")
         for label in DETAIL_SECONDARY_KPI_LABELS
     ]
+
+
+def _matching_debt_group_detail(rows: list[dict[str, object]], period: str) -> dict[str, object]:
+    clean_period = str(period or "").strip()
+    for row in rows:
+        if str(row.get("period") or "").strip() == clean_period:
+            return dict(row)
+    return dict(rows[-1]) if rows else {}
 
 
 def _current_user() -> str:

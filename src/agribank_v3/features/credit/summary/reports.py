@@ -8,6 +8,7 @@ from openpyxl.styles import Font, PatternFill
 
 from agribank_v3.features.credit.summary.models import (
     CreditLimitRow,
+    DashboardMetric,
     LoanSnapshotRow,
     SummaryDataType,
     SummaryError,
@@ -22,7 +23,16 @@ GENERIC_MONEY_HEADERS = {
     "Dư nợ",
     "Số dư nguồn vốn",
     "Tổng dư nợ",
+    "Tổng dư nợ HĐTD",
+    "Tổng dư nỢ HđTD",
+    "Tổng hạn mức",
     "Hạn mức tín dụng",
+    "Hạn mức TD",
+}
+GENERIC_COUNT_HEADERS = {
+    "HĐTD đã hết hạn",
+    "HĐTD sắp hết hạn",
+    "Tổng HĐTD cảnh báo",
 }
 GENERIC_TEXT_HEADERS = {
     "Mã KH",
@@ -138,11 +148,97 @@ def _generic_excel_value(header: str, value: object) -> object:
         text = "" if value is None else str(value).strip()
         return text[1:] if text.startswith("'") else text
     if header in GENERIC_MONEY_HEADERS:
-        try:
-            return int(round(float(value or 0)))
-        except (TypeError, ValueError):
-            return 0
+        return _number_for_excel(value)
+    if header in GENERIC_COUNT_HEADERS:
+        return int(round(_number_for_excel(value) or 0))
     return value
+
+
+def export_credit_limit_view_report(
+    rows: list[dict[str, object]],
+    metrics: tuple[DashboardMetric, ...],
+    destination: Path,
+    *,
+    sheet_name: str,
+    title: str,
+) -> Path:
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "TongHop"
+    summary["A1"] = title
+    summary["A1"].font = Font(bold=True, size=14)
+    summary.append(("Chỉ tiêu", "Giá trị", "Ghi chú"))
+    for cell in summary[2]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="D9EAF7")
+    for metric in metrics:
+        summary.append((metric.label, _generic_excel_value(metric.label, metric.value), metric.detail))
+    for row in summary.iter_rows(min_row=3, min_col=2, max_col=2):
+        for cell in row:
+            label = summary.cell(cell.row, 1).value
+            if label in GENERIC_MONEY_HEADERS:
+                cell.number_format = "#,##0"
+            elif label in GENERIC_COUNT_HEADERS:
+                cell.number_format = "0"
+    data_sheet = workbook.create_sheet((sheet_name[:31] or "BaoCao"))
+    headers = list(rows[0].keys()) if rows else ["Thông báo"]
+    data_sheet["A1"] = title
+    data_sheet["A1"].font = Font(bold=True, size=14)
+    data_sheet.append(headers)
+    for cell in data_sheet[2]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="D9EAF7")
+    if rows:
+        for row in rows:
+            data_sheet.append([_generic_excel_value(header, row.get(header, "")) for header in headers])
+    else:
+        data_sheet.append(["Không có dữ liệu"])
+    for column_index, header in enumerate(headers, start=1):
+        if header in GENERIC_MONEY_HEADERS:
+            for cell in data_sheet.iter_cols(min_col=column_index, max_col=column_index, min_row=3):
+                for item in cell:
+                    item.number_format = "#,##0"
+        elif header in GENERIC_TEXT_HEADERS:
+            for cell in data_sheet.iter_cols(min_col=column_index, max_col=column_index, min_row=3):
+                for item in cell:
+                    item.number_format = "@"
+    for worksheet in (summary, data_sheet):
+        for column_cells in worksheet.columns:
+            width = min(48, max(10, max(len(str(cell.value or "")) for cell in column_cells) + 2))
+            worksheet.column_dimensions[column_cells[0].column_letter].width = width
+    workbook.save(destination)
+    return destination
+
+
+def _number_for_excel(value: object) -> int | float:
+    if value in (None, "", "—"):
+        return 0
+    if isinstance(value, int | float):
+        number = float(value)
+    else:
+        text = str(value).strip().replace("đồng", "").replace("%", "").replace(" ", "")
+        if "," in text and "." in text:
+            if text.rfind(",") > text.rfind("."):
+                text = text.replace(".", "").replace(",", ".")
+            else:
+                text = text.replace(",", "")
+        elif "." in text:
+            parts = text.split(".")
+            if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]) and len(parts[0]) <= 3:
+                text = "".join(parts)
+        elif "," in text:
+            parts = text.split(",")
+            if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]) and len(parts[0]) <= 3:
+                text = "".join(parts)
+            else:
+                text = text.replace(",", ".")
+        try:
+            number = float(text)
+        except ValueError:
+            return 0
+    return int(number) if number.is_integer() else number
 
 
 def export_loan_compare_vba(rows: list[LoanSnapshotRow], destination: Path) -> Path:
