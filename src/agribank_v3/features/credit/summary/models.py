@@ -11,6 +11,8 @@ NIM_NV_TITLE = "NIM nguồn vốn"
 NIM_TITLE = "NIM DN / NIM NV"
 LOAN_COMPARE_TITLE = "So sánh tăng giảm khách hàng"
 CREDIT_LIMIT_TITLE = "Hạn mức tín dụng hết hạn"
+REPORT_DATA_TITLE = "Số liệu báo cáo"
+REPORT_SUMMARY_TITLE = "Tổng hợp số liệu báo cáo"
 DEBT_GROUP_NORMAL = "NORMAL"
 DEBT_GROUP_ATTENTION = "ATTENTION"
 DEBT_GROUP_BAD_DEBT = "BAD_DEBT"
@@ -123,6 +125,33 @@ class NormalizedLoanRow:
 
 
 @dataclass(frozen=True, slots=True)
+class NormalizedLn01Row:
+    period: str
+    source_file: str
+    source_row_number: int
+    branch_code: str
+    customer_sequence: str
+    customer_code: str
+    customer_name: str
+    account_number: str
+    approval_sequence: str
+    approval_date: date | None
+    approved_limit: float
+    maturity_date: date | None
+    outstanding_balance: float
+    customer_type_code: str
+    debt_group_code: str
+    secured_percent: float | None
+    industry_code: str
+    officer_code: str
+    officer_name: str
+    address: str
+    credit_line_type: str = ""
+    source_row_count: int = 1
+    group_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class NimSummaryRow:
     period: str
     branch: str
@@ -189,6 +218,7 @@ class CreditLimitRow:
     account_number: str = ""
     credit_line_type: str = "Line of Credit"
     source_row_count: int = 1
+    group_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

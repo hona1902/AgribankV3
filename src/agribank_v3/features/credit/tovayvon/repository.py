@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
+import shutil
 import sqlite3
 from typing import Iterator
 
@@ -12,6 +14,9 @@ from agribank_v3.features.credit.tovayvon.models import (
     COMMISSION_EXPORT_HEADERS,
     COMMISSION_RULE_EXPORT_HEADERS,
     DATA_TVV_HEADERS,
+    ASSOCIATION_OTHER,
+    infer_association_type,
+    normalize_association_type,
     CreditGroup,
     CreditGroupCommissionRate,
     CreditGroupCommissionRule,
@@ -68,6 +73,8 @@ class CreditGroupRepository:
                         to_hoi TEXT NOT NULL DEFAULT '',
                         tk_to_hoi_xa TEXT NOT NULL DEFAULT '',
                         to_chuc TEXT NOT NULL DEFAULT '',
+                        association_type TEXT NOT NULL DEFAULT 'OTHER',
+                        association_other_name TEXT NOT NULL DEFAULT '',
                         ten_huyen TEXT NOT NULL DEFAULT '',
                         tk_huyen TEXT NOT NULL DEFAULT '',
                         ten_tinh TEXT NOT NULL DEFAULT '',
@@ -144,6 +151,31 @@ class CreditGroupRepository:
                     "active",
                     "ALTER TABLE credit_groups ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
                 )
+                association_columns_missing = not self._column_exists(
+                    database,
+                    "credit_groups",
+                    "association_type",
+                ) or not self._column_exists(
+                    database,
+                    "credit_groups",
+                    "association_other_name",
+                )
+                if association_columns_missing:
+                    self._backup_database_before_schema_change()
+                added_association_type = self._ensure_column(
+                    database,
+                    "credit_groups",
+                    "association_type",
+                    "ALTER TABLE credit_groups ADD COLUMN association_type TEXT NOT NULL DEFAULT 'OTHER'",
+                )
+                added_association_other = self._ensure_column(
+                    database,
+                    "credit_groups",
+                    "association_other_name",
+                    "ALTER TABLE credit_groups ADD COLUMN association_other_name TEXT NOT NULL DEFAULT ''",
+                )
+                if added_association_type or added_association_other:
+                    self._backfill_association_types(database)
                 self._ensure_column(
                     database,
                     "credit_group_commission_rates",
@@ -174,23 +206,73 @@ class CreditGroupRepository:
             ) from exc
 
     @staticmethod
-    def _ensure_column(
+    def _column_exists(
         database: sqlite3.Connection,
         table_name: str,
         column_name: str,
-        alter_sql: str,
-    ) -> None:
+    ) -> bool:
         columns = {
             str(row["name"])
             for row in database.execute(f"PRAGMA table_info({table_name})").fetchall()
         }
-        if column_name not in columns:
+        return column_name in columns
+
+    @classmethod
+    def _ensure_column(
+        cls,
+        database: sqlite3.Connection,
+        table_name: str,
+        column_name: str,
+        alter_sql: str,
+    ) -> bool:
+        if not cls._column_exists(database, table_name, column_name):
             database.execute(alter_sql)
+            return True
+        return False
+
+    def _backup_database_before_schema_change(self) -> Path | None:
+        if not self.database_path.is_file():
+            return None
+        backup_dir = self.database_path.parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{self.database_path.stem}-before-credit-groups-association-{datetime.now():%Y%m%d_%H%M%S}.db"
+        counter = 1
+        while backup_path.exists():
+            counter += 1
+            backup_path = backup_dir / f"{self.database_path.stem}-before-credit-groups-association-{datetime.now():%Y%m%d_%H%M%S}_{counter}.db"
+        shutil.copy2(self.database_path, backup_path)
+        return backup_path
+
+    @staticmethod
+    def _backfill_association_types(database: sqlite3.Connection) -> None:
+        rows = database.execute(
+            """
+            SELECT ma_to, to_hoi, to_chuc, ten_huyen, ten_tinh, ten_tw
+            FROM credit_groups
+            """
+        ).fetchall()
+        for row in rows:
+            type_code = infer_association_type(
+                row["to_hoi"],
+                row["to_chuc"],
+                row["ten_huyen"],
+                row["ten_tinh"],
+                row["ten_tw"],
+            )
+            database.execute(
+                """
+                UPDATE credit_groups
+                SET association_type = ?, association_other_name = ''
+                WHERE ma_to = ?
+                """,
+                (type_code, row["ma_to"]),
+            )
 
     def save_group(self, group: CreditGroup) -> None:
         ma_to = group.ma_to.strip()
         if not ma_to:
             raise CreditGroupRepositoryError("Mã tổ không được để trống.")
+        group = self._normalize_group_for_storage(group)
         now = now_text()
         try:
             with self._database() as database:
@@ -225,11 +307,30 @@ class CreditGroupRepository:
         except sqlite3.Error as exc:
             raise CreditGroupRepositoryError(f"Không thể lưu tổ vay vốn: {exc}") from exc
 
-    def list_groups(self, *, include_inactive: bool = False) -> list[CreditGroup]:
+    def list_groups(
+        self,
+        *,
+        include_inactive: bool = False,
+        association_type: str = "",
+    ) -> list[CreditGroup]:
+        normalized_type = ""
+        if str(association_type or "").strip():
+            try:
+                normalized_type = normalize_association_type(association_type)
+            except ValueError as exc:
+                raise CreditGroupRepositoryError(str(exc)) from exc
         with self._database() as database:
-            where_clause = "" if include_inactive else "WHERE active = 1"
+            filters: list[str] = []
+            params: list[object] = []
+            if not include_inactive:
+                filters.append("active = 1")
+            if normalized_type:
+                filters.append("association_type = ?")
+                params.append(normalized_type)
+            where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
             rows = database.execute(
-                f"SELECT * FROM credit_groups {where_clause} ORDER BY stt, ma_to COLLATE NOCASE"
+                f"SELECT * FROM credit_groups {where_clause} ORDER BY stt, ma_to COLLATE NOCASE",
+                params,
             ).fetchall()
         return [self._group_from_row(row) for row in rows]
 
@@ -620,13 +721,24 @@ class CreditGroupRepository:
             count = 0
             rule_settings: CreditCommissionRuleSettings | None = None
             max_col = max(len(DATA_TVV_HEADERS), len(headers))
+            has_association_columns = "LoaiToChucHoi" in header_map or "TenToChucKhac" in header_map
             for row_number, row in enumerate(
                 sheet.iter_rows(min_row=2, max_col=max_col, values_only=True),
                 start=2,
             ):
                 if not row or not str(row[1] or "").strip():
                     continue
-                group = CreditGroup.from_data_tvv_row(row[: len(DATA_TVV_HEADERS)])
+                try:
+                    group = CreditGroup.from_data_tvv_row(
+                        row[: len(DATA_TVV_HEADERS)],
+                        has_association_columns=has_association_columns,
+                    )
+                except ValueError as exc:
+                    raise CreditGroupRepositoryError(f"Dòng {row_number}: {exc}") from exc
+                if has_association_columns and group.association_type == ASSOCIATION_OTHER and not group.association_other_name:
+                    raise CreditGroupRepositoryError(
+                        f"Dòng {row_number}: Chọn Khác phải nhập Tên tổ chức khác."
+                    )
                 self.save_group(group)
                 rate = self._commission_rate_from_import_row(row, header_map, group.ma_to)
                 if rate is not None:
@@ -721,6 +833,17 @@ class CreditGroupRepository:
         return min(stt - 1, existing_count)
 
     @staticmethod
+    def _normalize_group_for_storage(group: CreditGroup) -> CreditGroup:
+        try:
+            association_type = normalize_association_type(group.association_type)
+        except ValueError as exc:
+            raise CreditGroupRepositoryError(str(exc)) from exc
+        if not association_type:
+            association_type = infer_association_type(group.to_hoi, group.to_chuc)
+        other_name = group.association_other_name.strip() if association_type == ASSOCIATION_OTHER else ""
+        return replace(group, association_type=association_type, association_other_name=other_name)
+
+    @staticmethod
     def _upsert_group(
         database: sqlite3.Connection,
         group: CreditGroup,
@@ -733,11 +856,12 @@ class CreditGroupRepository:
             INSERT INTO credit_groups(
                 ma_to, stt, ten_to, ten_tvv_day_du, xa, ma_to_truong,
                 ten_to_truong, dia_chi, tk_to_truong, so_dien_thoai,
-                to_hoi, tk_to_hoi_xa, to_chuc, ten_huyen, tk_huyen,
-                ten_tinh, tk_tinh, ten_tw, tk_tw, uy_quyen, ttln_tw,
-                ttln_tinh, active, created_at, updated_at
+                to_hoi, tk_to_hoi_xa, to_chuc, association_type,
+                association_other_name, ten_huyen, tk_huyen, ten_tinh,
+                tk_tinh, ten_tw, tk_tw, uy_quyen, ttln_tw, ttln_tinh,
+                active, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ma_to) DO UPDATE SET
                 stt = excluded.stt,
                 ten_to = excluded.ten_to,
@@ -751,6 +875,8 @@ class CreditGroupRepository:
                 to_hoi = excluded.to_hoi,
                 tk_to_hoi_xa = excluded.tk_to_hoi_xa,
                 to_chuc = excluded.to_chuc,
+                association_type = excluded.association_type,
+                association_other_name = excluded.association_other_name,
                 ten_huyen = excluded.ten_huyen,
                 tk_huyen = excluded.tk_huyen,
                 ten_tinh = excluded.ten_tinh,
@@ -777,6 +903,8 @@ class CreditGroupRepository:
                 group.to_hoi,
                 group.tk_to_hoi_xa,
                 group.to_chuc,
+                group.association_type,
+                group.association_other_name,
                 group.ten_huyen,
                 group.tk_huyen,
                 group.ten_tinh,
@@ -1017,6 +1145,8 @@ class CreditGroupRepository:
             to_hoi=str(row["to_hoi"] or ""),
             tk_to_hoi_xa=str(row["tk_to_hoi_xa"] or ""),
             to_chuc=str(row["to_chuc"] or ""),
+            association_type=str(row["association_type"] or ASSOCIATION_OTHER),
+            association_other_name=str(row["association_other_name"] or ""),
             ten_huyen=str(row["ten_huyen"] or ""),
             tk_huyen=str(row["tk_huyen"] or ""),
             ten_tinh=str(row["ten_tinh"] or ""),

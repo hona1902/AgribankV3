@@ -1,3 +1,3 @@
 """AgribankV3 desktop application."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"

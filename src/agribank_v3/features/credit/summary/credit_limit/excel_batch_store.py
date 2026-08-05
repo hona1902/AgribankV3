@@ -25,6 +25,8 @@ from .models import (
     DATA_SHEET_NAME,
     META_SHEET_NAME,
     STORAGE_FOLDER_NAME,
+    CreditLimitBatchLookup,
+    CreditLimitBatchLookupState,
     CreditLimitBatchMetadata,
     CreditLimitStorageStatus,
 )
@@ -46,9 +48,10 @@ DATA_HEADERS: tuple[str, ...] = (
     "officer_name",
     "address",
     "source_row_count",
+    "group_code",
 )
 REQUIRED_DATA_HEADERS_FOR_READ: tuple[str, ...] = tuple(
-    header for header in DATA_HEADERS if header != "outstanding_balance"
+    header for header in DATA_HEADERS if header not in {"outstanding_balance", "group_code"}
 )
 TEXT_COLUMNS = {
     "batch_id",
@@ -61,6 +64,7 @@ TEXT_COLUMNS = {
     "officer_code",
     "officer_name",
     "address",
+    "group_code",
 }
 MONEY_COLUMNS = {"approved_limit", "outstanding_balance"}
 DATE_COLUMNS = {"approval_date", "maturity_date"}
@@ -77,6 +81,13 @@ class CreditLimitRowContext:
     outstanding_balance_available: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class PendingCreditLimitBatch:
+    metadata: CreditLimitBatchMetadata
+    temp_file: Path
+    target_file: Path
+
+
 def credit_limit_storage_directory(main_database_path: str | Path | None = None) -> Path:
     if main_database_path:
         return Path(main_database_path).expanduser().resolve().parent / STORAGE_FOLDER_NAME
@@ -91,6 +102,7 @@ class CreditLimitExcelBatchStore:
         self.temp_path = self.storage_path / "Temp"
         self.backup_path = self.storage_path / "Backup"
         self.trash_path = self.storage_path / "Trash"
+        self.history_path = self.storage_path / "History"
         self._metadata_cache: dict[Path, tuple[int, int, CreditLimitBatchMetadata]] = {}
         self._row_cache: dict[Path, tuple[int, int, tuple[CreditLimitRow, ...], bool]] = {}
 
@@ -99,6 +111,7 @@ class CreditLimitExcelBatchStore:
         self.temp_path.mkdir(parents=True, exist_ok=True)
         self.backup_path.mkdir(parents=True, exist_ok=True)
         self.trash_path.mkdir(parents=True, exist_ok=True)
+        self.history_path.mkdir(parents=True, exist_ok=True)
         return self.storage_path
 
     def create_batch(
@@ -115,11 +128,58 @@ class CreditLimitExcelBatchStore:
         imported_by: str = "",
         source_row_count: int = 0,
         duplicate_policy: str = "error",
+        period: str = "",
+        branch_code: str = "",
+        office_code: str = "",
         progress: Callable[[str], None] | None = None,
     ) -> CreditLimitBatchMetadata:
+        pending = self.prepare_batch(
+            source_path=source_path,
+            rows=rows,
+            accepted_rows=accepted_rows,
+            reference_date=reference_date,
+            min_limit=min_limit,
+            warn_days=warn_days,
+            source_file_sha256=source_file_sha256,
+            source_file_size=source_file_size,
+            imported_by=imported_by,
+            source_row_count=source_row_count,
+            duplicate_policy=duplicate_policy,
+            period=period,
+            branch_code=branch_code,
+            office_code=office_code,
+            progress=progress,
+        )
+        try:
+            self.finalize_prepared_batch(pending)
+        except Exception:
+            self.cleanup_prepared_batch(pending)
+            raise
+        return self._metadata_from_file(pending.target_file)
+
+    def prepare_batch(
+        self,
+        *,
+        source_path: Path,
+        rows: Sequence[CreditLimitRow] | Sequence[Mapping[str, Any]],
+        accepted_rows: Sequence[CreditLimitRow] | Sequence[Mapping[str, Any]],
+        reference_date: date,
+        min_limit: float,
+        warn_days: int,
+        source_file_sha256: str,
+        source_file_size: int,
+        imported_by: str = "",
+        source_row_count: int = 0,
+        duplicate_policy: str = "error",
+        replace_metadata: CreditLimitBatchMetadata | None = None,
+        period: str = "",
+        branch_code: str = "",
+        office_code: str = "",
+        progress: Callable[[str], None] | None = None,
+    ) -> PendingCreditLimitBatch:
         self.ensure_storage()
         duplicate = self.find_duplicate_by_sha(source_file_sha256)
-        if duplicate and duplicate_policy == "error":
+        if duplicate and duplicate_policy == "error" and replace_metadata is None:
             first = duplicate[0]
             raise SummaryError(
                 f"File LN01 này đã được nhập trước đó: {first.batch_name} ({first.file_name})."
@@ -130,12 +190,26 @@ class CreditLimitExcelBatchStore:
         source_path = Path(source_path)
         materialized_rows = tuple(normalize_credit_limit_row(row) for row in rows)
         materialized_accepted = tuple(normalize_credit_limit_row(row) for row in accepted_rows)
+        clean_period = _normalize_period(period) or _period_from_file_name(source_path.name)
+        clean_branch = str(branch_code or "").strip() or _infer_branch_code(materialized_rows, source_path.name)
+        clean_office = str(office_code or "").strip()
+        same_period = self.find_active_batch_by_period(clean_period, clean_branch, clean_office) if clean_period else None
+        if same_period is not None and replace_metadata is None and duplicate_policy == "error":
+            raise SummaryError(
+                f"Kỳ {clean_period} đã có batch HMHETHAN active: {same_period.file_name}."
+            )
         expired = sum(1 for row in materialized_accepted if row.status == "Đã hết hạn")
         expiring = sum(1 for row in materialized_accepted if row.status == "Sắp hết hạn")
-        batch_id = self._new_batch_id(now, source_file_sha256)
-        batch_name = f"{source_path.stem} - {now:%d/%m/%Y %H:%M:%S}"
-        file_name = self._new_file_name(now, source_path.stem, source_file_sha256)
-        target = self.storage_path / file_name
+        if replace_metadata is not None:
+            batch_id = replace_metadata.batch_id
+            batch_name = _batch_display_name(clean_period, clean_branch, source_path.stem, now)
+            file_name = replace_metadata.file_name
+            target = replace_metadata.file_path
+        else:
+            batch_id = self._new_batch_id(now, source_file_sha256, clean_period, clean_branch)
+            batch_name = _batch_display_name(clean_period, clean_branch, source_path.stem, now)
+            file_name = self._new_file_name(now, source_path.stem, source_file_sha256, clean_period, clean_branch)
+            target = self.storage_path / file_name
         temp_file = self.temp_path / f".{file_name}.{uuid.uuid4().hex}.tmp.xlsx"
         metadata = CreditLimitBatchMetadata(
             batch_id=batch_id,
@@ -159,6 +233,13 @@ class CreditLimitExcelBatchStore:
             expiring_count_at_import=expiring,
             status="OK",
             notes="",
+            period=clean_period,
+            branch_code=clean_branch,
+            office_code=clean_office,
+            is_active=True,
+            replaced_batch_id=replace_metadata.batch_id if replace_metadata is not None else "",
+            previous_version=replace_metadata.file_name if replace_metadata is not None else "",
+            period_missing=not bool(clean_period),
         )
         workbook: Workbook | None = None
         try:
@@ -170,7 +251,6 @@ class CreditLimitExcelBatchStore:
             self._write_data_sheet(data_sheet, metadata.batch_id, materialized_rows)
             workbook.save(temp_file)
             self._validate_workbook(temp_file)
-            os.replace(temp_file, target)
         except Exception:
             if temp_file.exists():
                 temp_file.unlink(missing_ok=True)
@@ -178,10 +258,22 @@ class CreditLimitExcelBatchStore:
         finally:
             if workbook is not None:
                 workbook.close()
+        return PendingCreditLimitBatch(metadata=metadata, temp_file=temp_file, target_file=target)
+
+    def finalize_prepared_batch(self, pending: PendingCreditLimitBatch) -> CreditLimitBatchMetadata:
+        if not pending.temp_file.is_file():
+            raise SummaryError("Không tìm thấy workbook tạm HMHETHAN để hoàn tất import.")
+        os.replace(pending.temp_file, pending.target_file)
         self.invalidate_cache()
-        return self._metadata_from_file(target)
+        return self._metadata_from_file(pending.target_file)
+
+    def cleanup_prepared_batch(self, pending: PendingCreditLimitBatch) -> None:
+        pending.temp_file.unlink(missing_ok=True)
 
     def list_batches(self) -> list[CreditLimitBatchMetadata]:
+        return self._deduplicate_active_batches(self.list_all_batches())
+
+    def list_all_batches(self) -> list[CreditLimitBatchMetadata]:
         self.ensure_storage()
         batches: list[CreditLimitBatchMetadata] = []
         for path in self._iter_candidate_files():
@@ -205,9 +297,98 @@ class CreditLimitExcelBatchStore:
             return []
         return [
             item
-            for item in self.list_batches()
+            for item in self.list_all_batches()
             if str(item.source_file_sha256 or "").strip().lower() == needle
         ]
+
+    def find_batch_by_sha_status(
+        self,
+        source_file_sha256: str,
+        *,
+        period: str = "",
+        branch_code: str = "",
+        office_code: str = "",
+    ) -> CreditLimitBatchLookup:
+        needle = str(source_file_sha256 or "").strip().lower()
+        clean_period = _normalize_period(period)
+        clean_branch = str(branch_code or "").strip()
+        clean_office = str(office_code or "").strip()
+        if not needle and not clean_period:
+            return CreditLimitBatchLookup(CreditLimitBatchLookupState.NOT_FOUND)
+        valid: list[CreditLimitBatchMetadata] = []
+        invalid: list[CreditLimitBatchLookup] = []
+        for path in self._iter_candidate_files():
+            try:
+                metadata = self._metadata_from_file(path)
+            except Exception as exc:
+                if len(needle) >= 8 and needle[:8] in path.name.lower():
+                    invalid.append(
+                        CreditLimitBatchLookup(
+                            CreditLimitBatchLookupState.FOUND_INVALID,
+                            invalid_file_path=path,
+                            error_message=str(exc),
+                        )
+                    )
+                continue
+            metadata_hash = str(metadata.source_file_sha256 or "").strip().lower()
+            same_hash = bool(needle and metadata_hash == needle)
+            same_period = _same_batch_period(metadata, clean_period, clean_branch, clean_office)
+            if not same_hash and not same_period:
+                continue
+            try:
+                self._validate_workbook(path)
+                self._rows_from_file_with_profile(path)
+            except Exception as exc:
+                invalid.append(
+                    CreditLimitBatchLookup(
+                        CreditLimitBatchLookupState.FOUND_INVALID,
+                        metadata=metadata,
+                        invalid_file_path=path,
+                        error_message=str(exc),
+                    )
+                )
+                continue
+            valid.append(metadata)
+        if valid:
+            valid.sort(
+                key=lambda item: (
+                    int(str(item.source_file_sha256 or "").strip().lower() == needle),
+                    item.imported_at or datetime.min,
+                    item.modified_at or datetime.min,
+                    item.file_name,
+                ),
+                reverse=True,
+            )
+            return CreditLimitBatchLookup(CreditLimitBatchLookupState.FOUND_VALID, metadata=valid[0])
+        if invalid:
+            return invalid[0]
+        return CreditLimitBatchLookup(CreditLimitBatchLookupState.NOT_FOUND)
+
+    def find_active_batch_by_period(
+        self,
+        period: str,
+        branch_code: str = "",
+        office_code: str = "",
+    ) -> CreditLimitBatchMetadata | None:
+        clean_period = _normalize_period(period)
+        if not clean_period:
+            return None
+        matches = [
+            batch
+            for batch in self.list_all_batches()
+            if _same_batch_period(batch, clean_period, branch_code, office_code)
+        ]
+        if not matches:
+            return None
+        matches.sort(
+            key=lambda item: (
+                item.imported_at or datetime.min,
+                item.modified_at or datetime.min,
+                item.file_name,
+            ),
+            reverse=True,
+        )
+        return matches[0]
 
     def query_credit_limits(
         self,
@@ -426,11 +607,84 @@ class CreditLimitExcelBatchStore:
         self.invalidate_cache()
         return trash_file
 
+    def assign_batch_period(
+        self,
+        batch_id: str | int,
+        *,
+        period: str,
+        branch_code: str = "",
+        office_code: str = "",
+    ) -> CreditLimitBatchMetadata:
+        metadata = self.get_batch(batch_id)
+        if metadata is None:
+            raise SummaryError("Không tìm thấy batch HMHETHAN cần gán kỳ.")
+        clean_period = _normalize_period(period)
+        if not clean_period:
+            raise SummaryError("Kỳ dữ liệu phải có dạng YYYY-MM.")
+        updates = {
+            "period": clean_period,
+            "branch_code": str(branch_code or metadata.branch_code or "").strip(),
+            "office_code": str(office_code or metadata.office_code or "").strip(),
+            "period_missing": False,
+            "is_active": True,
+        }
+        return self._rewrite_metadata(metadata.file_path, updates)
+
+    def activate_batch(self, batch_id: str | int) -> dict[str, object]:
+        selected = self.get_batch(batch_id)
+        if selected is None:
+            raise SummaryError("Không tìm thấy batch HMHETHAN cần chọn làm chính thức.")
+        if not selected.period:
+            raise SummaryError("Batch này chưa có kỳ dữ liệu. Vui lòng gán kỳ trước.")
+        archived: list[Path] = []
+        for batch in self.list_all_batches():
+            if batch.batch_id == selected.batch_id:
+                continue
+            if _same_batch_period(batch, selected.period, selected.branch_code, selected.office_code):
+                archived.append(self.archive_file_to_history(batch.file_path, suffix="inactive"))
+        active = self._rewrite_metadata(selected.file_path, {"is_active": True})
+        return {"active_batch_id": active.batch_id, "archived": archived}
+
+    def list_history_batches(
+        self,
+        *,
+        period: str = "",
+        branch_code: str = "",
+        office_code: str = "",
+    ) -> list[CreditLimitBatchMetadata]:
+        self.ensure_storage()
+        batches: list[CreditLimitBatchMetadata] = []
+        for path in self.history_path.iterdir():
+            if not path.is_file() or path.suffix.lower() != ".xlsx" or path.name.startswith("~$"):
+                continue
+            try:
+                metadata = self._metadata_from_file(path)
+            except Exception:
+                continue
+            if period and not _same_batch_period(metadata, period, branch_code, office_code):
+                continue
+            batches.append(metadata)
+        batches.sort(key=lambda item: item.imported_at or datetime.min, reverse=True)
+        return batches
+
+    def archive_file_to_history(self, file_path: Path, *, suffix: str = "history") -> Path:
+        self.ensure_storage()
+        file_path = Path(file_path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive = self.history_path / f"{file_path.stem}_{suffix}_{timestamp}{file_path.suffix}"
+        counter = 1
+        while archive.exists():
+            counter += 1
+            archive = self.history_path / f"{file_path.stem}_{suffix}_{timestamp}_{counter}{file_path.suffix}"
+        shutil.move(str(file_path), str(archive))
+        self.invalidate_cache()
+        return archive
+
     def get_batch(self, batch_id: str | int | None) -> CreditLimitBatchMetadata | None:
         if batch_id is None or str(batch_id).strip() in {"", "0"}:
             return None
         clean = str(batch_id).strip()
-        for metadata in self.list_batches():
+        for metadata in self.list_all_batches():
             if metadata.batch_id == clean or metadata.file_name == clean:
                 return metadata
         return None
@@ -717,6 +971,38 @@ class CreditLimitExcelBatchStore:
             row[0].alignment = Alignment(vertical="top")
             row[1].alignment = Alignment(vertical="top", wrap_text=True)
 
+    def _rewrite_metadata(
+        self,
+        path: Path,
+        updates: Mapping[str, object],
+    ) -> CreditLimitBatchMetadata:
+        self.ensure_storage()
+        workbook = load_workbook(path)
+        temp_file = self.temp_path / f".{Path(path).name}.{uuid.uuid4().hex}.metadata.tmp.xlsx"
+        try:
+            if META_SHEET_NAME not in workbook.sheetnames:
+                raise SummaryError(f"Workbook thiếu sheet {META_SHEET_NAME}.")
+            sheet = workbook[META_SHEET_NAME]
+            row_by_key: dict[str, int] = {}
+            for row_index in range(2, sheet.max_row + 1):
+                key = str(sheet.cell(row_index, 1).value or "").strip()
+                if key:
+                    row_by_key[key] = row_index
+            for key, value in updates.items():
+                row_index = row_by_key.get(key)
+                if row_index is None:
+                    row_index = sheet.max_row + 1
+                    sheet.cell(row_index, 1).value = key
+                sheet.cell(row_index, 2).value = _excel_value(value)
+            workbook.save(temp_file)
+            self._validate_workbook(temp_file)
+            os.replace(temp_file, path)
+        finally:
+            workbook.close()
+            temp_file.unlink(missing_ok=True)
+        self.invalidate_cache()
+        return self._metadata_from_file(path)
+
     def _write_data_sheet(
         self,
         sheet: Worksheet,
@@ -768,17 +1054,78 @@ class CreditLimitExcelBatchStore:
         finally:
             workbook.close()
 
-    def _new_batch_id(self, imported_at: datetime, source_hash: str) -> str:
-        prefix = f"{imported_at:%Y%m%d_%H%M%S}_{source_hash[:8].lower()}"
+    def _deduplicate_active_batches(
+        self,
+        batches: Sequence[CreditLimitBatchMetadata],
+    ) -> list[CreditLimitBatchMetadata]:
+        selected: dict[tuple[str, str, str], CreditLimitBatchMetadata] = {}
+        loose: list[CreditLimitBatchMetadata] = []
+        ordered = sorted(
+            batches,
+            key=lambda item: (
+                item.imported_at or datetime.min,
+                item.modified_at or datetime.min,
+                item.file_name,
+            ),
+            reverse=True,
+        )
+        for batch in ordered:
+            if not batch.is_active:
+                continue
+            period = _normalize_period(batch.period)
+            if not period:
+                loose.append(batch)
+                continue
+            key = (period, str(batch.branch_code or "").strip(), str(batch.office_code or "").strip())
+            if key not in selected:
+                selected[key] = batch
+        return sorted(
+            [*selected.values(), *loose],
+            key=lambda item: (
+                item.period or "",
+                item.imported_at or datetime.min,
+                item.modified_at or datetime.min,
+                item.file_name,
+            ),
+            reverse=True,
+        )
+
+    def _new_batch_id(
+        self,
+        imported_at: datetime,
+        source_hash: str,
+        period: str = "",
+        branch_code: str = "",
+    ) -> str:
+        clean_period = _normalize_period(period)
+        clean_branch = _safe_file_part(branch_code) or "BRANCH"
+        sha8 = str(source_hash or "")[:8].upper()
+        if clean_period:
+            prefix = f"HMHETHAN_{clean_period}_{clean_branch}_{sha8}"
+        else:
+            prefix = f"{imported_at:%Y%m%d_%H%M%S}_{str(source_hash or '')[:8].lower()}"
         candidate = prefix
-        existing = {batch.batch_id for batch in self.list_batches()}
+        existing = {batch.batch_id for batch in self.list_all_batches()}
         while candidate in existing:
             candidate = f"{prefix}_{uuid.uuid4().hex[:6]}"
         return candidate
 
-    def _new_file_name(self, imported_at: datetime, source_stem: str, source_hash: str) -> str:
-        safe_stem = _safe_file_part(source_stem)[:60] or "LN01"
-        prefix = f"HMHETHAN_{imported_at:%Y%m%d_%H%M%S}_{safe_stem}_{source_hash[:8].lower()}"
+    def _new_file_name(
+        self,
+        imported_at: datetime,
+        source_stem: str,
+        source_hash: str,
+        period: str = "",
+        branch_code: str = "",
+    ) -> str:
+        clean_period = _normalize_period(period)
+        clean_branch = _safe_file_part(branch_code) or "BRANCH"
+        sha8 = str(source_hash or "")[:8].upper()
+        if clean_period:
+            prefix = f"HMHETHAN_{clean_period}_{clean_branch}_{sha8}"
+        else:
+            safe_stem = _safe_file_part(source_stem)[:60] or "LN01"
+            prefix = f"HMHETHAN_{imported_at:%Y%m%d_%H%M%S}_{safe_stem}_{str(source_hash or '')[:8].lower()}"
         candidate = f"{prefix}.xlsx"
         counter = 1
         while (self.storage_path / candidate).exists():
@@ -856,6 +1203,7 @@ def credit_limit_row_to_excel_values(row: CreditLimitRow, batch_id: str) -> list
         row.officer,
         row.address,
         row.source_row_count,
+        row.group_code or "",
     )
     return [_excel_data_value(value) for value in values]
 
@@ -884,6 +1232,7 @@ def excel_record_to_credit_limit_row(record: Mapping[str, Any]) -> CreditLimitRo
         account_number=_clean_mapping_text(record, "account_number"),
         credit_line_type=_clean_mapping_text(record, "credit_line_type") or "Line of Credit",
         source_row_count=max(1, _to_int(_mapping_value(record, "source_row_count"))),
+        group_code=_clean_mapping_text(record, "group_code", "Mã tổ vay vốn"),
     )
 
 
@@ -893,6 +1242,8 @@ def credit_limit_context_to_page_dict(context: CreditLimitRowContext) -> dict[st
     return {
         "batch_id": metadata.batch_id,
         "batch_name": metadata.batch_name,
+        "period": metadata.period,
+        "batch_file_name": metadata.file_name,
         "customer_code": row.customer_code,
         "customer_name": row.customer_name,
         "contract_number": row.contract_number,
@@ -910,6 +1261,7 @@ def credit_limit_context_to_page_dict(context: CreditLimitRowContext) -> dict[st
         "account_number": row.account_number,
         "credit_line_type": row.credit_line_type,
         "source_row_count": row.source_row_count,
+        "group_code": row.group_code or "",
         "reference_date": context.reference_date,
         "warn_days": context.warn_days,
         "min_limit": context.min_limit,
@@ -961,12 +1313,16 @@ def _metadata_values(metadata: CreditLimitBatchMetadata) -> dict[str, object]:
 
 def _metadata_from_values(values: dict[str, object], path: Path) -> CreditLimitBatchMetadata:
     stat = path.stat()
+    source_file_name = str(values.get("source_file_name") or "")
+    period = _normalize_period(values.get("period")) or _period_from_file_name(source_file_name) or _period_from_file_name(path.name)
+    branch_code = str(values.get("branch_code") or "").strip() or _branch_from_file_name(source_file_name) or _branch_from_file_name(path.name)
+    office_code = str(values.get("office_code") or "").strip()
     return CreditLimitBatchMetadata(
         batch_id=str(values.get("batch_id") or path.stem),
         batch_name=str(values.get("batch_name") or path.stem),
         file_path=path,
         file_name=path.name,
-        source_file_name=str(values.get("source_file_name") or ""),
+        source_file_name=source_file_name,
         source_file_sha256=str(values.get("source_file_sha256") or ""),
         source_file_size=_to_int(values.get("source_file_size")),
         imported_at=_to_datetime(values.get("imported_at")),
@@ -983,6 +1339,13 @@ def _metadata_from_values(values: dict[str, object], path: Path) -> CreditLimitB
         expiring_count_at_import=_to_int(values.get("expiring_count_at_import")),
         status=str(values.get("status") or "OK"),
         notes=str(values.get("notes") or ""),
+        period=period,
+        branch_code=branch_code,
+        office_code=office_code,
+        is_active=_to_bool(values.get("is_active"), default=True),
+        replaced_batch_id=str(values.get("replaced_batch_id") or values.get("previous_batch_id") or ""),
+        previous_version=str(values.get("previous_version") or ""),
+        period_missing=not bool(period),
         schema_version=str(values.get("schema_version") or CREDIT_LIMIT_BATCH_SCHEMA_VERSION),
         file_size=stat.st_size,
         modified_at=datetime.fromtimestamp(stat.st_mtime),
@@ -1054,6 +1417,21 @@ def _to_datetime(value: object) -> datetime | None:
     return None
 
 
+def _to_bool(value: object, *, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return bool(value)
+    text = str(value or "").strip().casefold()
+    if text in {"1", "true", "yes", "y", "co", "có", "active", "ok"}:
+        return True
+    if text in {"0", "false", "no", "n", "khong", "không", "inactive"}:
+        return False
+    return default
+
+
 def _to_date(value: object) -> date | None:
     if isinstance(value, datetime):
         return value.date()
@@ -1121,6 +1499,66 @@ def _safe_file_part(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     text = re.sub(r"_+", "_", text).strip("._-")
     return text
+
+
+def _normalize_period(value: object) -> str:
+    text = str(value or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}", text):
+        return text
+    return ""
+
+
+def _period_from_file_name(file_name: str) -> str:
+    stem = Path(str(file_name or "")).stem
+    match = re.search(r"(\d{4})(\d{2})(\d{2})(?!\d)", stem)
+    if match:
+        month = match.group(2)
+        if "01" <= month <= "12":
+            return f"{match.group(1)}-{month}"
+    return ""
+
+
+def _branch_from_file_name(file_name: str) -> str:
+    stem = Path(str(file_name or "")).stem
+    batch_match = re.match(r"^HMHETHAN_\d{4}-\d{2}_(\d{4})(?:\D|$)", stem, flags=re.IGNORECASE)
+    if batch_match:
+        return batch_match.group(1)
+    match = re.match(r"^\D*(\d{4})(?:\D|$)", stem)
+    return match.group(1) if match else ""
+
+
+def _infer_branch_code(rows: Sequence[CreditLimitRow], file_name: str) -> str:
+    for row in rows:
+        branch_code = str(row.branch_code or "").strip()
+        if branch_code:
+            return branch_code
+    return _branch_from_file_name(file_name)
+
+
+def _batch_display_name(period: str, branch_code: str, source_stem: str, imported_at: datetime) -> str:
+    clean_period = _normalize_period(period)
+    clean_branch = str(branch_code or "").strip()
+    if clean_period and clean_branch:
+        return f"{clean_period} - {clean_branch}"
+    if clean_period:
+        return clean_period
+    return f"{source_stem} - {imported_at:%d/%m/%Y %H:%M:%S}"
+
+
+def _same_batch_period(
+    metadata: CreditLimitBatchMetadata,
+    period: str,
+    branch_code: str = "",
+    office_code: str = "",
+) -> bool:
+    clean_period = _normalize_period(period)
+    if not clean_period or _normalize_period(metadata.period) != clean_period:
+        return False
+    if branch_code and str(metadata.branch_code or "").strip() != str(branch_code or "").strip():
+        return False
+    if office_code and str(metadata.office_code or "").strip() != str(office_code or "").strip():
+        return False
+    return bool(metadata.is_active)
 
 
 def _date_sort_value(value: object) -> str:

@@ -8,7 +8,7 @@ import unittest
 
 from openpyxl import load_workbook
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
+from PySide6.QtWidgets import QApplication, QComboBox, QPushButton, QSizePolicy, QWidget
 
 from agribank_v3.features.credit.summary.customer.officer_center_controller import open_officer_center_window
 from agribank_v3.features.credit.summary.customer.officer_center_export import export_officer_center_workbook
@@ -47,6 +47,31 @@ class OfficerCenterTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def _show_officer_window(self, window: OfficerCenterWindow, width: int, height: int) -> None:
+        app = QApplication.instance() or QApplication([])
+        window.resize(width, height)
+        window.show()
+        app.processEvents()
+
+    def _assert_toolbars_do_not_overlap(self, window: OfficerCenterWindow) -> None:
+        for toolbar in window.filter_toolbars:
+            geometries = []
+            for widget in toolbar.item_widgets():
+                geometry = widget.geometry()
+                self.assertGreater(geometry.width(), 0)
+                self.assertGreater(geometry.height(), 0)
+                compact = geometry.adjusted(0, 0, -1, -1)
+                for previous in geometries:
+                    self.assertFalse(
+                        compact.intersects(previous.adjusted(0, 0, -1, -1)),
+                        f"{widget.objectName() or widget.__class__.__name__} overlaps in {toolbar.objectName()}",
+                    )
+                geometries.append(geometry)
+
+    def _assert_button_text_has_room(self, button: QPushButton) -> None:
+        required = button.fontMetrics().horizontalAdvance(button.text()) + 40
+        self.assertGreaterEqual(max(button.minimumWidth(), button.sizeHint().width()), required)
 
     def test_officer_import_mode_uses_customer_officer_period(self) -> None:
         filters = OfficerCenterFilters(report_period="2026-03", mode=OFFICER_MODE_IMPORTED)
@@ -326,7 +351,7 @@ class OfficerCenterTests(unittest.TestCase):
             self.assertIn("DanhSachCBTD", workbook.sheetnames)
             self.assertIn("BienDongCBTD", workbook.sheetnames)
             self.assertIn("SoSanhCBTD", workbook.sheetnames)
-            self.assertIn("ChatLuongDuNo", workbook.sheetnames)
+            self.assertIn("ChatLuongTinDung", workbook.sheetnames)
             self.assertIn("KhachHangTheoCBTD", workbook.sheetnames)
             self.assertIn("DanhMucCBTD", workbook.sheetnames)
             self.assertIn("ThongTin", workbook.sheetnames)
@@ -498,11 +523,126 @@ class OfficerCenterTests(unittest.TestCase):
         _ = app
         window = OfficerCenterWindow(self.main_database_path)
         try:
-            layout = window.search_box.parentWidget().layout()
-            self.assertIs(layout.itemAtPosition(1, 3).widget(), window.search_box)
-            self.assertIs(layout.itemAtPosition(1, 5).widget(), window.refresh_button)
-            self.assertIs(layout.itemAtPosition(1, 6).widget(), window.clear_button)
-            self.assertIs(layout.itemAtPosition(1, 7).widget(), window.export_button)
+            self._show_officer_window(window, 1080, 680)
+            self._assert_toolbars_do_not_overlap(window)
+        finally:
+            window.close()
+
+    def test_officer_center_filters_do_not_overlap(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            self._show_officer_window(window, 1080, 680)
+            self._assert_toolbars_do_not_overlap(window)
+        finally:
+            window.close()
+
+    def test_officer_center_filter_layout_wraps(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            toolbar = window.findChild(QWidget, "OfficerCenterActionToolbar")
+            self.assertIsNotNone(toolbar)
+            toolbar.resize(460, 90)
+            app.processEvents()
+            self.assertGreaterEqual(toolbar.row_count(), 2)
+        finally:
+            window.close()
+
+    def test_officer_center_search_minimum_width(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            self.assertGreaterEqual(window.search_box.minimumWidth(), 320)
+            self.assertEqual(window.search_box.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Expanding)
+        finally:
+            window.close()
+
+    def test_officer_center_import_mode_combo_visible(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            text = "Theo phân bổ dữ liệu import"
+            required = window.mode_combo.fontMetrics().horizontalAdvance(text) + 40
+            self.assertGreaterEqual(window.mode_combo.minimumWidth(), required)
+            self.assertGreaterEqual(window.mode_combo.view().minimumWidth(), required)
+            self.assertIn(text, window.mode_combo.toolTip())
+        finally:
+            window.close()
+
+    def test_officer_center_status_combo_visible(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            text = "Trạng thái CBTD"
+            self.assertGreaterEqual(window.status_combo.minimumWidth(), window.status_combo.fontMetrics().horizontalAdvance(text) + 40)
+            self.assertGreaterEqual(window.status_combo.view().minimumWidth(), window.status_combo.minimumWidth())
+        finally:
+            window.close()
+
+    def test_officer_center_export_button_text_visible(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            self._assert_button_text_has_room(window.export_button)
+        finally:
+            window.close()
+
+    def test_officer_center_controls_inside_client_rect(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            self._show_officer_window(window, 1080, 680)
+            for toolbar in window.filter_toolbars:
+                rect = toolbar.contentsRect()
+                for widget in toolbar.item_widgets():
+                    geometry = widget.geometry()
+                    self.assertGreaterEqual(geometry.left(), rect.left())
+                    self.assertGreaterEqual(geometry.top(), rect.top())
+                    self.assertLessEqual(geometry.right(), rect.right())
+        finally:
+            window.close()
+
+    def test_officer_center_layout_at_normal_window_size(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            self._show_officer_window(window, 1080, 680)
+            self._assert_toolbars_do_not_overlap(window)
+            self.assertTrue(window.dashboard_tab.top_table.minimumHeight() >= 320)
+        finally:
+            window.close()
+
+    def test_officer_center_layout_at_maximized_size(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            window.showMaximized()
+            app.processEvents()
+            self._assert_toolbars_do_not_overlap(window)
+        finally:
+            window.close()
+
+    def test_officer_center_layout_at_125_percent_dpi(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        window = OfficerCenterWindow(self.main_database_path)
+        try:
+            font = window.font()
+            font.setPointSize(max(font.pointSize() + 2, 13))
+            window.setFont(font)
+            self._show_officer_window(window, 1080, 680)
+            self._assert_toolbars_do_not_overlap(window)
+            self._assert_button_text_has_room(window.export_button)
         finally:
             window.close()
 

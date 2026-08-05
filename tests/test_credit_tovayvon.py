@@ -17,10 +17,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QLineEdit, QMessageBox, QRadioButton
 
 from agribank_v3.settings import AppSettingsDatabase, BranchProfile
 from agribank_v3.features.credit.tovayvon.models import (
+    ASSOCIATION_FARMERS_UNION,
+    ASSOCIATION_OTHER,
+    ASSOCIATION_WOMENS_UNION,
     COMMISSION_EXPORT_HEADERS,
     COMMISSION_RULE_EXPORT_HEADERS,
     DATA_TVV_FIELD_LABELS,
@@ -30,6 +33,7 @@ from agribank_v3.features.credit.tovayvon.models import (
     CreditGroupCommissionRate,
     CreditGroupCommissionRule,
     CreditCommissionRuleSettings,
+    association_type_display,
 )
 from agribank_v3.features.credit.tovayvon.excel_templates import (
     DATA_TVV_TEXT_COLUMNS,
@@ -82,6 +86,7 @@ from agribank_v3.features.credit.tovayvon.repository import (
     CreditGroupRepository,
     CreditGroupRepositoryError,
 )
+from agribank_v3.features.credit.tovayvon.organization_service import CreditGroupOrganizationService
 from agribank_v3.features.credit.tovayvon.word_template import (
     extract_docx_text,
     replace_word_placeholders,
@@ -138,10 +143,179 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         self.assertEqual(set(DATA_TVV_FIELD_LABELS), set(DATA_TVV_HEADERS))
         self.assertEqual(DATA_TVV_FIELD_LABELS["MaTo"], "Mã số tổ")
         self.assertEqual(DATA_TVV_FIELD_LABELS["TenTo"], "Tên tổ vay vốn")
+        self.assertEqual(DATA_TVV_FIELD_LABELS["LoaiToChucHoi"], "Loại tổ chức Hội")
         self.assertEqual(
             DATA_TVV_FIELD_LABELS["TK_HUYEN"],
             "Tài khoản tổ hội cấp huyện",
         )
+
+    def test_credit_group_association_type_schema(self) -> None:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(credit_groups)").fetchall()
+            }
+
+        self.assertIn("association_type", columns)
+        self.assertIn("association_other_name", columns)
+
+    def test_credit_group_farmers_union_value(self) -> None:
+        self.repository.save_group(
+            CreditGroup(
+                stt=1,
+                ma_to="T001",
+                ten_to="Tổ 001",
+                association_type=ASSOCIATION_FARMERS_UNION,
+                association_other_name="Không lưu",
+            )
+        )
+
+        group = self.repository.get_group("T001")
+
+        self.assertEqual(group.association_type, ASSOCIATION_FARMERS_UNION)
+        self.assertEqual(group.association_other_name, "")
+
+    def test_credit_group_womens_union_value(self) -> None:
+        self.repository.save_group(
+            CreditGroup(stt=1, ma_to="T001", ten_to="Tổ 001", association_type="Hội Phụ nữ")
+        )
+
+        self.assertEqual(self.repository.get_group("T001").association_type, ASSOCIATION_WOMENS_UNION)
+
+    def test_credit_group_other_value(self) -> None:
+        self.repository.save_group(
+            CreditGroup(
+                stt=1,
+                ma_to="T001",
+                ten_to="Tổ 001",
+                association_type=ASSOCIATION_OTHER,
+                association_other_name="Hội Cựu chiến binh",
+            )
+        )
+
+        group = self.repository.get_group("T001")
+
+        self.assertEqual(group.association_type, ASSOCIATION_OTHER)
+        self.assertEqual(group.association_other_name, "Hội Cựu chiến binh")
+        self.assertEqual(association_type_display(group.association_type, group.association_other_name), "Hội Cựu chiến binh")
+
+    def test_credit_group_backfill_farmers_union(self) -> None:
+        database_path = Path(self.temporary_directory.name) / "old_farmers.db"
+        self._seed_old_credit_groups_database(database_path, to_hoi="Hội nông dân xã")
+
+        repository = CreditGroupRepository(database_path)
+
+        self.assertEqual(repository.get_group("T001").association_type, ASSOCIATION_FARMERS_UNION)
+
+    def test_credit_group_backfill_womens_union(self) -> None:
+        database_path = Path(self.temporary_directory.name) / "old_womens.db"
+        self._seed_old_credit_groups_database(database_path, to_hoi="HLHPN xã")
+
+        repository = CreditGroupRepository(database_path)
+
+        self.assertEqual(repository.get_group("T001").association_type, ASSOCIATION_WOMENS_UNION)
+
+    def test_credit_group_backfill_unknown_as_other(self) -> None:
+        database_path = Path(self.temporary_directory.name) / "old_other.db"
+        self._seed_old_credit_groups_database(database_path, to_hoi="Tổ chức địa phương")
+
+        repository = CreditGroupRepository(database_path)
+
+        group = repository.get_group("T001")
+        self.assertEqual(group.association_type, ASSOCIATION_OTHER)
+        self.assertEqual(group.association_other_name, "")
+
+    def test_credit_group_filter_by_association_type(self) -> None:
+        self.repository.save_group(CreditGroup(stt=1, ma_to="T001", ten_to="Tổ 001", association_type=ASSOCIATION_FARMERS_UNION))
+        self.repository.save_group(CreditGroup(stt=2, ma_to="T002", ten_to="Tổ 002", association_type=ASSOCIATION_WOMENS_UNION))
+
+        groups = self.repository.list_groups(association_type=ASSOCIATION_WOMENS_UNION)
+
+        self.assertEqual([group.ma_to for group in groups], ["T002"])
+
+    def test_credit_group_radio_group_exclusive(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CreditGroupEditDialog(self.repository, mode="add")
+        try:
+            farmers = dialog.association_type_buttons[ASSOCIATION_FARMERS_UNION]
+            womens = dialog.association_type_buttons[ASSOCIATION_WOMENS_UNION]
+
+            farmers.setChecked(True)
+            womens.setChecked(True)
+
+            self.assertFalse(farmers.isChecked())
+            self.assertTrue(womens.isChecked())
+            self.assertEqual(len(dialog.association_button_group.buttons()), 3)
+            self.assertTrue(all(isinstance(button, QRadioButton) for button in dialog.association_button_group.buttons()))
+        finally:
+            dialog.close()
+
+    def test_credit_group_other_requires_name(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CreditGroupEditDialog(self.repository, mode="add")
+        try:
+            dialog.inputs["ma_to"].setText("T001")
+            dialog.inputs["ten_to"].setText("Tổ 001")
+            dialog.association_type_buttons[ASSOCIATION_OTHER].setChecked(True)
+            group = dialog.collect_form_data()
+
+            errors = dialog.validate_form_data(group)
+
+            self.assertIn("Chọn Khác phải nhập Tên tổ chức khác.", errors)
+        finally:
+            dialog.close()
+
+    def test_credit_group_create_saves_association_type(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CreditGroupEditDialog(self.repository, mode="add")
+        try:
+            dialog.inputs["ma_to"].setText("T001")
+            dialog.inputs["ten_to"].setText("Tổ 001")
+            dialog.association_type_buttons[ASSOCIATION_FARMERS_UNION].setChecked(True)
+            group = dialog.collect_form_data()
+            self.repository.save_group(group)
+
+            self.assertEqual(self.repository.get_group("T001").association_type, ASSOCIATION_FARMERS_UNION)
+        finally:
+            dialog.close()
+
+    def test_credit_group_edit_loads_association_type(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        group = CreditGroup(
+            stt=1,
+            ma_to="T001",
+            ten_to="Tổ 001",
+            association_type=ASSOCIATION_OTHER,
+            association_other_name="Hội Cựu chiến binh",
+        )
+        self.repository.save_group(group)
+
+        dialog = CreditGroupEditDialog(self.repository, mode="edit", group=group)
+        try:
+            self.assertTrue(dialog.association_type_buttons[ASSOCIATION_OTHER].isChecked())
+            self.assertTrue(dialog.association_other_input.isEnabled())
+            self.assertEqual(dialog.association_other_input.text(), "Hội Cựu chiến binh")
+        finally:
+            dialog.close()
+
+    def test_report_can_read_credit_group_association_type(self) -> None:
+        self.repository.save_group(CreditGroup(stt=1, ma_to="T001", ten_to="Tổ 001", association_type=ASSOCIATION_FARMERS_UNION))
+        self.repository.save_group(CreditGroup(stt=2, ma_to="T002", ten_to="Tổ 002", association_type=ASSOCIATION_WOMENS_UNION))
+        service = CreditGroupOrganizationService(self.repository)
+
+        self.assertEqual(service.get_group_organization_type("T001"), ASSOCIATION_FARMERS_UNION)
+        self.assertEqual(service.get_group_organization_display("T002"), "Hội Phụ nữ")
+        self.assertEqual(service.list_groups_by_organization_type(ASSOCIATION_FARMERS_UNION), ["T001"])
+        self.assertEqual(service.summarize_group_counts_by_organization_type()[ASSOCIATION_WOMENS_UNION], 1)
+
+    def test_report_does_not_infer_group_link_from_names(self) -> None:
+        service = CreditGroupOrganizationService(self.repository)
+
+        self.assertFalse(hasattr(service, "summarize_loan_balance_by_customer_name"))
 
     def test_default_info_empty_does_not_crash(self) -> None:
         self.assertEqual(get_default_credit_group_info(), {})
@@ -1499,7 +1673,7 @@ class CreditGroupRepositoryTests(unittest.TestCase):
             100.0,
         )
 
-    def test_export_data_tvv_preserves_original_22_columns_by_default(self) -> None:
+    def test_export_data_tvv_includes_association_columns_by_default(self) -> None:
         self.repository.save_group(
             CreditGroup(stt=1, ma_to="T001", ten_to="Tổ 001")
         )
@@ -1528,9 +1702,10 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         finally:
             workbook.close()
         self.assertEqual(headers, list(DATA_TVV_HEADERS))
-        self.assertEqual(len(headers), 22)
+        self.assertEqual(len(headers), 24)
+        self.assertEqual(headers[13:15], ["LoaiToChucHoi", "TenToChucKhac"])
 
-    def test_create_data_tvv_template_has_46_columns(self) -> None:
+    def test_create_data_tvv_template_has_48_columns(self) -> None:
         output_path = Path(self.temporary_directory.name) / "Mau_Data_TVV.xlsx"
 
         create_data_tvv_template(output_path)
@@ -1547,10 +1722,10 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         finally:
             workbook.close()
         self.assertEqual(headers, list(DATA_TVV_TEMPLATE_HEADERS))
-        self.assertEqual(headers[:22], list(DATA_TVV_HEADERS))
-        self.assertEqual(headers[22:36], list(COMMISSION_EXPORT_HEADERS))
-        self.assertEqual(headers[36:46], list(COMMISSION_RULE_EXPORT_HEADERS))
-        self.assertEqual(len(headers), 46)
+        self.assertEqual(headers[:24], list(DATA_TVV_HEADERS))
+        self.assertEqual(headers[24:38], list(COMMISSION_EXPORT_HEADERS))
+        self.assertEqual(headers[38:48], list(COMMISSION_RULE_EXPORT_HEADERS))
+        self.assertEqual(len(headers), 48)
 
     def test_template_text_columns_are_formatted_as_text(self) -> None:
         output_path = Path(self.temporary_directory.name) / "Mau_Data_TVV.xlsx"
@@ -1595,8 +1770,14 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Data_TVV"
-        sheet.append(DATA_TVV_HEADERS)
-        sheet.append(self._data_tvv_row(1, "T001", "Tổ 001"))
+        old_headers = tuple(
+            header
+            for header in DATA_TVV_HEADERS
+            if header not in {"LoaiToChucHoi", "TenToChucKhac"}
+        )
+        sheet.append(old_headers)
+        new_row = self._data_tvv_row(1, "T001", "Tổ 001")
+        sheet.append(new_row[:13] + new_row[15:])
         workbook.save(source_path)
         workbook.close()
 
@@ -1607,8 +1788,9 @@ class CreditGroupRepositoryTests(unittest.TestCase):
             self.repository.get_or_create_commission_rate("T001").no_secured_to_truong,
             80.0,
         )
+        self.assertEqual(self.repository.get_group("T001").association_type, ASSOCIATION_FARMERS_UNION)
 
-    def test_import_new_46_column_template_with_commission(self) -> None:
+    def test_import_new_48_column_template_with_commission(self) -> None:
         source_path = Path(self.temporary_directory.name) / "New_Data_TVV.xlsx"
         workbook = Workbook()
         sheet = workbook.active
@@ -1654,7 +1836,7 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         with self.assertRaises(CreditGroupRepositoryError):
             self.repository.import_data_tvv(source_path)
 
-    def test_export_with_commission_has_46_columns(self) -> None:
+    def test_export_with_commission_has_48_columns(self) -> None:
         self.repository.save_group(
             CreditGroup(stt=1, ma_to="T001", ten_to="Tổ 001")
         )
@@ -1671,7 +1853,7 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         finally:
             workbook.close()
         self.assertEqual(headers, list(DATA_TVV_TEMPLATE_HEADERS))
-        self.assertEqual(len(headers), 46)
+        self.assertEqual(len(headers), 48)
 
     def test_commission_rule_settings_have_vba_like_defaults(self) -> None:
         settings = self.repository.get_commission_rule_settings()
@@ -3461,6 +3643,51 @@ class CreditGroupRepositoryTests(unittest.TestCase):
         return None
 
     @staticmethod
+    def _seed_old_credit_groups_database(database_path: Path, *, to_hoi: str, to_chuc: str = "") -> None:
+        with closing(sqlite3.connect(database_path)) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE credit_groups (
+                    ma_to TEXT PRIMARY KEY,
+                    stt INTEGER NOT NULL DEFAULT 0,
+                    ten_to TEXT NOT NULL DEFAULT '',
+                    ten_tvv_day_du TEXT NOT NULL DEFAULT '',
+                    xa TEXT NOT NULL DEFAULT '',
+                    ma_to_truong TEXT NOT NULL DEFAULT '',
+                    ten_to_truong TEXT NOT NULL DEFAULT '',
+                    dia_chi TEXT NOT NULL DEFAULT '',
+                    tk_to_truong TEXT NOT NULL DEFAULT '',
+                    so_dien_thoai TEXT NOT NULL DEFAULT '',
+                    to_hoi TEXT NOT NULL DEFAULT '',
+                    tk_to_hoi_xa TEXT NOT NULL DEFAULT '',
+                    to_chuc TEXT NOT NULL DEFAULT '',
+                    ten_huyen TEXT NOT NULL DEFAULT '',
+                    tk_huyen TEXT NOT NULL DEFAULT '',
+                    ten_tinh TEXT NOT NULL DEFAULT '',
+                    tk_tinh TEXT NOT NULL DEFAULT '',
+                    ten_tw TEXT NOT NULL DEFAULT '',
+                    tk_tw TEXT NOT NULL DEFAULT '',
+                    uy_quyen TEXT NOT NULL DEFAULT '',
+                    ttln_tw TEXT NOT NULL DEFAULT '',
+                    ttln_tinh TEXT NOT NULL DEFAULT '',
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO credit_groups(
+                    ma_to, stt, ten_to, to_hoi, to_chuc, created_at, updated_at
+                )
+                VALUES ('T001', 1, 'Tổ 001', ?, ?, '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+                """,
+                (to_hoi, to_chuc),
+            )
+            connection.commit()
+
+    @staticmethod
     def _data_tvv_row(stt: int, ma_to: str, ten_to: str) -> list[str | int]:
         return [
             stt,
@@ -3476,6 +3703,8 @@ class CreditGroupRepositoryTests(unittest.TestCase):
             "Hội nông dân",
             "987654321",
             "Tổ chức A",
+            "Hội Nông dân",
+            "",
             "Huyện A",
             "111",
             "Tỉnh A",

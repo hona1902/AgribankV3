@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 from pathlib import Path
 
 
-CREDIT_LIMIT_BATCH_SCHEMA_VERSION = "1"
+CREDIT_LIMIT_BATCH_SCHEMA_VERSION = "2"
 DATA_SHEET_NAME = "DuLieuHanMuc"
 META_SHEET_NAME = "ThongTinBatch"
 STORAGE_FOLDER_NAME = "HMHETHAN"
@@ -34,9 +35,30 @@ class CreditLimitBatchMetadata:
     expiring_count_at_import: int
     status: str
     notes: str
+    period: str = ""
+    branch_code: str = ""
+    office_code: str = ""
+    is_active: bool = True
+    replaced_batch_id: str = ""
+    previous_version: str = ""
+    period_missing: bool = False
     schema_version: str = CREDIT_LIMIT_BATCH_SCHEMA_VERSION
     file_size: int = 0
     modified_at: datetime | None = None
+
+
+class CreditLimitBatchLookupState(StrEnum):
+    NOT_FOUND = "NOT_FOUND"
+    FOUND_VALID = "FOUND_VALID"
+    FOUND_INVALID = "FOUND_INVALID"
+
+
+@dataclass(frozen=True)
+class CreditLimitBatchLookup:
+    state: CreditLimitBatchLookupState
+    metadata: CreditLimitBatchMetadata | None = None
+    invalid_file_path: Path | None = None
+    error_message: str = ""
 
 
 @dataclass(frozen=True)

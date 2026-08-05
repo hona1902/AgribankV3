@@ -3,6 +3,22 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
+import unicodedata
+
+
+ASSOCIATION_FARMERS_UNION = "FARMERS_UNION"
+ASSOCIATION_WOMENS_UNION = "WOMENS_UNION"
+ASSOCIATION_OTHER = "OTHER"
+ASSOCIATION_TYPES: tuple[str, ...] = (
+    ASSOCIATION_FARMERS_UNION,
+    ASSOCIATION_WOMENS_UNION,
+    ASSOCIATION_OTHER,
+)
+ASSOCIATION_TYPE_LABELS: dict[str, str] = {
+    ASSOCIATION_FARMERS_UNION: "Hội Nông dân",
+    ASSOCIATION_WOMENS_UNION: "Hội Phụ nữ",
+    ASSOCIATION_OTHER: "Khác",
+}
 
 
 DATA_TVV_HEADERS: tuple[str, ...] = (
@@ -19,6 +35,8 @@ DATA_TVV_HEADERS: tuple[str, ...] = (
     "ToHoi",
     "TK_ToHoiXa",
     "ToChuc",
+    "LoaiToChucHoi",
+    "TenToChucKhac",
     "Ten_Huyen",
     "TK_HUYEN",
     "Ten_Tinh",
@@ -82,6 +100,8 @@ DATA_TVV_FIELD_LABELS: dict[str, str] = {
     "ToHoi": "Tổ Hội cấp xã",
     "TK_ToHoiXa": "Tài khoản tổ hội cấp xã",
     "ToChuc": "Tổ chức quản lý cấp xã",
+    "LoaiToChucHoi": "Loại tổ chức Hội",
+    "TenToChucKhac": "Tên tổ chức khác",
     "Ten_Huyen": "Tổ Hội cấp huyện",
     "TK_HUYEN": "Tài khoản tổ hội cấp huyện",
     "Ten_Tinh": "Tổ Hội cấp tỉnh",
@@ -108,6 +128,8 @@ DATA_TVV_ATTR_TO_HEADER: dict[str, str] = {
     "to_hoi": "ToHoi",
     "tk_to_hoi_xa": "TK_ToHoiXa",
     "to_chuc": "ToChuc",
+    "association_type": "LoaiToChucHoi",
+    "association_other_name": "TenToChucKhac",
     "ten_huyen": "Ten_Huyen",
     "tk_huyen": "TK_HUYEN",
     "ten_tinh": "Ten_Tinh",
@@ -122,6 +144,57 @@ DATA_TVV_ATTR_TO_HEADER: dict[str, str] = {
 
 def now_text() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def normalize_association_type(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    upper = text.upper()
+    if upper in ASSOCIATION_TYPES:
+        return upper
+    normalized = _normalize_vietnamese_text(text)
+    if normalized in {"hoi nong dan", "nong dan", "hnd"}:
+        return ASSOCIATION_FARMERS_UNION
+    if normalized in {"hoi phu nu", "hoi lien hiep phu nu", "lien hiep phu nu", "phu nu", "hlhpn", "hpn"}:
+        return ASSOCIATION_WOMENS_UNION
+    if normalized in {"khac", "other"}:
+        return ASSOCIATION_OTHER
+    raise ValueError(f"Loại tổ chức Hội không hợp lệ: {text}")
+
+
+def infer_association_type(*values: object) -> str:
+    combined = " ".join(str(value or "") for value in values)
+    normalized = _normalize_vietnamese_text(combined)
+    if "hoi nong dan" in normalized or re_contains_token(normalized, "hnd"):
+        return ASSOCIATION_FARMERS_UNION
+    if (
+        "hoi phu nu" in normalized
+        or "hoi lien hiep phu nu" in normalized
+        or re_contains_token(normalized, "hlhpn")
+        or re_contains_token(normalized, "hpn")
+    ):
+        return ASSOCIATION_WOMENS_UNION
+    return ASSOCIATION_OTHER
+
+
+def association_type_display(type_code: object, other_name: object = "") -> str:
+    normalized = normalize_association_type(type_code) if str(type_code or "").strip() else ASSOCIATION_OTHER
+    if normalized == ASSOCIATION_OTHER:
+        return str(other_name or "").strip() or ASSOCIATION_TYPE_LABELS[ASSOCIATION_OTHER]
+    return ASSOCIATION_TYPE_LABELS[normalized]
+
+
+def _normalize_vietnamese_text(value: object) -> str:
+    text = str(value or "").strip().casefold().replace("đ", "d")
+    decomposed = unicodedata.normalize("NFD", text)
+    no_marks = "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+    return " ".join(no_marks.split())
+
+
+def re_contains_token(text: str, token: str) -> bool:
+    parts = [part for part in text.replace("_", " ").replace("-", " ").split() if part]
+    return token in parts
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +212,8 @@ class CreditGroup:
     to_hoi: str = ""
     tk_to_hoi_xa: str = ""
     to_chuc: str = ""
+    association_type: str = ASSOCIATION_OTHER
+    association_other_name: str = ""
     ten_huyen: str = ""
     tk_huyen: str = ""
     ten_tinh: str = ""
@@ -153,8 +228,23 @@ class CreditGroup:
     updated_at: str = ""
 
     @classmethod
-    def from_data_tvv_row(cls, row: list[Any] | tuple[Any, ...]) -> "CreditGroup":
+    def from_data_tvv_row(
+        cls,
+        row: list[Any] | tuple[Any, ...],
+        *,
+        has_association_columns: bool | None = None,
+    ) -> "CreditGroup":
         values = list(row) + [""] * (len(DATA_TVV_HEADERS) - len(row))
+        if has_association_columns is None:
+            has_association_columns = len(row) >= len(DATA_TVV_HEADERS)
+        if has_association_columns:
+            association_type = normalize_association_type(values[13]) if str(values[13] or "").strip() else infer_association_type(values[10], values[12])
+            association_other_name = str(values[14] or "").strip()
+            tail_offset = 2
+        else:
+            association_type = infer_association_type(values[10], values[12], values[13], values[15], values[17])
+            association_other_name = ""
+            tail_offset = 0
         return cls(
             stt=int(values[0] or 0),
             ma_to=str(values[1] or "").strip(),
@@ -169,15 +259,17 @@ class CreditGroup:
             to_hoi=str(values[10] or "").strip(),
             tk_to_hoi_xa=str(values[11] or "").strip(),
             to_chuc=str(values[12] or "").strip(),
-            ten_huyen=str(values[13] or "").strip(),
-            tk_huyen=str(values[14] or "").strip(),
-            ten_tinh=str(values[15] or "").strip(),
-            tk_tinh=str(values[16] or "").strip(),
-            ten_tw=str(values[17] or "").strip(),
-            tk_tw=str(values[18] or "").strip(),
-            uy_quyen=str(values[19] or "").strip(),
-            ttln_tw=str(values[20] or "").strip(),
-            ttln_tinh=str(values[21] or "").strip(),
+            association_type=association_type,
+            association_other_name=association_other_name,
+            ten_huyen=str(values[13 + tail_offset] or "").strip(),
+            tk_huyen=str(values[14 + tail_offset] or "").strip(),
+            ten_tinh=str(values[15 + tail_offset] or "").strip(),
+            tk_tinh=str(values[16 + tail_offset] or "").strip(),
+            ten_tw=str(values[17 + tail_offset] or "").strip(),
+            tk_tw=str(values[18 + tail_offset] or "").strip(),
+            uy_quyen=str(values[19 + tail_offset] or "").strip(),
+            ttln_tw=str(values[20 + tail_offset] or "").strip(),
+            ttln_tinh=str(values[21 + tail_offset] or "").strip(),
         )
 
     def to_data_tvv_row(self) -> tuple[Any, ...]:
@@ -195,6 +287,8 @@ class CreditGroup:
             self.to_hoi,
             self.tk_to_hoi_xa,
             self.to_chuc,
+            association_type_display(self.association_type),
+            self.association_other_name,
             self.ten_huyen,
             self.tk_huyen,
             self.ten_tinh,

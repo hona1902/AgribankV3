@@ -21,6 +21,8 @@ DATA_TVV_TEXT_COLUMNS: frozenset[str] = frozenset(
         "TK_ToTruong",
         "SoDienThoai",
         "TK_ToHoiXa",
+        "LoaiToChucHoi",
+        "TenToChucKhac",
         "TK_HUYEN",
         "TK_TINH",
         "TK_TW",
@@ -45,6 +47,8 @@ DATA_TVV_SAMPLE_ROW: tuple[str | int, ...] = (
     "Hội Nông dân",
     "5491000000001",
     "Hội Nông dân xã",
+    "Hội Nông dân",
+    "",
     "Huyện mẫu",
     "5491000000002",
     "Tỉnh mẫu",
@@ -123,8 +127,10 @@ def create_data_tvv_template(output_path: Path) -> Path:
     guide_sheet = workbook.create_sheet("HuongDan")
     guide_sheet.append(("Hướng dẫn nhập dữ liệu Data_TVV",))
     guide_sheet.append(("Không đổi tên sheet Data_TVV.",))
-    guide_sheet.append(("Không đổi tên hoặc sắp xếp lại 22 cột Data_TVV gốc.",))
-    guide_sheet.append(("22 cột đầu là dữ liệu tổ vay vốn gốc.",))
+    guide_sheet.append(("Không đổi tên hoặc sắp xếp lại 24 cột Data_TVV gốc.",))
+    guide_sheet.append(("24 cột đầu là dữ liệu tổ vay vốn gốc.",))
+    guide_sheet.append(("LoaiToChucHoi nhận Hội Nông dân, Hội Phụ nữ, Khác hoặc mã enum chuẩn.",))
+    guide_sheet.append(("Nếu LoaiToChucHoi là Khác thì TenToChucKhac là bắt buộc.",))
     guide_sheet.append(("Các cột HH_* dùng để nhập tỷ lệ hoa hồng riêng theo từng tổ.",))
     guide_sheet.append(("Nếu để trống cột HH_* thì hệ thống dùng tỷ lệ mặc định.",))
     guide_sheet.append(("Tổng hoa hồng không BĐ và có BĐTS phải bằng 100.",))
@@ -159,6 +165,8 @@ def _column_width(header: str) -> int:
         "ToHoi": 20,
         "TK_ToHoiXa": 20,
         "ToChuc": 24,
+        "LoaiToChucHoi": 18,
+        "TenToChucKhac": 24,
         "Ten_Huyen": 18,
         "TK_HUYEN": 18,
         "Ten_Tinh": 18,

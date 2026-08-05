@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from datetime import date, datetime
@@ -12,10 +12,12 @@ from io import StringIO
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import tempfile
 from time import perf_counter
 from typing import Iterable
+from enum import StrEnum
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
@@ -26,6 +28,7 @@ from agribank_v3.features.credit.summary.models import (
     LoanSnapshotRow,
     NIM_DN_CONFIG,
     NIM_NV_CONFIG,
+    NormalizedLn01Row,
     NormalizedLoanRow,
     OfficerHistory,
     OfficerHistoryPoint,
@@ -52,6 +55,18 @@ from agribank_v3.features.credit.summary.customer.services import (
     normalize_customer_sequence,
     split_officer as split_customer_officer,
 )
+from agribank_v3.features.credit.summary.ln01 import (
+    ln01_has_group_code_header,
+    parse_ln01_bytes,
+    project_credit_limit_rows,
+)
+from agribank_v3.features.credit.summary.credit_limit.excel_batch_store import PendingCreditLimitBatch
+from agribank_v3.features.credit.summary.credit_limit.models import (
+    CreditLimitBatchLookup,
+    CreditLimitBatchLookupState,
+    CreditLimitBatchMetadata,
+)
+from agribank_v3.features.credit.summary.credit_report import CreditReportRepository
 from agribank_v3.features.settings.unit_directory.service import (
     UnitDirectoryService,
     get_unit_directory_service,
@@ -60,6 +75,69 @@ from agribank_v3.runtime_paths import application_root
 
 
 ProgressCallback = Callable[[str], None]
+
+
+class Ln01DuplicateDecision(StrEnum):
+    CREATE_BOTH = "CREATE_BOTH"
+    CREATE_CREDIT_ONLY = "CREATE_CREDIT_ONLY"
+    CREATE_HMHE_THAN_ONLY = "CREATE_HMHEthan_ONLY"
+    OVERWRITE_CREDIT = "OVERWRITE_CREDIT"
+    OVERWRITE_BOTH = "OVERWRITE_BOTH"
+    CANCEL = "CANCEL"
+
+
+@dataclass(frozen=True, slots=True)
+class CreditPeriodStatus:
+    period: str
+    exists: bool
+    same_sha: bool
+    different_sha: bool
+    source_file_name: str = ""
+    source_sha256: str = ""
+    imported_at: str = ""
+    imported_by: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Ln01ImportDecisionResolution:
+    default_decision: Ln01DuplicateDecision
+    allowed_decisions: tuple[Ln01DuplicateDecision, ...]
+    requires_confirmation: bool
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Ln01ImportContext:
+    period: str
+    branch_code: str
+    source_file_name: str
+    source_sha256: str
+    source_file_size: int
+    source_row_count: int
+    hmhethan_status: CreditLimitBatchLookup
+    credit_status: CreditPeriodStatus
+    resolution: Ln01ImportDecisionResolution
+
+
+Ln01DecisionProvider = Callable[[Ln01ImportContext], Ln01DuplicateDecision | str | None]
+
+
+@dataclass(frozen=True, slots=True)
+class Ln01PreparedImport:
+    file_path: Path
+    period: str
+    branch_code: str
+    source_sha256: str
+    source_file_size: int
+    source_row_count: int
+    normalized_rows: tuple[NormalizedLn01Row, ...]
+    agreements: tuple[CreditLimitRow, ...]
+    accepted_rows: tuple[CreditLimitRow, ...]
+    reference_date: date
+    min_limit: float
+    warn_days: int
+    has_group_code_column: bool
+    context: Ln01ImportContext
 
 
 NIM_COMMON_HEADERS = (
@@ -199,9 +277,16 @@ def import_nim_folder(
             customer_result = None
 
     customer_repository = CustomerRepository(repository.main_database_path) if customer_result is not None else None
+    credit_report_repository = (
+        CreditReportRepository(repository.main_database_path)
+        if config.data_type == SummaryDataType.NIM_DN
+        else None
+    )
     snapshot_paths = [repository.database_path]
     if customer_repository is not None:
         snapshot_paths.append(customer_repository.database_path)
+    if credit_report_repository is not None:
+        snapshot_paths.append(credit_report_repository.database_path)
 
     total_rows = 0
     first_batch_id = 0
@@ -217,6 +302,8 @@ def import_nim_folder(
                 except SummaryError as exc:
                     if "Không có dữ liệu" not in str(exc):
                         raise
+                if credit_report_repository is not None:
+                    credit_report_repository.delete_credit_card_period(period)
         for file_path, parsed, duration_ms in parsed_files:
             if progress:
                 progress(f"Đang ghi CreditSummary.db: {file_path.name}")
@@ -238,6 +325,23 @@ def import_nim_folder(
                 first_batch_id = batch_id
             total_rows += len(rows)
             total_summary_rows += len(summary_rows)
+            if (
+                credit_report_repository is not None
+                and not parsed.customer_missing_headers
+            ):
+                if progress:
+                    progress(f"Đang ghi dư nợ thẻ DN15 sang Credit.db: {file_path.name}")
+                credit_report_repository.save_credit_card_projection(
+                    period=parsed.period,
+                    file_name=file_path.name,
+                    source_sha256=parsed.source_hash,
+                    source_file_size=file_path.stat().st_size if file_path.is_file() else 0,
+                    source_row_count=len(parsed.rows),
+                    rows=parsed.customer_rows,
+                    imported_by=user,
+                    replace_period=False,
+                    duration_ms=duration_ms,
+                )
             if progress:
                 progress(f"Đã lưu {len(summary_rows):,} dòng tổng hợp NIM từ {len(rows):,} dòng nguồn")
         if customer_repository is not None and customer_result is not None:
@@ -647,6 +751,645 @@ def import_credit_limit_file(
     repository: SummaryRepository,
     file_path: Path,
     *,
+    period: str | None = None,
+    min_limit: float = 0.0,
+    warn_days: int = 30,
+    reference_date: date | None = None,
+    export_path: Path | None = None,
+    imported_by: str | None = None,
+    duplicate_policy: str = "error",
+    overwrite_report_period: bool | None = None,
+    duplicate_decision: Ln01DuplicateDecision | str | None = None,
+    decision_provider: Ln01DecisionProvider | None = None,
+    progress: ProgressCallback | None = None,
+) -> ImportResult:
+    coordinator = Ln01ImportCoordinator(repository)
+    return coordinator.import_file(
+        file_path,
+        period=period,
+        min_limit=min_limit,
+        warn_days=warn_days,
+        reference_date=reference_date,
+        export_path=export_path,
+        imported_by=imported_by,
+        duplicate_policy=duplicate_policy,
+        overwrite_report_period=overwrite_report_period,
+        duplicate_decision=duplicate_decision,
+        decision_provider=decision_provider,
+        progress=progress,
+    )
+
+
+class Ln01ImportCoordinator:
+    def __init__(
+        self,
+        repository: SummaryRepository,
+        credit_repository: CreditReportRepository | None = None,
+    ) -> None:
+        self.repository = repository
+        self.credit_repository = credit_repository or CreditReportRepository(repository.main_database_path)
+
+    def import_file(
+        self,
+        file_path: Path,
+        *,
+        period: str | None = None,
+        min_limit: float = 0.0,
+        warn_days: int = 30,
+        reference_date: date | None = None,
+        export_path: Path | None = None,
+        imported_by: str | None = None,
+        duplicate_policy: str = "error",
+        overwrite_report_period: bool | None = None,
+        duplicate_decision: Ln01DuplicateDecision | str | None = None,
+        decision_provider: Ln01DecisionProvider | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> ImportResult:
+        prepared = self.prepare_import(
+            file_path,
+            period=period,
+            min_limit=min_limit,
+            warn_days=warn_days,
+            reference_date=reference_date,
+            duplicate_policy=duplicate_policy,
+            overwrite_report_period=overwrite_report_period,
+            progress=progress,
+        )
+        decision = self._choose_decision(
+            prepared.context,
+            duplicate_decision=duplicate_decision,
+            decision_provider=decision_provider,
+        )
+        return self.execute_prepared_import(
+            prepared,
+            duplicate_decision=decision,
+            export_path=export_path,
+            imported_by=imported_by,
+            progress=progress,
+        )
+
+    def prepare_import(
+        self,
+        file_path: Path,
+        *,
+        period: str | None = None,
+        min_limit: float = 0.0,
+        warn_days: int = 30,
+        reference_date: date | None = None,
+        duplicate_policy: str = "error",
+        overwrite_report_period: bool | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> Ln01PreparedImport:
+        file_path = Path(file_path)
+        if file_path.suffix.casefold() != ".csv":
+            raise SummaryError("Hạn mức tín dụng chỉ hỗ trợ file CSV LN01.")
+        reference_date = reference_date or date.today()
+        report_period = _credit_report_period(period, file_path, reference_date)
+        if progress:
+            progress(f"Đang đọc file LN01: {file_path.name}")
+        raw_data = file_path.read_bytes()
+        source_hash = hashlib.sha256(raw_data).hexdigest()
+        has_group_code_column = ln01_has_group_code_header(raw_data)
+        normalized_rows, source_row_count = parse_ln01_bytes(file_path, raw_data, period=report_period)
+        agreements = tuple(project_credit_limit_rows(normalized_rows))
+        branch_code = _ln01_branch_code(agreements, file_path)
+        if progress:
+            progress("Đang lọc hợp đồng hạn mức cảnh báo")
+        accepted_rows = tuple(
+            filter_credit_limit_rows(
+                agreements,
+                min_limit=float(min_limit),
+                warn_days=int(warn_days),
+                reference_date=reference_date,
+            )
+        )
+        hmhethan_status = self.find_hmhethan_batch_by_sha(
+            source_hash,
+            period=report_period,
+            branch_code=branch_code,
+        )
+        credit_status = self.get_credit_period_status(report_period, source_hash)
+        resolution = self.resolve_ln01_import_decision(
+            hmhethan_status,
+            credit_status,
+            duplicate_policy=duplicate_policy,
+            overwrite_report_period=overwrite_report_period,
+        )
+        context = Ln01ImportContext(
+            period=report_period,
+            branch_code=branch_code,
+            source_file_name=file_path.name,
+            source_sha256=source_hash,
+            source_file_size=len(raw_data),
+            source_row_count=source_row_count,
+            hmhethan_status=hmhethan_status,
+            credit_status=credit_status,
+            resolution=resolution,
+        )
+        return Ln01PreparedImport(
+            file_path=file_path,
+            period=report_period,
+            branch_code=branch_code,
+            source_sha256=source_hash,
+            source_file_size=len(raw_data),
+            source_row_count=source_row_count,
+            normalized_rows=tuple(normalized_rows),
+            agreements=agreements,
+            accepted_rows=accepted_rows,
+            reference_date=reference_date,
+            min_limit=float(min_limit),
+            warn_days=int(warn_days),
+            has_group_code_column=has_group_code_column,
+            context=context,
+        )
+
+    def execute_prepared_import(
+        self,
+        prepared: Ln01PreparedImport,
+        *,
+        duplicate_decision: Ln01DuplicateDecision | str | None = None,
+        export_path: Path | None = None,
+        imported_by: str | None = None,
+        progress: ProgressCallback | None = None,
+    ) -> ImportResult:
+        decision = self._normalize_decision(duplicate_decision) or prepared.context.resolution.default_decision
+        self._validate_decision(prepared.context, decision)
+        if decision == Ln01DuplicateDecision.CANCEL:
+            return ImportResult(batch_id="", row_count=0, message="Đã hủy import LN01.")
+
+        user = imported_by or _current_user()
+        pending_batch: PendingCreditLimitBatch | None = None
+        metadata = prepared.context.hmhethan_status.metadata
+        backup_file: Path | None = None
+        target_existed = False
+        batch_finalized = False
+        stage = "resolve_ln01_import"
+        report_result: dict[str, object] = {
+            "normalized_loan_count": 0,
+            "customer_count": 0,
+            "ln01_total_balance": 0.0,
+        }
+        started = perf_counter()
+        try:
+            if self._decision_creates_hmhethan(decision):
+                stage = "prepare_excel_batch"
+                pending_batch = self._prepare_hmhethan_batch(prepared, decision, imported_by=user, progress=progress)
+                target_existed = pending_batch.target_file.exists()
+                if target_existed:
+                    backup_file = self._backup_batch_target(pending_batch.target_file)
+
+            if progress and self._decision_writes_credit(decision):
+                progress(f"Đang ghi dữ liệu kỳ {prepared.period} vào Credit.db")
+            stage = "write_credit_db"
+            with closing(self.credit_repository.connect()) as credit_db:
+                credit_db.execute("BEGIN IMMEDIATE")
+                try:
+                    if self._decision_writes_credit(decision):
+                        report_result = self.credit_repository.write_ln01_period(
+                            credit_db,
+                            period=prepared.period,
+                            source_file_name=prepared.file_path.name,
+                            source_sha256=prepared.source_sha256,
+                            source_file_size=prepared.source_file_size,
+                            source_row_count=prepared.source_row_count,
+                            rows=list(prepared.normalized_rows),
+                            imported_by=user,
+                            overwrite_period=self._decision_overwrites_credit(prepared.context, decision),
+                            duration_ms=int((perf_counter() - started) * 1000),
+                            has_group_code_column=prepared.has_group_code_column,
+                            message=self._credit_history_message(prepared.context, decision),
+                        )
+                    if pending_batch is not None:
+                        stage = "finalize_excel_batch"
+                        metadata = self.repository.credit_limit_store.finalize_prepared_batch(pending_batch)
+                        batch_finalized = True
+                    if metadata is None:
+                        raise SummaryError("Không tìm thấy batch HMHETHAN để ghi nhận import LN01.")
+                    self.credit_repository.log_ln01_import_action(
+                        credit_db,
+                        action=self._action_name_for_decision(decision),
+                        period=prepared.period,
+                        source_sha256=prepared.source_sha256,
+                        source_file_name=prepared.file_path.name,
+                        batch_id=str(metadata.batch_id),
+                        created_by=user,
+                    )
+                    credit_db.commit()
+                except Exception:
+                    credit_db.rollback()
+                    self._rollback_batch_file(
+                        pending_batch=pending_batch,
+                        backup_file=backup_file,
+                        target_existed=target_existed,
+                        batch_finalized=batch_finalized,
+                    )
+                    raise
+            if backup_file is not None:
+                self._archive_batch_backup(backup_file, pending_batch.target_file if pending_batch else prepared.file_path)
+            stage = "export_report"
+            output_path = (
+                export_credit_limit_vba(list(prepared.accepted_rows), Path(export_path))
+                if export_path is not None and prepared.accepted_rows
+                else None
+            )
+            if progress:
+                progress(self._progress_done_message(prepared, decision))
+            return ImportResult(
+                batch_id=str(metadata.batch_id) if metadata is not None else "",
+                row_count=len(prepared.accepted_rows),
+                message=self._success_message(prepared, decision, metadata, report_result),
+                output_path=output_path,
+            )
+        except SummaryError as exc:
+            if pending_batch is not None and not batch_finalized:
+                self.repository.credit_limit_store.cleanup_prepared_batch(pending_batch)
+            if backup_file is not None and backup_file.exists() and not batch_finalized:
+                backup_file.unlink(missing_ok=True)
+            _log_credit_limit_import_failure(
+                repository=self.repository,
+                source_file=prepared.file_path,
+                stage=stage,
+                parsed_rows=len(prepared.agreements),
+                first_row_type=type(prepared.agreements[0]).__name__ if prepared.agreements else "",
+                batch_id=str(getattr(getattr(pending_batch, "metadata", None), "batch_id", "")),
+                exc=exc,
+            )
+            raise
+        except Exception as exc:
+            if pending_batch is not None and not batch_finalized:
+                self.repository.credit_limit_store.cleanup_prepared_batch(pending_batch)
+            if backup_file is not None and backup_file.exists() and not batch_finalized:
+                backup_file.unlink(missing_ok=True)
+            _log_credit_limit_import_failure(
+                repository=self.repository,
+                source_file=prepared.file_path,
+                stage=stage,
+                parsed_rows=len(prepared.agreements),
+                first_row_type=type(prepared.agreements[0]).__name__ if prepared.agreements else "",
+                batch_id=str(getattr(getattr(pending_batch, "metadata", None), "batch_id", "")),
+                exc=exc,
+            )
+            raise SummaryError("Không thể tạo batch Hạn mức tín dụng từ file LN01.") from exc
+
+    def find_hmhethan_batch_by_sha(
+        self,
+        source_sha256: str,
+        *,
+        period: str = "",
+        branch_code: str = "",
+    ) -> CreditLimitBatchLookup:
+        return self.repository.credit_limit_store.find_batch_by_sha_status(
+            source_sha256,
+            period=period,
+            branch_code=branch_code,
+        )
+
+    def get_credit_period_status(self, period: str, source_sha256: str) -> CreditPeriodStatus:
+        clean_hash = str(source_sha256 or "").strip().lower()
+        metadata = self.credit_repository.ln01_period_import_metadata(period)
+        if not metadata:
+            return CreditPeriodStatus(period=period, exists=False, same_sha=False, different_sha=False)
+        existing_hash = str(metadata.get("source_sha256") or "").strip().lower()
+        same_sha = bool(clean_hash and existing_hash == clean_hash)
+        return CreditPeriodStatus(
+            period=period,
+            exists=True,
+            same_sha=same_sha,
+            different_sha=bool(clean_hash and existing_hash and existing_hash != clean_hash),
+            source_file_name=str(metadata.get("source_file_name") or ""),
+            source_sha256=existing_hash,
+            imported_at=str(metadata.get("created_at") or ""),
+            imported_by=str(metadata.get("imported_by") or ""),
+        )
+
+    def resolve_ln01_import_decision(
+        self,
+        hmhethan_status: CreditLimitBatchLookup,
+        credit_status: CreditPeriodStatus,
+        *,
+        duplicate_policy: str = "error",
+        overwrite_report_period: bool | None = None,
+    ) -> Ln01ImportDecisionResolution:
+        overwrite_requested = (
+            bool(duplicate_policy == "new")
+            if overwrite_report_period is None
+            else bool(overwrite_report_period)
+        )
+        hm_valid = hmhethan_status.state == CreditLimitBatchLookupState.FOUND_VALID
+        if not credit_status.exists:
+            if hm_valid:
+                return Ln01ImportDecisionResolution(
+                    default_decision=Ln01DuplicateDecision.CREATE_CREDIT_ONLY,
+                    allowed_decisions=(
+                        Ln01DuplicateDecision.CREATE_CREDIT_ONLY,
+                        Ln01DuplicateDecision.CANCEL,
+                    ),
+                    requires_confirmation=True,
+                    reason="HMHETHAN_EXISTS_CREDIT_MISSING",
+                )
+            return Ln01ImportDecisionResolution(
+                default_decision=Ln01DuplicateDecision.CREATE_BOTH,
+                allowed_decisions=(Ln01DuplicateDecision.CREATE_BOTH, Ln01DuplicateDecision.CANCEL),
+                requires_confirmation=hmhethan_status.state == CreditLimitBatchLookupState.FOUND_INVALID,
+                reason="NO_CREDIT_PERIOD",
+            )
+        if credit_status.different_sha:
+            hm_hash = ""
+            if hmhethan_status.metadata is not None:
+                hm_hash = str(hmhethan_status.metadata.source_file_sha256 or "").strip().lower()
+            credit_hash = str(credit_status.source_sha256 or "").strip().lower()
+            default = (
+                Ln01DuplicateDecision.OVERWRITE_BOTH
+                if hm_valid and hm_hash == credit_hash
+                else Ln01DuplicateDecision.OVERWRITE_CREDIT
+                if hm_valid
+                else Ln01DuplicateDecision.CREATE_BOTH
+            )
+            allowed: tuple[Ln01DuplicateDecision, ...]
+            if hm_valid:
+                allowed = (
+                    Ln01DuplicateDecision.OVERWRITE_BOTH,
+                    Ln01DuplicateDecision.OVERWRITE_CREDIT,
+                    Ln01DuplicateDecision.CREATE_BOTH,
+                    Ln01DuplicateDecision.CANCEL,
+                )
+            else:
+                allowed = (Ln01DuplicateDecision.CREATE_BOTH, Ln01DuplicateDecision.CANCEL)
+            return Ln01ImportDecisionResolution(
+                default_decision=default,
+                allowed_decisions=allowed,
+                requires_confirmation=not overwrite_requested,
+                reason="CREDIT_PERIOD_DIFFERENT_SHA",
+            )
+        if hm_valid:
+            return Ln01ImportDecisionResolution(
+                default_decision=Ln01DuplicateDecision.OVERWRITE_CREDIT,
+                allowed_decisions=(
+                    Ln01DuplicateDecision.OVERWRITE_CREDIT,
+                    Ln01DuplicateDecision.OVERWRITE_BOTH,
+                    Ln01DuplicateDecision.CANCEL,
+                ),
+                requires_confirmation=not overwrite_requested,
+                reason="BOTH_EXIST_SAME_SHA",
+            )
+        default = Ln01DuplicateDecision.CREATE_BOTH if overwrite_requested else Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY
+        return Ln01ImportDecisionResolution(
+            default_decision=default,
+            allowed_decisions=(
+                Ln01DuplicateDecision.CREATE_BOTH,
+                Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY,
+                Ln01DuplicateDecision.CANCEL,
+            ),
+            requires_confirmation=not overwrite_requested,
+            reason="CREDIT_EXISTS_HMHEthan_MISSING",
+        )
+
+    def _choose_decision(
+        self,
+        context: Ln01ImportContext,
+        *,
+        duplicate_decision: Ln01DuplicateDecision | str | None,
+        decision_provider: Ln01DecisionProvider | None,
+    ) -> Ln01DuplicateDecision:
+        decision = self._normalize_decision(duplicate_decision)
+        if decision is None and decision_provider is not None and context.resolution.requires_confirmation:
+            decision = self._normalize_decision(decision_provider(context)) or Ln01DuplicateDecision.CANCEL
+        if decision is None:
+            if context.resolution.requires_confirmation and self._decision_requires_explicit_confirmation(context):
+                raise SummaryError(self._confirmation_required_message(context))
+            decision = context.resolution.default_decision
+        self._validate_decision(context, decision)
+        return decision
+
+    def _normalize_decision(
+        self,
+        decision: Ln01DuplicateDecision | str | None,
+    ) -> Ln01DuplicateDecision | None:
+        if decision is None:
+            return None
+        if isinstance(decision, Ln01DuplicateDecision):
+            return decision
+        text = str(decision or "").strip()
+        if not text:
+            return None
+        if text in Ln01DuplicateDecision.__members__:
+            return Ln01DuplicateDecision[text]
+        try:
+            return Ln01DuplicateDecision(text)
+        except ValueError as exc:
+            raise SummaryError(f"Lựa chọn import LN01 không hợp lệ: {text}") from exc
+
+    def _validate_decision(self, context: Ln01ImportContext, decision: Ln01DuplicateDecision) -> None:
+        if decision == Ln01DuplicateDecision.CANCEL:
+            return
+        if decision not in context.resolution.allowed_decisions:
+            raise SummaryError("Lựa chọn import LN01 không hợp lệ cho trạng thái hiện tại.")
+        hm_valid = context.hmhethan_status.state == CreditLimitBatchLookupState.FOUND_VALID
+        if decision in {Ln01DuplicateDecision.CREATE_CREDIT_ONLY, Ln01DuplicateDecision.OVERWRITE_CREDIT} and not hm_valid:
+            raise SummaryError("Không có batch HMHETHAN hợp lệ để tái sử dụng.")
+        if decision == Ln01DuplicateDecision.OVERWRITE_BOTH and context.hmhethan_status.metadata is None:
+            raise SummaryError("Không có batch HMHETHAN hợp lệ để ghi đè.")
+
+    def _decision_requires_explicit_confirmation(self, context: Ln01ImportContext) -> bool:
+        decision = context.resolution.default_decision
+        if decision in {Ln01DuplicateDecision.OVERWRITE_CREDIT, Ln01DuplicateDecision.OVERWRITE_BOTH}:
+            return True
+        return decision == Ln01DuplicateDecision.CREATE_BOTH and context.credit_status.exists
+
+    def _confirmation_required_message(self, context: Ln01ImportContext) -> str:
+        if context.credit_status.different_sha:
+            return (
+                f"Kỳ {context.period} đã được tạo từ file LN01 khác. "
+                "Cần xác nhận trước khi ghi đè dữ liệu báo cáo."
+            )
+        return f"Kỳ {context.period} đã có dữ liệu báo cáo. Cần xác nhận phạm vi ghi đè."
+
+    def _prepare_hmhethan_batch(
+        self,
+        prepared: Ln01PreparedImport,
+        decision: Ln01DuplicateDecision,
+        *,
+        imported_by: str,
+        progress: ProgressCallback | None,
+    ) -> PendingCreditLimitBatch:
+        replace_metadata = (
+            prepared.context.hmhethan_status.metadata
+            if decision == Ln01DuplicateDecision.OVERWRITE_BOTH
+            or (decision == Ln01DuplicateDecision.CREATE_BOTH and prepared.context.hmhethan_status.metadata is not None)
+            else None
+        )
+        duplicate_policy = "replace" if replace_metadata is not None else "new"
+        return self.repository.credit_limit_store.prepare_batch(
+            source_path=prepared.file_path,
+            rows=prepared.agreements,
+            accepted_rows=prepared.accepted_rows,
+            reference_date=prepared.reference_date,
+            warn_days=prepared.warn_days,
+            min_limit=prepared.min_limit,
+            source_file_sha256=prepared.source_sha256,
+            source_file_size=prepared.source_file_size,
+            imported_by=imported_by,
+            source_row_count=prepared.source_row_count,
+            duplicate_policy=duplicate_policy,
+            replace_metadata=replace_metadata,
+            period=prepared.period,
+            branch_code=prepared.branch_code,
+            progress=progress,
+        )
+
+    def _decision_creates_hmhethan(self, decision: Ln01DuplicateDecision) -> bool:
+        return decision in {
+            Ln01DuplicateDecision.CREATE_BOTH,
+            Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY,
+            Ln01DuplicateDecision.OVERWRITE_BOTH,
+        }
+
+    def _decision_writes_credit(self, decision: Ln01DuplicateDecision) -> bool:
+        return decision in {
+            Ln01DuplicateDecision.CREATE_BOTH,
+            Ln01DuplicateDecision.CREATE_CREDIT_ONLY,
+            Ln01DuplicateDecision.OVERWRITE_CREDIT,
+            Ln01DuplicateDecision.OVERWRITE_BOTH,
+        }
+
+    def _decision_overwrites_credit(self, context: Ln01ImportContext, decision: Ln01DuplicateDecision) -> bool:
+        return decision in {Ln01DuplicateDecision.OVERWRITE_CREDIT, Ln01DuplicateDecision.OVERWRITE_BOTH} or (
+            decision == Ln01DuplicateDecision.CREATE_BOTH and context.credit_status.exists
+        )
+
+    def _backup_batch_target(self, target_file: Path) -> Path:
+        target_file = Path(target_file)
+        backup_file = target_file.with_name(f".{target_file.name}.{os.getpid()}.bak")
+        counter = 1
+        while backup_file.exists():
+            counter += 1
+            backup_file = target_file.with_name(f".{target_file.name}.{os.getpid()}.{counter}.bak")
+        shutil.copy2(target_file, backup_file)
+        return backup_file
+
+    def _archive_batch_backup(self, backup_file: Path, target_file: Path) -> Path:
+        history_path = self.repository.credit_limit_store.history_path
+        history_path.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = Path(target_file)
+        archive = history_path / f"{target.stem}_replaced_{timestamp}{target.suffix}"
+        counter = 1
+        while archive.exists():
+            counter += 1
+            archive = history_path / f"{target.stem}_replaced_{timestamp}_{counter}{target.suffix}"
+        os.replace(backup_file, archive)
+        return archive
+
+    def _rollback_batch_file(
+        self,
+        *,
+        pending_batch: PendingCreditLimitBatch | None,
+        backup_file: Path | None,
+        target_existed: bool,
+        batch_finalized: bool,
+    ) -> None:
+        if pending_batch is None:
+            return
+        if not batch_finalized:
+            self.repository.credit_limit_store.cleanup_prepared_batch(pending_batch)
+            if backup_file is not None:
+                backup_file.unlink(missing_ok=True)
+            return
+        if target_existed and backup_file is not None and backup_file.is_file():
+            os.replace(backup_file, pending_batch.target_file)
+        else:
+            pending_batch.target_file.unlink(missing_ok=True)
+        self.repository.credit_limit_store.invalidate_cache()
+
+    def _action_name_for_decision(self, decision: Ln01DuplicateDecision) -> str:
+        return {
+            Ln01DuplicateDecision.CREATE_BOTH: "CREATE_BOTH",
+            Ln01DuplicateDecision.CREATE_CREDIT_ONLY: "CREATE_CREDIT_FROM_EXISTING_HMHEthan",
+            Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY: "CREATE_HMHEthan_ONLY",
+            Ln01DuplicateDecision.OVERWRITE_CREDIT: "OVERWRITE_CREDIT_KEEP_HMHEthan",
+            Ln01DuplicateDecision.OVERWRITE_BOTH: "OVERWRITE_BOTH",
+        }[decision]
+
+    def _credit_history_message(self, context: Ln01ImportContext, decision: Ln01DuplicateDecision) -> str:
+        action = self._action_name_for_decision(decision)
+        reused = decision in {Ln01DuplicateDecision.CREATE_CREDIT_ONLY, Ln01DuplicateDecision.OVERWRITE_CREDIT}
+        suffix = "; hmhethan_batch_reused=1" if reused else ""
+        return f"Import LN01 {context.source_file_name}; action={action}{suffix}"
+
+    def _progress_done_message(self, prepared: Ln01PreparedImport, decision: Ln01DuplicateDecision) -> str:
+        if decision == Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY:
+            return f"Đã tạo batch HMHETHAN từ {prepared.file_path.name}"
+        return f"Đã lưu kỳ {prepared.period} trong Credit.db"
+
+    def _success_message(
+        self,
+        prepared: Ln01PreparedImport,
+        decision: Ln01DuplicateDecision,
+        metadata: CreditLimitBatchMetadata | None,
+        report_result: dict[str, object],
+    ) -> str:
+        batch_file = metadata.file_name if metadata is not None else ""
+        group_warning = self._group_code_warning(prepared)
+        if decision == Ln01DuplicateDecision.CREATE_CREDIT_ONLY:
+            return (
+                f"Đã tạo lại dữ liệu báo cáo kỳ {prepared.period}.\n\n"
+                f"Batch Hạn mức đã có được giữ nguyên: {batch_file}"
+                f"{group_warning}"
+            )
+        if decision == Ln01DuplicateDecision.OVERWRITE_CREDIT:
+            return (
+                f"Đã ghi đè dữ liệu báo cáo kỳ {prepared.period}.\n\n"
+                "Batch Hạn mức hiện có không bị thay đổi."
+                f"{group_warning}"
+            )
+        if decision == Ln01DuplicateDecision.OVERWRITE_BOTH:
+            return f"Đã ghi đè dữ liệu báo cáo và batch Hạn mức kỳ {prepared.period}.{group_warning}"
+        if decision == Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY:
+            return f"Đã tạo batch Hạn mức {batch_file}. Dữ liệu Credit.db không thay đổi.{group_warning}"
+        return (
+            f"Đã lưu {len(prepared.accepted_rows):,} hợp đồng hạn mức. "
+            f"Credit.db kỳ {prepared.period}: {int(report_result['normalized_loan_count']):,} món, "
+            f"{int(report_result['customer_count']):,} khách hàng, "
+            f"tổng dư nợ LN01 {float(report_result['ln01_total_balance']):,.0f}."
+            f"{group_warning}"
+        )
+
+    @staticmethod
+    def _group_code_warning(prepared: Ln01PreparedImport) -> str:
+        if prepared.has_group_code_column:
+            return ""
+        return (
+            "\n\nLưu ý: File LN01 không có header GRPNO/MaToVayVon/MaTo. "
+            "Các báo cáo khác vẫn được import, nhưng kỳ này chưa có dữ liệu mã tổ vay vốn."
+        )
+
+
+def _credit_report_period(period: str | None, file_path: Path, reference_date: date) -> str:
+    clean_period = str(period or "").strip()
+    if re.fullmatch(r"\d{4}-\d{2}", clean_period):
+        return clean_period
+    parsed = parse_period_from_filename(file_path.name)
+    if re.fullmatch(r"\d{4}-\d{2}", parsed):
+        return parsed
+    raise SummaryError(
+        "Không xác định được kỳ dữ liệu LN01 từ tên file. "
+        "Vui lòng nhập kỳ theo dạng YYYY-MM."
+    )
+
+
+def _ln01_branch_code(rows: Sequence[CreditLimitRow], file_path: Path) -> str:
+    for row in rows:
+        branch_code = str(row.branch_code or "").strip()
+        if branch_code:
+            return branch_code
+    match = re.match(r"^\D*(\d{4})(?:\D|$)", Path(file_path).stem)
+    return match.group(1) if match else ""
+
+
+def _legacy_import_credit_limit_file(
+    repository: SummaryRepository,
+    file_path: Path,
+    *,
     min_limit: float = 0.0,
     warn_days: int = 30,
     reference_date: date | None = None,
@@ -1004,61 +1747,18 @@ def _load_credit_limit_agreements(file_path: Path) -> list[CreditLimitRow]:
 
 
 def _load_credit_limit_agreements_from_bytes(file_path: Path, raw_data: bytes) -> tuple[list[CreditLimitRow], int]:
-    text = raw_data.decode("utf-8-sig")
-    rows = _read_delimited_rows_from_text(text)
     try:
-        return _load_credit_limit_agreements_from_rows(rows)
+        normalized_rows, source_row_count = parse_ln01_bytes(file_path, raw_data)
+        return project_credit_limit_rows(normalized_rows), source_row_count
     except SummaryError as exc:
         raise SummaryError(str(exc)) from exc
 
 
 def _load_credit_limit_agreements_from_rows(rows: list[list[str]]) -> tuple[list[CreditLimitRow], int]:
-    if not rows:
-        raise SummaryError("File LN01 không có dữ liệu.")
-    headers = [clean_header(item) for item in rows[0]]
-    if len(headers) < 63:
-        raise SummaryError("File LN01 không đủ số cột tới CREDIT_LINE_YPE.")
-    h0, h1, h2, h3, hbk = headers[0], headers[1], headers[2], headers[3], headers[62]
-    if h0 != "BRCD" or h1 not in {"CUSTSED", "CUSTSEQ"} or h2 != "CUSTNM" or h3 != "TAI_KHOAN" or hbk != "CREDIT_LINE_YPE":
-        raise SummaryError("Bạn chọn không đúng file xxxx_ln01_yyyymmdd.csv xuất từ mssr98.")
-    by_contract: dict[str, CreditLimitRow] = {}
-    for raw in rows[1:]:
-        if len(raw) < 63:
-            continue
-        if clean_cell(raw[62]).upper() != "LINE OF CREDIT":
-            continue
-        contract_number = clean_cell(raw[14])
-        if not contract_number:
-            continue
-        outstanding = safe_amount(raw[5])
-        if contract_number in by_contract:
-            existing = by_contract[contract_number]
-            by_contract[contract_number] = replace(
-                existing,
-                outstanding_balance=existing.outstanding_balance + outstanding,
-                source_row_count=existing.source_row_count + 1,
-            )
-            continue
-        officer_code, officer_name = _split_officer(clean_cell(raw[27]))
-        by_contract[contract_number] = CreditLimitRow(
-            branch_code=clean_cell(raw[0]),
-            customer_code=clean_cell(raw[1]),
-            customer_name=clean_cell(raw[2]),
-            account_number=clean_cell(raw[3]),
-            credit_line_type=clean_cell(raw[62]),
-            contract_number=contract_number,
-            approved_date=parse_date(raw[15]),
-            approved_amount=safe_amount(raw[17]),
-            outstanding_balance=outstanding,
-            expiry_date=parse_date(raw[18]),
-            address=clean_cell(raw[35]),
-            officer=officer_name or clean_cell(raw[27]),
-            officer_code=officer_code,
-            note="",
-            days_to_expiry=None,
-            status="",
-        )
-    return list(by_contract.values()), max(0, len(rows) - 1)
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    return _load_credit_limit_agreements_from_bytes(Path("LN01.csv"), output.getvalue().encode("utf-8"))
 
 
 def _read_delimited_rows(file_path: Path) -> list[list[str]]:

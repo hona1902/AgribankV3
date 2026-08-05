@@ -103,8 +103,12 @@ from agribank_v3.features.credit.summary.models import (
     LOAN_COMPARE_TITLE,
     NIM_DN_TITLE,
     NIM_NV_TITLE,
+    REPORT_DATA_TITLE,
+    REPORT_SUMMARY_TITLE,
     SummaryDataType,
 )
+from agribank_v3.features.credit.summary.report_data_menu import REPORT_DATA_FEATURES
+from agribank_v3.features.credit.summary.report_window import ReportSummaryWindow
 from agribank_v3.features.credit.summary.windows import (
     CreditLimitWindow,
     LoanCompareWindow,
@@ -847,11 +851,13 @@ class MainWindow(QMainWindow):
         self.quyet_toan_tong_hop_page: QWidget | None = None
         self.tovayvon_page: QWidget | None = None
         self.auto_interest_page: QWidget | None = None
+        self.report_data_page: QWidget | None = None
         self.author_info_dialog: AuthorInfoDialog | None = None
         self.settlement_guidance_dialog: SettlementGuidanceDialog | None = None
         self.printer_settings_dialog: PrinterSettingsDialog | None = None
         self.unit_settings_window: UnitSettingsWindow | None = None
         self._customer_management_window = None
+        self._report_summary_window: ReportSummaryWindow | None = None
         self.quick_access_container: QWidget | None = None
         self.quick_access_layout: QVBoxLayout | None = None
         self._background_threads: list[object] = []
@@ -1320,6 +1326,38 @@ class MainWindow(QMainWindow):
         self.auto_interest_page = self._build_auto_interest_page()
         self.pages.addWidget(self.auto_interest_page)
         self.pages.setCurrentWidget(self.auto_interest_page)
+        self.nav_buttons[NAVIGATION.index("Tín dụng")].setChecked(True)
+
+    def _build_report_data_page(self) -> QWidget:
+        page = self._scroll_page()
+        body = page.widget()
+        layout = body.layout()
+
+        header = QHBoxLayout()
+        title = QLabel(f"{REPORT_DATA_TITLE} - AgribankV3")
+        title.setObjectName("PageTitle")
+        back_button = QPushButton("Quay lại Tín dụng")
+        back_button.setObjectName("SecondaryButton")
+        back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_button.clicked.connect(lambda: self.select_page(NAVIGATION.index("Tín dụng")))
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(back_button)
+        layout.addLayout(header)
+
+        grid = ResponsiveFeatureGrid(REPORT_DATA_FEATURES)
+        grid.connect_requested(self.open_feature)
+        layout.addWidget(grid)
+        layout.addStretch()
+        return page
+
+    def _show_report_data_page(self) -> None:
+        if self.report_data_page is not None:
+            self.pages.removeWidget(self.report_data_page)
+            self.report_data_page.deleteLater()
+        self.report_data_page = self._build_report_data_page()
+        self.pages.addWidget(self.report_data_page)
+        self.pages.setCurrentWidget(self.report_data_page)
         self.nav_buttons[NAVIGATION.index("Tín dụng")].setChecked(True)
 
     def _build_quyet_toan_tin_dung_page(self) -> QWidget:
@@ -2588,6 +2626,14 @@ class MainWindow(QMainWindow):
             self._show_auto_interest_page()
             return
 
+        if title in {REPORT_DATA_TITLE, "Sao kê tín dụng"}:
+            self._show_report_data_page()
+            return
+
+        if title == REPORT_SUMMARY_TITLE:
+            self.open_report_summary_window()
+            return
+
         if title == NIM_DN_TITLE:
             NimWindow(self, SummaryDataType.NIM_DN).exec()
             return
@@ -2761,6 +2807,24 @@ class MainWindow(QMainWindow):
             self.settings_database.database_path,
             initial_tab=initial_tab,
         )
+
+    def open_report_summary_window(self) -> ReportSummaryWindow:
+        if self._report_summary_window is not None and self._report_summary_window.isVisible():
+            self._report_summary_window.raise_()
+            self._report_summary_window.activateWindow()
+            return self._report_summary_window
+        dialog = ReportSummaryWindow(self.settings_database.database_path, self)
+        self._report_summary_window = dialog
+        dialog.finished.connect(self._clear_report_summary_window)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def _clear_report_summary_window(self) -> None:
+        if self._report_summary_window is not None:
+            self._report_summary_window.deleteLater()
+            self._report_summary_window = None
 
     def _show_unit_settings_window(self) -> None:
         if self.unit_settings_window is not None and self.unit_settings_window.isVisible():

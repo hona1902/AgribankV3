@@ -50,6 +50,7 @@ from agribank_v3.features.credit.summary.customer.officer_management_tab import 
 from agribank_v3.features.credit.summary.customer.repository import CustomerRepository
 from agribank_v3.features.credit.summary.customer.table_models import ColumnSpec, CustomerTableModel
 from agribank_v3.features.credit.summary.customer.widgets import (
+    CompactToolbar,
     CustomerTableView,
     KpiMetric,
     MetricGrid,
@@ -57,6 +58,7 @@ from agribank_v3.features.credit.summary.customer.widgets import (
     QueryStateBanner,
     SearchBox,
     combo_box,
+    configure_combo_popup_width,
     current_data,
     fit_window_to_screen,
     populate_combo,
@@ -161,23 +163,23 @@ class OfficerCenterWindow(QDialog):
 
     def _build_filter_panel(self) -> QWidget:
         panel = QWidget()
-        panel.setObjectName("CustomerFilterPanel")
-        grid = QGridLayout(panel)
-        grid.setContentsMargins(10, 8, 10, 8)
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(7)
-        self.period_from_combo = combo_box("Từ kỳ", minimum_width=112, maximum_width=150)
-        self.period_to_combo = combo_box("Đến kỳ", minimum_width=112, maximum_width=150)
-        self.report_period_combo = combo_box("Kỳ báo cáo", minimum_width=118, maximum_width=160)
-        self.branch_combo = combo_box("Tất cả chi nhánh", minimum_width=170, maximum_width=260)
-        self.office_combo = combo_box("Tất cả PGD", minimum_width=135, maximum_width=210)
-        self.customer_type_combo = combo_box("Loại KH", minimum_width=120, maximum_width=180)
-        self.loan_term_combo = combo_box("Loại thời hạn", minimum_width=150, maximum_width=230)
-        self.debt_group_combo = combo_box("Nhóm nợ", minimum_width=150, maximum_width=240)
-        self.status_combo = combo_box("Trạng thái CBTD", minimum_width=160, maximum_width=240)
-        self.mode_combo = combo_box("Cách xác định cán bộ", minimum_width=210, maximum_width=300)
+        panel.setObjectName("OfficerCenterFilterPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(10, 8, 10, 8)
+        panel_layout.setSpacing(7)
+        self.period_from_combo = combo_box("Từ kỳ", minimum_width=135, maximum_width=155)
+        self.period_to_combo = combo_box("Đến kỳ", minimum_width=135, maximum_width=155)
+        self.report_period_combo = combo_box("Kỳ báo cáo", minimum_width=140, maximum_width=165)
+        self.branch_combo = combo_box("Tất cả chi nhánh", minimum_width=190, maximum_width=280)
+        self.office_combo = combo_box("Tất cả Phòng GD", minimum_width=170, maximum_width=250)
+        self.customer_type_combo = combo_box("Loại khách hàng", minimum_width=155, maximum_width=210)
+        self.loan_term_combo = combo_box("Loại thời hạn", minimum_width=165, maximum_width=220)
+        self.debt_group_combo = combo_box("Nhóm nợ", minimum_width=155, maximum_width=220)
+        self.status_combo = combo_box("Trạng thái CBTD", minimum_width=190, maximum_width=280)
+        self.mode_combo = combo_box("Cách xác định dữ liệu", minimum_width=260, maximum_width=420)
         self.search_box = SearchBox("Tìm mã hoặc tên CBTD")
         self.search_box.setMinimumWidth(320)
+        self.search_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.refresh_button = secondary_button("Làm mới")
         self.clear_button = secondary_button("Xóa lọc")
         self.export_button = primary_button("Xuất toàn bộ")
@@ -189,6 +191,9 @@ class OfficerCenterWindow(QDialog):
         mode_index = self.mode_combo.findData(OFFICER_MODE_IMPORTED)
         if mode_index >= 0:
             self.mode_combo.setCurrentIndex(mode_index)
+            self.mode_combo.setToolTip(self.mode_combo.currentText())
+        configure_combo_popup_width(self.mode_combo, minimum_popup_width=340, maximum_screen_ratio=0.90)
+        configure_combo_popup_width(self.status_combo, minimum_popup_width=260, maximum_screen_ratio=0.90)
         for combo in (
             self.period_from_combo,
             self.period_to_combo,
@@ -202,32 +207,40 @@ class OfficerCenterWindow(QDialog):
             self.mode_combo,
         ):
             combo.currentIndexChanged.connect(self._filter_changed)
+        self.mode_combo.currentIndexChanged.connect(lambda index: self.mode_combo.setToolTip(self.mode_combo.itemText(index)))
         self.branch_combo.currentIndexChanged.connect(lambda _index: self._refresh_office_filter())
         self.search_box.debouncedTextChanged.connect(lambda _text: self._filter_changed())
         self.refresh_button.clicked.connect(lambda: self.refresh_all(use_cache=False))
         self.clear_button.clicked.connect(self.clear_filters)
         self.export_button.clicked.connect(self.export_all)
-        first_row = (
+        period_toolbar = CompactToolbar()
+        period_toolbar.setObjectName("OfficerCenterPeriodToolbar")
+        for widget in (
             self.period_from_combo,
             self.period_to_combo,
             self.report_period_combo,
             self.branch_combo,
             self.office_combo,
+        ):
+            period_toolbar.addWidget(widget)
+        analysis_toolbar = CompactToolbar()
+        analysis_toolbar.setObjectName("OfficerCenterAnalysisToolbar")
+        for widget in (
             self.customer_type_combo,
             self.loan_term_combo,
-        )
-        for column, widget in enumerate(first_row):
-            grid.addWidget(widget, 0, column)
-        grid.addWidget(self.debt_group_combo, 1, 0)
-        grid.addWidget(self.status_combo, 1, 1)
-        grid.addWidget(self.mode_combo, 1, 2)
-        grid.addWidget(self.search_box, 1, 3, 1, 2)
-        grid.addWidget(self.refresh_button, 1, 5)
-        grid.addWidget(self.clear_button, 1, 6)
-        grid.addWidget(self.export_button, 1, 7)
-        grid.setColumnStretch(3, 2)
-        grid.setColumnStretch(4, 2)
-        grid.setColumnStretch(7, 0)
+            self.debt_group_combo,
+            self.status_combo,
+            self.mode_combo,
+        ):
+            analysis_toolbar.addWidget(widget)
+        action_toolbar = CompactToolbar()
+        action_toolbar.setObjectName("OfficerCenterActionToolbar")
+        for widget in (self.search_box, self.refresh_button, self.clear_button, self.export_button):
+            action_toolbar.addWidget(widget)
+        self.filter_toolbars = (period_toolbar, analysis_toolbar, action_toolbar)
+        panel_layout.addWidget(period_toolbar)
+        panel_layout.addWidget(analysis_toolbar)
+        panel_layout.addWidget(action_toolbar)
         return panel
 
     def refresh_filters(self) -> None:

@@ -62,7 +62,7 @@ class FlowLayout(QLayout):
             widget = item.widget()
             if widget is None:
                 continue
-            item_size = item.sizeHint()
+            item_size = item.sizeHint().expandedTo(item.minimumSize())
             next_x = x + item_size.width() + spacing
             if next_x - spacing > effective.right() and line_height > 0:
                 x = effective.x()
@@ -74,4 +74,3 @@ class FlowLayout(QLayout):
             x = next_x
             line_height = max(line_height, item_size.height())
         return y + line_height - rect.y() + bottom
-

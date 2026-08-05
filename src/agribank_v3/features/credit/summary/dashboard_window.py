@@ -70,6 +70,7 @@ from agribank_v3.ui.components.controls import (
     primary_button,
     secondary_button,
 )
+from agribank_v3.ui.components.flow_layout import FlowLayout
 from agribank_v3.ui.components.kpi import KpiMetric, MetricGrid
 
 
@@ -126,7 +127,9 @@ class NimDashboardWindow(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        filter_row = QHBoxLayout()
+        toolbar = QWidget()
+        toolbar.setObjectName("NimDashboardToolbar")
+        filter_row = FlowLayout(toolbar, spacing=8)
         self.period_from_combo = _combo("Từ kỳ", "Từ kỳ")
         self.period_to_combo = _combo("Đến kỳ", "Đến kỳ")
         self.branch_combo = _combo("Chi nhánh", "Tất cả chi nhánh")
@@ -134,14 +137,14 @@ class NimDashboardWindow(QDialog):
         self.customer_type_combo = _combo("Loại KH", "Tất cả loại KH")
         self.metric_combo = _metric_combo(self.ui_config)
         self.metric_combo.currentIndexChanged.connect(lambda _index: self._render_branch_tab())
-        apply_button = primary_button("Áp dụng")
-        apply_button.clicked.connect(self.reload)
-        clear_button = secondary_button("Xóa lọc")
-        clear_button.clicked.connect(self.clear_filters)
-        export_button = secondary_button("Xuất toàn bộ")
-        export_button.clicked.connect(self.export_all_tabs)
-        close_button = secondary_button("Đóng")
-        close_button.clicked.connect(self.close)
+        self.apply_button = primary_button("Áp dụng")
+        self.apply_button.clicked.connect(self.reload)
+        self.clear_button = secondary_button("Xóa lọc")
+        self.clear_button.clicked.connect(self.clear_filters)
+        self.export_all_button = secondary_button("Xuất toàn bộ")
+        self.export_all_button.clicked.connect(self.export_all_tabs)
+        self.close_button = secondary_button("Đóng")
+        self.close_button.clicked.connect(self.close)
         for widget in (
             self.period_from_combo,
             self.period_to_combo,
@@ -149,14 +152,13 @@ class NimDashboardWindow(QDialog):
             self.transaction_office_combo,
             self.customer_type_combo,
             self.metric_combo,
-            apply_button,
-            clear_button,
-            export_button,
-            close_button,
+            self.apply_button,
+            self.clear_button,
+            self.export_all_button,
+            self.close_button,
         ):
             filter_row.addWidget(widget)
-        filter_row.addStretch()
-        layout.addLayout(filter_row)
+        layout.addWidget(toolbar)
 
         self.kpi_grid = MetricGrid()
         layout.addWidget(self.kpi_grid)
@@ -707,13 +709,21 @@ def _is_percent_header(header: str) -> bool:
 
 
 def _combo(tooltip: str, first_label: str) -> QComboBox:
-    combo = shared_combo_box(first_label, minimum_width=110, maximum_width=180)
+    widths = {
+        "Từ kỳ": (120, 155),
+        "Đến kỳ": (120, 155),
+        "Chi nhánh": (170, 240),
+        "Phòng GD": (165, 240),
+        "Loại KH": (150, 210),
+    }
+    minimum_width, maximum_width = widths.get(tooltip, (130, 200))
+    combo = shared_combo_box(first_label, minimum_width=minimum_width, maximum_width=maximum_width)
     combo.setToolTip(tooltip)
     return combo
 
 
 def _metric_combo(ui_config: NimUiConfig) -> QComboBox:
-    combo = shared_combo_box("Chỉ tiêu chính", minimum_width=150, maximum_width=220)
+    combo = shared_combo_box("Chỉ tiêu chính", minimum_width=160, maximum_width=240)
     combo.clear()
     combo.setToolTip("Chỉ tiêu chính")
     labels = ui_config.metric_labels()

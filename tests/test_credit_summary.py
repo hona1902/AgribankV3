@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from contextlib import closing
+import csv
 from dataclasses import replace
 from datetime import date
+import hashlib
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -15,8 +18,29 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox, QPushButton, QRadioButton, QSizePolicy, QStyleOptionViewItem
+from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QLineEdit, QMessageBox, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QStyleOptionViewItem, QWidget
 
+from agribank_v3.features.catalog import SECTIONS
+from agribank_v3.features.credit.summary.credit_report import (
+    CREDIT_QUALITY_DISPLAY_NAME,
+    CUSTOMER_TYPE_LEGAL,
+    CUSTOMER_TYPE_PERSONAL,
+    GROUP_CREDIT_QUALITY,
+    GROUP_CUSTOMER_TYPE,
+    GROUP_DECREE55,
+    GROUP_INDUSTRY,
+    GROUP_SUMMARY,
+    GROUP_TERM_STRUCTURE,
+    REPORT_GROUP_LABELS,
+    VIEW_COMPARE_PERIODS,
+    VIEW_CURRENT_PERIOD,
+    CreditReportFilters,
+    CreditReportRepository,
+    compare_report_snapshots,
+    classify_industry,
+    classify_term_from_account,
+    get_report_snapshot,
+)
 from agribank_v3.features.credit.summary.dashboard_repository import NimDashboardRepository
 from agribank_v3.features.credit.summary.dashboard_charts import DashboardBranchComparisonChart, branch_bar_values, branch_period_pair_values
 from agribank_v3.features.credit.summary.dashboard_export import (
@@ -42,9 +66,31 @@ from agribank_v3.features.credit.summary.models import (
     LOAN_COMPARE_TITLE,
     DashboardData,
     DashboardMetric,
+    NormalizedLoanRow,
+    REPORT_DATA_TITLE,
+    REPORT_SUMMARY_TITLE,
     SummaryDataType,
     SummaryError,
 )
+from agribank_v3.features.credit.summary.report_data_menu import (
+    REPORT_DATA_FEATURES,
+    REPORT_SUMMARY_ROUTE,
+)
+from agribank_v3.features.credit.summary.customer.routes import CUSTOMER_DATA_TITLE
+from agribank_v3.features.credit.summary.ln01 import parse_ln01_bytes, normalize_credit_group_code
+from agribank_v3.features.credit.summary.group_lending.export_service import GroupLendingExportService
+from agribank_v3.features.credit.summary.group_lending.models import (
+    ASSOCIATION_UNKNOWN,
+    DETAIL_BY_GROUP,
+    GROUP_STATUS_NOT_DECLARED,
+    GroupLendingFilters,
+    SUMMARY_BY_ASSOCIATION,
+)
+from agribank_v3.features.credit.summary.group_lending.repository import GroupLendingRepository
+from agribank_v3.features.credit.summary.group_lending.service import GroupLendingService
+from agribank_v3.features.credit.summary.report_window import ReportSummaryWindow
+from agribank_v3.features.credit.tovayvon.models import ASSOCIATION_FARMERS_UNION, ASSOCIATION_OTHER, ASSOCIATION_WOMENS_UNION, CreditGroup
+from agribank_v3.features.credit.tovayvon.repository import CreditGroupRepository
 from agribank_v3.features.credit.summary.credit_limit import (
     CreditLimitExcelBatchStore,
     credit_limit_row_to_excel_values,
@@ -83,6 +129,8 @@ from agribank_v3.features.credit.summary.reports import (
 from agribank_v3.features.credit.summary.repository import SummaryRepository
 from agribank_v3.features.credit.summary.regression import compare_workbooks
 from agribank_v3.features.credit.summary.services import (
+    Ln01DuplicateDecision,
+    Ln01ImportCoordinator,
     build_officer_history,
     compare_loan_balances,
     export_officer_history_excel,
@@ -90,6 +138,7 @@ from agribank_v3.features.credit.summary.services import (
     import_nim_dn,
     import_nim_nv,
 )
+from agribank_v3.features.credit.summary.ln01_import_dialog import _dialog_actions
 from agribank_v3.features.credit.summary.windows import (
     CreditLimitOfficerChart,
     CreditLimitTab,
@@ -117,15 +166,28 @@ from agribank_v3.features.settings.unit_directory.models import (
     OfficeDirectoryEntry,
     TRANSACTION_OFFICE,
 )
+from agribank_v3.ui.main_window import MainWindow
 from agribank_v3.ui.components.controls import (
     configure_combo_popup_width,
+    configure_filter_combo_width,
     danger_button,
     primary_button,
+    recommended_button_width,
     recommended_control_height,
     secondary_button,
 )
 from agribank_v3.ui.components.kpi import CompactKpiCard, MetricGrid
 from agribank_v3.update.db_migrations import MigrationSpec, apply_migrations
+
+
+GROUP_ORDER_FOR_TESTS = (
+    GROUP_SUMMARY,
+    GROUP_TERM_STRUCTURE,
+    GROUP_CUSTOMER_TYPE,
+    GROUP_CREDIT_QUALITY,
+    GROUP_DECREE55,
+    GROUP_INDUSTRY,
+)
 
 
 class CreditSummaryTests(unittest.TestCase):
@@ -153,9 +215,18 @@ class CreditSummaryTests(unittest.TestCase):
         headers[18] = "EXPIRY_DATE"
         headers[27] = "OFFICER"
         headers[35] = "ADDR1"
+        headers[49] = "GRPNO"
         headers[62] = "CREDIT_LINE_YPE"
 
-        def row(customer: str, contract: str, expiry: str, outstanding: str, *, credit_type: str = "Line of Credit") -> list[str]:
+        def row(
+            customer: str,
+            contract: str,
+            expiry: str,
+            outstanding: str,
+            *,
+            credit_type: str = "Line of Credit",
+            group_code: str = "5491LLG202100001",
+        ) -> list[str]:
             values = [""] * 63
             values[0] = "5491"
             values[1] = customer
@@ -168,6 +239,7 @@ class CreditSummaryTests(unittest.TestCase):
             values[18] = expiry
             values[27] = "CB1"
             values[35] = "Dia chi"
+            values[49] = group_code
             values[62] = credit_type
             return values
 
@@ -178,8 +250,1863 @@ class CreditSummaryTests(unittest.TestCase):
             row("KH04", "HD04", "20240210", "400", credit_type="Term Loan"),
             row("KH01", "HD01", "20240115", "50"),
         ]
-        path.write_text("\n".join([",".join(headers), *(",".join(item) for item in rows)]), encoding="utf-8")
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            writer.writerows(rows)
         return path
+
+    def _write_report_ln01_file(self, name: str = "5491_ln01_20260430.csv", *, scale: float = 1.0) -> Path:
+        path = self.root / name
+        headers = [f"H{i}" for i in range(77)]
+        headers[0] = "BRCD"
+        headers[1] = "CUSTSEQ"
+        headers[2] = "CUSTNM"
+        headers[3] = "TAI_KHOAN"
+        headers[5] = "DU_NO"
+        headers[14] = "APPRSEQ"
+        headers[15] = "APPRDT"
+        headers[17] = "APPRAMT"
+        headers[18] = "APPRMATDT"
+        headers[27] = "OFFICER_NAME"
+        headers[31] = "CUSTOMER_TYPE_CODE"
+        headers[35] = "ADDR1"
+        headers[43] = "SECURED_PERCENT"
+        headers[44] = "NHOM_NO"
+        headers[49] = "GRPNO"
+        headers[62] = "CREDIT_LINE_YPE"
+        headers[76] = "MA_NGANH_KT"
+
+        def row(
+            customer: str,
+            account: str,
+            contract: str,
+            balance: str,
+            customer_type: str,
+            debt_group: str,
+            secured_percent: str,
+            industry_code: str,
+            group_code: str = "5491LLG202100001",
+        ) -> list[str]:
+            values = [""] * 77
+            values[0] = "5491"
+            values[1] = customer
+            values[2] = f"Khach {customer}"
+            values[3] = account
+            values[5] = balance
+            values[14] = contract
+            values[15] = "20240101"
+            values[17] = "1000"
+            values[18] = "20241231"
+            values[27] = "[CB01] Nguyen Van A"
+            values[31] = customer_type
+            values[35] = "Dia chi"
+            values[43] = secured_percent
+            values[44] = debt_group
+            values[49] = group_code
+            values[62] = "Line of Credit"
+            values[76] = industry_code
+            return values
+
+        rows = [
+            row("0001", "211001", "HD01", str(int(100 * scale)), "100", "01", "0", "10104", "5491LLG202100001"),
+            row("0002", "212001", "HD02", str(int(200 * scale)), "999", "02", "10", "100101", "5491LLG202100001"),
+            row("0003", "213001", "HD03", str(int(300 * scale)), "570", "03", "0,00", "812345", "5491LLG202100002"),
+            row("0001", "211001", "HD01", str(int(50 * scale)), "100", "01", "0", "10104", "5491LLG202100001"),
+            row("0004", "999001", "HD04", "0", "999", "", "5", "999999", ""),
+        ]
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            writer.writerows(rows)
+        return path
+
+    def _seed_credit_groups(self) -> None:
+        repository = CreditGroupRepository(self.database_path)
+        repository.save_group(
+            CreditGroup(
+                ma_to="5491LLG202100001",
+                ten_to="To vay von 001",
+                xa="Xa 1",
+                ten_to_truong="To truong 1",
+                association_type=ASSOCIATION_FARMERS_UNION,
+                active=True,
+            )
+        )
+        repository.save_group(
+            CreditGroup(
+                ma_to="5491LLG202100002",
+                ten_to="To vay von 002",
+                xa="Xa 2",
+                ten_to_truong="To truong 2",
+                association_type=ASSOCIATION_WOMENS_UNION,
+                active=True,
+            )
+        )
+
+    def _write_ln01_group_alias_file(self, name: str = "5491_ln01_alias_20260430.csv") -> Path:
+        path = self.root / name
+        headers = [f"H{i}" for i in range(63)]
+        headers[0] = "BRCD"
+        headers[1] = "CUSTSEQ"
+        headers[2] = "CUSTNM"
+        headers[3] = "TAI_KHOAN"
+        headers[5] = "DU_NO"
+        headers[10] = "MaToVayVon"
+        headers[14] = "APPRSEQ"
+        headers[15] = "APPRDT"
+        headers[17] = "APPRAMT"
+        headers[18] = "APPRMATDT"
+        headers[27] = "OFFICER_NAME"
+        headers[35] = "ADDR1"
+        headers[49] = "AX_NOT_GROUP"
+        headers[62] = "CREDIT_LINE_YPE"
+        values = [""] * 63
+        values[0] = "5491"
+        values[1] = "0001"
+        values[2] = "Khach alias"
+        values[3] = "211001"
+        values[5] = "100"
+        values[10] = "ALIAS-GROUP-001"
+        values[14] = "HD01"
+        values[15] = "20240101"
+        values[17] = "1000"
+        values[18] = "20241231"
+        values[27] = "[CB01] Nguyen Van A"
+        values[35] = "Dia chi"
+        values[49] = "WRONG-FALLBACK-GROUP"
+        values[62] = "Line of Credit"
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            writer.writerow(values)
+        return path
+
+    def test_credit_statement_card_renamed_to_report_data(self) -> None:
+        titles = [feature.title for feature in SECTIONS["Tín dụng"]]
+        self.assertIn(REPORT_DATA_TITLE, titles)
+        self.assertNotIn("Sao kê tín dụng", titles)
+
+    def test_report_child_menu_has_summary_report(self) -> None:
+        titles = [feature.title for feature in REPORT_DATA_FEATURES]
+        self.assertEqual(titles, [REPORT_SUMMARY_TITLE])
+        self.assertNotIn("Chức năng 2", titles)
+        self.assertEqual(REPORT_SUMMARY_ROUTE, "credit.report_summary")
+
+    def test_report_data_card_opens_child_menu(self) -> None:
+        window = MainWindow()
+        try:
+            window.open_feature(REPORT_DATA_TITLE)
+            self.assertIsNotNone(window.report_data_page)
+            self.assertIs(window.pages.currentWidget(), window.report_data_page)
+        finally:
+            window.close()
+
+    def test_report_child_menu_does_not_invent_other_feature_names(self) -> None:
+        titles = [feature.title for feature in REPORT_DATA_FEATURES]
+        self.assertNotIn("Chức năng 2", titles)
+        self.assertNotIn("Chức năng 3", titles)
+        self.assertNotIn("Chức năng 4", titles)
+
+    def test_summary_report_single_instance_and_non_modal(self) -> None:
+        window = MainWindow()
+        try:
+            first = window.open_report_summary_window()
+            second = window.open_report_summary_window()
+            self.assertIs(first, second)
+            self.assertFalse(first.isModal())
+        finally:
+            if window._report_summary_window is not None:
+                window._report_summary_window.close()
+            window.close()
+
+    def test_report_window_has_group_lending_tab_in_order(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertEqual(
+                [window.tabs.tabText(index) for index in range(window.tabs.count())],
+                ["Tổng quan", "Cho vay qua tổ", "Lịch sử import", "Cài đặt phân loại"],
+            )
+            removed = {
+                "Cơ cấu thời hạn",
+                "Loại hình khách hàng",
+                "Chất lượng dư nợ",
+                "Cho vay Nghị định 55",
+                "Dư nợ theo ngành kinh tế",
+                "So sánh các kỳ",
+            }
+            self.assertTrue(removed.isdisjoint({window.tabs.tabText(index) for index in range(window.tabs.count())}))
+        finally:
+            window.close()
+
+    def test_report_window_modes_and_group_options(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertTrue(window.mode_button_group.exclusive())
+            self.assertTrue(window.current_mode_radio.isChecked())
+            self.assertFalse(window.from_period_combo.isEnabled())
+            self.assertFalse(window.to_period_combo.isEnabled())
+            self.assertTrue(window.period_combo.isEnabled())
+            window.compare_mode_radio.setChecked(True)
+            self.assertTrue(window.from_period_combo.isEnabled())
+            self.assertTrue(window.to_period_combo.isEnabled())
+            self.assertFalse(window.period_combo.isEnabled())
+            self.assertEqual(set(window.group_buttons), set(GROUP_ORDER_FOR_TESTS))
+            self.assertEqual(window.group_buttons[GROUP_CREDIT_QUALITY].text(), CREDIT_QUALITY_DISPLAY_NAME)
+            visible_text = " ".join(
+                [window.tabs.tabText(index) for index in range(window.tabs.count())]
+                + [button.text() for button in window.group_buttons.values()]
+            )
+            self.assertNotIn("Chất lượng dư nợ", visible_text)
+        finally:
+            window.close()
+
+    def test_report_view_mode_is_outside_overview_tab(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertIsNotNone(window.view_mode_widget)
+            self.assertIsNot(window.view_mode_widget.parentWidget(), window.overview_tab)
+            self.assertNotIn(window.current_mode_radio, window.overview_tab.findChildren(QRadioButton))
+            self.assertNotIn(window.compare_mode_radio, window.overview_tab.findChildren(QRadioButton))
+        finally:
+            window.close()
+
+    def test_report_overview_has_no_view_mode_widget(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertIsNone(window.overview_tab.findChild(QWidget, "ReportViewModeWidget"))
+            overview_radio_texts = {button.text() for button in window.overview_tab.findChildren(QRadioButton)}
+            self.assertNotIn("Kỳ hiện tại", overview_radio_texts)
+            self.assertNotIn("So sánh các kỳ", overview_radio_texts)
+        finally:
+            window.close()
+
+    def test_global_customer_search_removed(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertFalse(hasattr(window, "search_edit"))
+            placeholders = {edit.placeholderText() for edit in window.findChildren(QLineEdit)}
+            self.assertNotIn("Tìm mã hoặc tên khách hàng", placeholders)
+        finally:
+            window.close()
+
+    def test_report_header_has_view_mode_widget(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            area = window.findChild(QWidget, "ReportSummaryFilterArea")
+            self.assertIsNotNone(area)
+            self.assertIs(window.view_mode_widget.parentWidget(), area)
+            self.assertIsNotNone(area.findChild(QWidget, "ReportViewModeWidget"))
+        finally:
+            window.close()
+
+    def test_view_mode_replaces_search_position(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            area = window.findChild(QWidget, "ReportSummaryFilterArea")
+            flow = area.layout()
+            self.assertIs(flow.itemAt(flow.count() - 1).widget(), window.view_mode_widget)
+            self.assertEqual(window.view_mode_widget.objectName(), "ReportViewModeWidget")
+        finally:
+            window.close()
+
+    def test_view_mode_radio_group_is_exclusive(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertTrue(window.mode_button_group.exclusive())
+            window.compare_mode_radio.setChecked(True)
+            self.assertFalse(window.current_mode_radio.isChecked())
+            self.assertTrue(window.compare_mode_radio.isChecked())
+        finally:
+            window.close()
+
+    def test_current_period_is_default(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertEqual(window._view_mode(), VIEW_CURRENT_PERIOD)
+            self.assertTrue(window.current_mode_radio.isChecked())
+        finally:
+            window.close()
+
+    def test_current_mode_enables_report_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.current_mode_radio.setChecked(True)
+            self.assertTrue(window.period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_current_mode_disables_from_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.current_mode_radio.setChecked(True)
+            self.assertFalse(window.from_period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_current_mode_disables_to_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.current_mode_radio.setChecked(True)
+            self.assertFalse(window.to_period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_compare_mode_enables_from_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.compare_mode_radio.setChecked(True)
+            self.assertTrue(window.from_period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_compare_mode_enables_to_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.compare_mode_radio.setChecked(True)
+            self.assertTrue(window.to_period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_compare_mode_disables_report_period(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.compare_mode_radio.setChecked(True)
+            self.assertFalse(window.period_combo.isEnabled())
+        finally:
+            window.close()
+
+    def test_view_mode_applies_to_overview_tab(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.tabs.setCurrentWidget(window.overview_tab)
+            with patch.object(window, "reload_overview") as reload_overview, patch.object(window.group_lending_tab, "refresh") as group_refresh:
+                window.compare_mode_radio.setChecked(True)
+            reload_overview.assert_called_once()
+            group_refresh.assert_not_called()
+        finally:
+            window.close()
+
+    def test_view_mode_applies_to_group_lending_tab(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.tabs.setCurrentWidget(window.group_lending_tab)
+            with patch.object(window, "reload_overview") as reload_overview, patch.object(window.group_lending_tab, "refresh") as group_refresh:
+                window.compare_mode_radio.setChecked(True)
+            group_refresh.assert_called_once()
+            reload_overview.assert_not_called()
+        finally:
+            window.close()
+
+    def test_view_mode_does_not_refresh_import_history(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.tabs.setCurrentIndex(2)
+            with patch.object(window.repository, "import_history_rows") as import_history_rows:
+                window.compare_mode_radio.setChecked(True)
+            import_history_rows.assert_not_called()
+        finally:
+            window.close()
+
+    def test_view_mode_does_not_refresh_classification_settings(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            window.tabs.setCurrentWidget(window.rules_tab)
+            with patch.object(window.repository, "customer_type_rule_rows") as rule_rows:
+                window.compare_mode_radio.setChecked(True)
+            rule_rows.assert_not_called()
+        finally:
+            window.close()
+
+    def test_report_export_reads_global_view_mode(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        captured: dict[str, object] = {}
+        try:
+            window.tabs.setCurrentWidget(window.overview_tab)
+            with patch.object(window, "reload_overview"), patch.object(window.group_lending_tab, "refresh"):
+                window.compare_mode_radio.setChecked(True)
+            with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.root / "report.xlsx"), "Excel (*.xlsx)")):
+                with patch.object(
+                    window.repository,
+                    "export_workbook",
+                    side_effect=lambda path, *, filters, view_mode: captured.update({"filters": filters, "view_mode": view_mode}) or path,
+                ):
+                    with patch.object(window, "_run_background", side_effect=lambda _title, fn, _done: fn(lambda _message: None)):
+                        window.export_excel()
+            self.assertEqual(captured["view_mode"], VIEW_COMPARE_PERIODS)
+            self.assertEqual(captured["filters"].search, "")
+        finally:
+            window.close()
+
+    def test_group_lending_export_reads_global_view_mode(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        captured: dict[str, object] = {}
+        try:
+            window.tabs.setCurrentWidget(window.group_lending_tab)
+            with patch.object(window, "reload_overview"), patch.object(window.group_lending_tab, "refresh"):
+                window.compare_mode_radio.setChecked(True)
+            def fake_export(*args, **kwargs):
+                path = args[-1] if args else self.root / "groups.xlsx"
+                captured.update(
+                    {
+                        "view_mode": kwargs.get("view_mode"),
+                        "filters": kwargs.get("filters"),
+                        "display_mode": kwargs.get("display_mode"),
+                    }
+                )
+                return path
+            with patch.object(QFileDialog, "getSaveFileName", return_value=(str(self.root / "groups.xlsx"), "Excel (*.xlsx)")):
+                with patch.object(
+                    GroupLendingExportService,
+                    "export",
+                    side_effect=fake_export,
+                ):
+                    with patch.object(QMessageBox, "information", return_value=None), patch.object(QMessageBox, "warning", return_value=None):
+                        window.export_excel()
+            self.assertEqual(captured["view_mode"], VIEW_COMPARE_PERIODS)
+        finally:
+            window.close()
+
+    def test_group_lending_search_box_still_exists(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertEqual(window.group_lending_tab.search_edit.placeholderText(), "Tìm mã hoặc tên tổ")
+        finally:
+            window.close()
+
+    def test_global_search_signal_removed(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            self.assertFalse(hasattr(window, "search_edit"))
+            self.assertEqual(window._filters().search, "")
+        finally:
+            window.close()
+
+    def test_report_filter_layout_has_no_horizontal_scroll(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            area = window.findChild(QWidget, "ReportSummaryFilterArea")
+            self.assertIsNotNone(area)
+            self.assertFalse(hasattr(area, "horizontalScrollBar"))
+            self.assertTrue(area.layout().hasHeightForWidth())
+        finally:
+            window.close()
+
+    def test_report_filter_layout_wraps_on_narrow_width(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            area = window.findChild(QWidget, "ReportSummaryFilterArea")
+            flow = area.layout()
+            self.assertGreater(flow.heightForWidth(640), flow.heightForWidth(1800))
+        finally:
+            window.close()
+
+    def test_mode_widget_text_not_clipped(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            for button in (window.current_mode_radio, window.compare_mode_radio):
+                required_width = button.fontMetrics().horizontalAdvance(button.text()) + 32
+                self.assertGreaterEqual(button.minimumWidth(), required_width)
+            self.assertGreaterEqual(window.view_mode_widget.minimumWidth(), window.current_mode_radio.minimumWidth() + window.compare_mode_radio.minimumWidth())
+        finally:
+            window.close()
+
+    def test_group_lending_tab_options_are_exclusive_and_default_detail(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            tab = window.group_lending_tab
+            self.assertTrue(tab.option_button_group.exclusive())
+            self.assertTrue(tab.detail_radio.isChecked())
+            self.assertEqual(tab.detail_radio.property("group_lending_mode"), DETAIL_BY_GROUP)
+            self.assertEqual(tab.association_radio.property("group_lending_mode"), SUMMARY_BY_ASSOCIATION)
+            self.assertNotIn("Chart", {child.__class__.__name__ for child in tab.findChildren(QWidget)})
+        finally:
+            window.close()
+
+    def _assert_combo_text_has_room(self, combo: QComboBox, text: str | None = None) -> None:
+        visible_text = text if text is not None else combo.itemText(0)
+        required_width = combo.fontMetrics().horizontalAdvance(visible_text) + 54
+        self.assertGreaterEqual(combo.minimumWidth(), required_width, visible_text)
+        self.assertEqual(combo.toolTip().splitlines()[0], combo.currentText())
+        line_edit = combo.lineEdit()
+        self.assertIsInstance(line_edit, QLineEdit)
+        self.assertEqual(line_edit.cursorPosition(), 0)
+
+    def test_report_filter_combo_minimum_widths(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            expected = (
+                (window.from_period_combo, 132),
+                (window.to_period_combo, 132),
+                (window.period_combo, 136),
+                (window.branch_combo, 168),
+                (window.office_combo, 184),
+                (window.customer_type_combo, 176),
+                (window.debt_group_combo, 152),
+                (window.term_combo, 166),
+                (window.officer_combo, 170),
+            )
+            for combo, minimum_width in expected:
+                self.assertGreaterEqual(combo.minimumWidth(), minimum_width)
+        finally:
+            window.close()
+
+    def test_report_period_combo_text_visible(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            for combo in (window.from_period_combo, window.to_period_combo, window.period_combo):
+                self._assert_combo_text_has_room(combo)
+        finally:
+            window.close()
+
+    def test_report_branch_combo_text_visible(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            for combo in (window.branch_combo, window.office_combo):
+                self._assert_combo_text_has_room(combo)
+        finally:
+            window.close()
+
+    def test_report_combo_popup_width_includes_full_text_and_tooltip(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            combo = window.office_combo
+            long_text = "Phòng giao dịch Trung tâm Agribank huyện rất dài"
+            combo.addItem(long_text, "pgd-long")
+            configure_filter_combo_width(combo, minimum_width=184, maximum_width=250)
+            combo.setCurrentIndex(combo.findData("pgd-long"))
+            self.qt_app.processEvents()
+            self.assertEqual(combo.toolTip(), long_text)
+            self.assertGreaterEqual(combo.view().minimumWidth(), combo.fontMetrics().horizontalAdvance(long_text) + 40)
+            self.assertEqual(combo.view().horizontalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.assertEqual(combo.lineEdit().cursorPosition(), 0)
+        finally:
+            window.close()
+
+    def test_group_lending_filter_combo_text_visible(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            tab = window.group_lending_tab
+            for combo in (tab.branch_combo, tab.office_combo, tab.association_combo, tab.status_combo, tab.officer_combo):
+                self._assert_combo_text_has_room(combo)
+        finally:
+            window.close()
+
+    def test_report_and_group_filter_layouts_wrap_when_narrow(self) -> None:
+        window = ReportSummaryWindow(self.database_path)
+        try:
+            for object_name in ("ReportSummaryFilterArea", "GroupLendingFilterArea"):
+                area = window.findChild(QWidget, object_name)
+                self.assertIsNotNone(area)
+                flow = area.layout()
+                self.assertTrue(flow.hasHeightForWidth())
+                self.assertGreaterEqual(flow.heightForWidth(640), flow.heightForWidth(1800))
+            self.assertEqual(window.group_lending_tab.search_edit.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Expanding)
+        finally:
+            window.close()
+
+    def test_customer_data_menu_route_still_exists(self) -> None:
+        self.assertIn(CUSTOMER_DATA_TITLE, [feature.title for feature in SECTIONS["Tín dụng"]])
+
+    def test_ln01_parser_reads_grpno(self) -> None:
+        path = self._write_ln01_file()
+
+        rows, source_count = parse_ln01_bytes(path, path.read_bytes(), period="2026-04")
+
+        self.assertEqual(source_count, 5)
+        self.assertTrue(hasattr(rows[0], "group_code"))
+        self.assertEqual(rows[0].group_code, "5491LLG202100001")
+
+    def test_ln01_parser_grpno_alias_preferred_over_ax_fallback(self) -> None:
+        path = self._write_ln01_group_alias_file()
+
+        rows, _source_count = parse_ln01_bytes(path, path.read_bytes(), period="2026-04")
+
+        self.assertEqual(rows[0].group_code, "ALIAS-GROUP-001")
+
+    def test_ln01_group_code_normalization_rules(self) -> None:
+        self.assertEqual(normalize_credit_group_code(" 5491LLG202100003 "), "5491LLG202100003")
+        self.assertEqual(normalize_credit_group_code("'5491LLG202100003"), "5491LLG202100003")
+        self.assertEqual(normalize_credit_group_code("549100003.0"), "549100003")
+        self.assertIsNone(normalize_credit_group_code(""))
+        self.assertIsNone(normalize_credit_group_code(None))
+
+    def test_ln01_missing_grpno_header_warns_but_imports_other_reports(self) -> None:
+        path = self._write_report_ln01_file()
+        with path.open(encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        rows[0][49] = "AX_NOT_GROUP"
+        for row in rows[1:]:
+            row[49] = ""
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerows(rows)
+
+        result = import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            loan_count = connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0]
+            run = connection.execute(
+                "SELECT group_code_stats_json FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'"
+            ).fetchone()
+        stats = json.loads(run["group_code_stats_json"])
+        self.assertIn("không có header GRPNO", result.message)
+        self.assertEqual(loan_count, 4)
+        self.assertFalse(stats["has_group_code_column"])
+        self.assertEqual(stats["normalized_loans_with_group_code"], 0)
+
+    def test_credit_loan_period_has_group_code_and_migration_is_idempotent(self) -> None:
+        legacy_root = self.root / "legacy"
+        legacy_root.mkdir()
+        main_database = legacy_root / "DuLieuV3.db"
+        credit_database = legacy_root / "Credit.db"
+        with closing(sqlite3.connect(credit_database)) as connection:
+            with connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE credit_import_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        period TEXT NOT NULL,
+                        source_type TEXT NOT NULL,
+                        source_file_name TEXT NOT NULL DEFAULT '',
+                        source_sha256 TEXT NOT NULL DEFAULT '',
+                        source_file_size INTEGER NOT NULL DEFAULT 0,
+                        source_row_count INTEGER NOT NULL DEFAULT 0,
+                        normalized_loan_count INTEGER NOT NULL DEFAULT 0,
+                        customer_count INTEGER NOT NULL DEFAULT 0,
+                        ln01_total_balance REAL NOT NULL DEFAULT 0,
+                        card_balance REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'success',
+                        warning_count INTEGER NOT NULL DEFAULT 0,
+                        message TEXT NOT NULL DEFAULT '',
+                        imported_by TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        duration_ms INTEGER NOT NULL DEFAULT 0
+                    );
+                    CREATE TABLE credit_customer_master (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        branch_code TEXT NOT NULL,
+                        customer_sequence TEXT NOT NULL,
+                        customer_code TEXT NOT NULL DEFAULT '',
+                        customer_name TEXT NOT NULL DEFAULT '',
+                        latest_customer_type_code TEXT NOT NULL DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(branch_code, customer_sequence)
+                    );
+                    CREATE TABLE credit_loan_period (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        period TEXT NOT NULL,
+                        customer_id INTEGER NOT NULL,
+                        branch_code TEXT NOT NULL,
+                        loan_key TEXT NOT NULL,
+                        account_number TEXT NOT NULL DEFAULT '',
+                        approval_sequence TEXT NOT NULL DEFAULT '',
+                        outstanding_balance REAL NOT NULL DEFAULT 0,
+                        customer_type_code TEXT NOT NULL DEFAULT '',
+                        debt_group_code TEXT NOT NULL DEFAULT 'UNKNOWN',
+                        secured_percent REAL,
+                        industry_code TEXT NOT NULL DEFAULT '',
+                        officer_code TEXT NOT NULL DEFAULT '',
+                        officer_name TEXT NOT NULL DEFAULT '',
+                        term_category TEXT NOT NULL DEFAULT 'UNKNOWN',
+                        source_run_id INTEGER NOT NULL,
+                        source_row_count INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        UNIQUE(period, branch_code, loan_key)
+                    );
+                    INSERT INTO credit_import_runs(id, period, source_type, source_file_name, created_at, updated_at)
+                    VALUES (1, '2026-03', 'LN01', 'legacy.csv', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+                    INSERT INTO credit_customer_master(id, branch_code, customer_sequence, customer_code, customer_name, created_at, updated_at)
+                    VALUES (1, '5491', '0001', '54910001', 'Khach 0001', '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+                    INSERT INTO credit_loan_period(
+                        id, period, customer_id, branch_code, loan_key, account_number, approval_sequence,
+                        outstanding_balance, customer_type_code, debt_group_code, officer_code, officer_name,
+                        term_category, source_run_id, created_at
+                    )
+                    VALUES (
+                        1, '2026-03', 1, '5491', '1:211001:HD01', '211001', 'HD01',
+                        100, '100', '01', 'CB01', 'Nguyen Van A', 'SHORT', 1, '2026-01-01T00:00:00'
+                    );
+                    """
+                )
+
+        repository = CreditReportRepository(main_database)
+        repository.ensure_schema()
+
+        with closing(repository.connect()) as connection:
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(credit_loan_period)").fetchall()}
+            indexes = {row["name"] for row in connection.execute("PRAGMA index_list(credit_loan_period)").fetchall()}
+            row = connection.execute("SELECT group_code FROM credit_loan_period WHERE id = 1").fetchone()
+            run = connection.execute("SELECT group_code_stats_json FROM credit_import_runs WHERE id = 1").fetchone()
+        self.assertIn("group_code", columns)
+        self.assertIn("idx_credit_loan_period_period_group_customer", indexes)
+        self.assertIsNone(row["group_code"])
+        self.assertEqual(run["group_code_stats_json"], "{}")
+        self.assertTrue(any((legacy_root / "backups").glob("Credit-before-*.db")))
+
+    def test_ln01_import_writes_group_code_and_metadata(self) -> None:
+        self._seed_credit_groups()
+        path = self._write_report_ln01_file()
+
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            rows = {
+                row["account_number"]: row
+                for row in connection.execute(
+                    """
+                    SELECT account_number, outstanding_balance, group_code
+                    FROM credit_loan_period
+                    WHERE period = '2026-04'
+                    """
+                ).fetchall()
+            }
+            run = connection.execute(
+                "SELECT group_code_stats_json FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'"
+            ).fetchone()
+        stats = json.loads(run["group_code_stats_json"])
+        self.assertEqual(rows["211001"]["group_code"], "5491LLG202100001")
+        self.assertEqual(rows["211001"]["outstanding_balance"], 150)
+        self.assertIsNone(rows["999001"]["group_code"])
+        self.assertTrue(stats["has_group_code_column"])
+        self.assertEqual(stats["source_rows_with_group_code"], 4)
+        self.assertEqual(stats["normalized_loans_with_group_code"], 3)
+        self.assertEqual(stats["balance_with_group_code"], 650)
+        self.assertEqual(stats["matched_group_code_count"], 2)
+        self.assertEqual(stats["unknown_group_code_count"], 0)
+
+    def test_ln01_overwrite_period_replaces_group_code(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260430.csv")
+        second_path = self._write_report_ln01_file("5491_ln01_20260430_v2.csv")
+        second_path.write_text(
+            second_path.read_text(encoding="utf-8").replace("5491LLG202100001", "5491LLG202100003"),
+            encoding="utf-8",
+        )
+        import_credit_limit_file(self.repository, first_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.CREATE_BOTH,
+        )
+
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            codes = {
+                str(row["group_code"])
+                for row in connection.execute(
+                    "SELECT group_code FROM credit_loan_period WHERE period = '2026-04' AND group_code IS NOT NULL"
+                ).fetchall()
+            }
+            loan_count = connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0]
+        self.assertEqual(loan_count, 4)
+        self.assertEqual(codes, {"5491LLG202100002", "5491LLG202100003"})
+
+    def test_hmhethan_workbook_preserves_group_code(self) -> None:
+        path = self._write_ln01_file()
+
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        workbook = load_workbook(batch.file_path, data_only=True)
+        try:
+            sheet = workbook[DATA_SHEET_NAME]
+            headers = [sheet.cell(1, column).value for column in range(1, sheet.max_column + 1)]
+            group_column = headers.index("group_code") + 1
+            self.assertEqual(sheet.cell(2, group_column).value, "5491LLG202100001")
+        finally:
+            workbook.close()
+
+    def test_group_lending_detail_joins_credit_groups_by_ma_to(self) -> None:
+        self._seed_credit_groups()
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        result = GroupLendingRepository(self.database_path).get_group_lending_snapshot(
+            "2026-04",
+            GroupLendingFilters(period="2026-04"),
+        )
+
+        rows = {row.group_code: row for row in result.rows}
+        kpis = {kpi.label: kpi.value for kpi in result.kpis}
+        self.assertEqual(rows["5491LLG202100001"].group_name, "To vay von 001")
+        self.assertEqual(rows["5491LLG202100001"].association_type, ASSOCIATION_FARMERS_UNION)
+        self.assertEqual(rows["5491LLG202100001"].member_count, 2)
+        self.assertEqual(rows["5491LLG202100001"].loan_count, 2)
+        self.assertEqual(rows["5491LLG202100001"].total_balance, 350)
+        self.assertEqual(rows["5491LLG202100002"].association_type, ASSOCIATION_WOMENS_UNION)
+        self.assertEqual(kpis["Số tổ có dư nợ"], 2)
+        self.assertEqual(kpis["Tổng số tổ viên duy nhất"], 3)
+        self.assertEqual(kpis["Tổng lượt tổ viên theo tổ"], 3)
+        self.assertEqual(kpis["Tổng dư nợ cho vay qua tổ"], 650)
+
+    def test_group_lending_unknown_group_is_preserved(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        result = GroupLendingRepository(self.database_path).get_group_lending_snapshot(
+            "2026-04",
+            GroupLendingFilters(period="2026-04"),
+        )
+
+        rows = {row.group_code: row for row in result.rows}
+        self.assertEqual(rows["5491LLG202100001"].status, GROUP_STATUS_NOT_DECLARED)
+        self.assertEqual(rows["5491LLG202100001"].group_name, "Chưa khai báo")
+        self.assertEqual(rows["5491LLG202100001"].association_type, ASSOCIATION_UNKNOWN)
+        self.assertEqual(sum(row.total_balance for row in result.rows), 650)
+
+    def test_group_lending_blank_group_code_is_excluded_and_warns_old_period(self) -> None:
+        path = self._write_report_ln01_file()
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            .replace("5491LLG202100001", "")
+            .replace("5491LLG202100002", ""),
+            encoding="utf-8",
+        )
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        result = GroupLendingRepository(self.database_path).get_group_lending_snapshot(
+            "2026-04",
+            GroupLendingFilters(period="2026-04"),
+        )
+
+        self.assertEqual(result.rows, ())
+        self.assertIn("Kỳ 2026-04 chưa có dữ liệu mã tổ vay vốn", " ".join(result.notes))
+        self.assertEqual(result.diagnostics["no_group_balance"], 650)
+
+    def test_group_lending_association_summary_and_dynamic_directory_updates(self) -> None:
+        self._seed_credit_groups()
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        repository = GroupLendingRepository(self.database_path)
+        filters = GroupLendingFilters(period="2026-04")
+        before = {row.association_type: row for row in repository.get_association_summary("2026-04", filters).rows}
+        CreditGroupRepository(self.database_path).save_group(
+            CreditGroup(
+                ma_to="5491LLG202100002",
+                ten_to="To vay von 002 updated",
+                xa="Xa 2",
+                ten_to_truong="To truong 2",
+                association_type=ASSOCIATION_OTHER,
+                association_other_name="Hoi khac",
+                active=True,
+            )
+        )
+        after = {row.group_code: row for row in repository.get_group_lending_snapshot("2026-04", filters).rows}
+
+        self.assertEqual(before[ASSOCIATION_FARMERS_UNION].total_balance, 350)
+        self.assertEqual(before[ASSOCIATION_WOMENS_UNION].total_balance, 300)
+        self.assertEqual(after["5491LLG202100002"].group_name, "To vay von 002 updated")
+        self.assertEqual(after["5491LLG202100002"].association_type, ASSOCIATION_OTHER)
+
+    def test_group_lending_compare_is_direct_full_outer_join(self) -> None:
+        self._seed_credit_groups()
+        first_path = self._write_report_ln01_file("5491_ln01_20260331.csv")
+        first_path.write_text(
+            first_path.read_text(encoding="utf-8").replace("5491LLG202100002", ""),
+            encoding="utf-8",
+        )
+        second_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2026-03", warn_days=30, reference_date=date(2024, 1, 20))
+        import_credit_limit_file(self.repository, second_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        result = GroupLendingRepository(self.database_path).compare_groups(
+            "2026-03",
+            "2026-04",
+            GroupLendingFilters(from_period="2026-03", to_period="2026-04"),
+        )
+
+        rows = {row.group_code: row for row in result.rows}
+        self.assertEqual(rows["5491LLG202100001"].balance_from, 350)
+        self.assertEqual(rows["5491LLG202100001"].balance_to, 700)
+        self.assertEqual(rows["5491LLG202100001"].balance_growth_rate, 100)
+        self.assertEqual(rows["5491LLG202100002"].balance_from, 0)
+        self.assertEqual(rows["5491LLG202100002"].balance_to, 600)
+        self.assertEqual(rows["5491LLG202100002"].movement_category, "Tổ mới có dư nợ")
+
+    def test_group_lending_customer_in_multiple_groups_diagnostics_and_unique_kpi(self) -> None:
+        self._seed_credit_groups()
+        path = self._write_report_ln01_file()
+        with path.open(encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        rows[3][1] = "0001"
+        rows[3][2] = "Khach 0001"
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerows(rows)
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        result = GroupLendingRepository(self.database_path).get_group_lending_snapshot(
+            "2026-04",
+            GroupLendingFilters(period="2026-04"),
+        )
+        kpis = {kpi.label: kpi.value for kpi in result.kpis}
+
+        self.assertEqual(kpis["Tổng số tổ viên duy nhất"], 2)
+        self.assertEqual(kpis["Tổng lượt tổ viên theo tổ"], 3)
+        self.assertEqual(result.diagnostics["multi_group_customer_count"], 1)
+        self.assertEqual(result.diagnostics["credit_card_scope"], "excluded_without_group_code")
+
+    def test_group_lending_export_modes(self) -> None:
+        self._seed_credit_groups()
+        first_path = self._write_report_ln01_file("5491_ln01_20260331.csv", scale=0.5)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        import_credit_limit_file(self.repository, first_path, period="2026-03", warn_days=30, reference_date=date(2024, 1, 20))
+        import_credit_limit_file(self.repository, second_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        exporter = GroupLendingExportService(GroupLendingService(self.database_path))
+        cases = (
+            (VIEW_CURRENT_PERIOD, DETAIL_BY_GROUP, "ChoVayQuaTo", "current_detail.xlsx"),
+            (VIEW_CURRENT_PERIOD, SUMMARY_BY_ASSOCIATION, "TongHopTheoHoi", "current_association.xlsx"),
+            (VIEW_COMPARE_PERIODS, DETAIL_BY_GROUP, "SoSanhTheoTo", "compare_detail.xlsx"),
+            (VIEW_COMPARE_PERIODS, SUMMARY_BY_ASSOCIATION, "SoSanhTheoHoi", "compare_association.xlsx"),
+        )
+
+        for view_mode, display_mode, sheet_name, file_name in cases:
+            output = exporter.export(
+                self.root / file_name,
+                filters=GroupLendingFilters(period="2026-04", from_period="2026-03", to_period="2026-04"),
+                view_mode=view_mode,
+                display_mode=display_mode,
+            )
+            workbook = load_workbook(output, data_only=True)
+            try:
+                self.assertIn(sheet_name, workbook.sheetnames)
+                self.assertIn("ThongTin", workbook.sheetnames)
+                self.assertGreaterEqual(workbook[sheet_name].max_row, 2)
+                metadata = {
+                    workbook["ThongTin"].cell(row, 1).value: workbook["ThongTin"].cell(row, 2).value
+                    for row in range(2, workbook["ThongTin"].max_row + 1)
+                }
+                self.assertEqual(metadata["Nguồn GRPNO"], "LN01.GRPNO -> credit_groups.ma_to")
+            finally:
+                workbook.close()
+
+    def test_ln01_shared_import_reads_file_once_and_updates_both_outputs(self) -> None:
+        path = self._write_ln01_file()
+        calls: list[Path] = []
+        original = Path.read_bytes
+
+        def counting_read_bytes(target: Path) -> bytes:
+            if Path(target) == path:
+                calls.append(path)
+            return original(target)
+
+        with patch.object(Path, "read_bytes", counting_read_bytes):
+            result = import_credit_limit_file(
+                self.repository,
+                path,
+                warn_days=30,
+                reference_date=date(2024, 1, 20),
+            )
+
+        self.assertEqual(calls, [path])
+        self.assertEqual(result.row_count, 2)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        report_repository = CreditReportRepository(self.database_path)
+        with closing(report_repository.connect()) as connection:
+            loan_count = connection.execute("SELECT COUNT(*) FROM credit_loan_period").fetchone()[0]
+            total_balance = connection.execute("SELECT SUM(outstanding_balance) FROM credit_loan_period").fetchone()[0]
+        self.assertEqual(loan_count, 4)
+        self.assertEqual(total_balance, 1050)
+
+    def test_credit_limit_import_requires_period(self) -> None:
+        path = self._write_ln01_file("ln01_no_period.csv")
+
+        with self.assertRaisesRegex(SummaryError, "Không xác định được kỳ"):
+            import_credit_limit_file(
+                self.repository,
+                path,
+                warn_days=30,
+                reference_date=date(2024, 1, 20),
+            )
+
+    def test_credit_limit_period_inferred_from_source_filename(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        self.assertEqual(batch.period, "2025-12")
+        self.assertEqual(batch.branch_code, "5491")
+
+    def test_credit_limit_period_not_based_on_import_time(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2026, 8, 4),
+        )
+
+        self.assertEqual(self.repository.list_credit_limit_batches()[0].period, "2025-12")
+
+    def test_credit_limit_metadata_contains_period(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        self.assertEqual(batch.period, "2025-12")
+        self.assertTrue(batch.is_active)
+        self.assertFalse(batch.period_missing)
+
+    def test_credit_limit_filename_contains_period(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+
+        import_credit_limit_file(
+            self.repository,
+            path,
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        file_name = self.repository.list_credit_limit_batches()[0].file_name
+        self.assertTrue(file_name.startswith("HMHETHAN_2025-12_5491_"))
+
+    def test_credit_limit_combo_displays_period(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+        tab = CreditLimitTab(self.repository)
+        self.addCleanup(tab.deleteLater)
+
+        tab.reload_filters()
+
+        self.assertEqual(tab.batch_filter.itemText(0), "Tất cả kỳ")
+        self.assertIn("2025-12", tab.batch_filter.itemText(1))
+        self.assertNotIn(path.name, tab.batch_filter.itemText(1))
+
+    def test_credit_limit_table_displays_period(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        rows = self.repository.query_credit_limits(page_size=20).rows
+
+        self.assertEqual(rows[0]["period"], "2025-12")
+
+    def test_credit_limit_all_periods_uses_one_active_batch_per_period(self) -> None:
+        store = CreditLimitExcelBatchStore(self.database_path)
+        row = self._sample_credit_limit_row()
+        store.create_batch(
+            source_path=self.root / "5491_ln01_20251231.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="1" * 64,
+            source_file_size=1,
+            duplicate_policy="new",
+        )
+        store.create_batch(
+            source_path=self.root / "5491_ln01_20251231_v2.csv",
+            rows=(row,),
+            accepted_rows=(row,),
+            reference_date=date(2024, 1, 20),
+            min_limit=0,
+            warn_days=30,
+            source_file_sha256="2" * 64,
+            source_file_size=1,
+            duplicate_policy="new",
+            period="2025-12",
+            branch_code="5491",
+        )
+
+        self.assertEqual(len(store.list_all_batches()), 2)
+        self.assertEqual(len(store.list_batches()), 1)
+        self.assertEqual(store.query_credit_limits(page_size=20).total_rows, 1)
+
+    def test_credit_limit_same_period_offers_overwrite(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20251231.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20251231_v2.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2025-12", warn_days=30, reference_date=date(2024, 1, 20))
+
+        prepared = Ln01ImportCoordinator(self.repository).prepare_import(
+            second_path,
+            period="2025-12",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        self.assertTrue(prepared.context.resolution.requires_confirmation)
+        self.assertIn(Ln01DuplicateDecision.OVERWRITE_BOTH, prepared.context.resolution.allowed_decisions)
+        self.assertIn(Ln01DuplicateDecision.OVERWRITE_CREDIT, prepared.context.resolution.allowed_decisions)
+
+    def test_credit_limit_overwrite_does_not_create_duplicate_active_batch(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20251231.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20251231_v2.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2025-12", warn_days=30, reference_date=date(2024, 1, 20))
+
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2025-12",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.OVERWRITE_BOTH,
+        )
+
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+
+    def test_credit_limit_overwrite_archives_previous_version(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20251231.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20251231_v2.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2025-12", warn_days=30, reference_date=date(2024, 1, 20))
+
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2025-12",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.OVERWRITE_BOTH,
+        )
+
+        history_files = list((self.database_path.parent / "HMHETHAN" / "History").glob("*.xlsx"))
+        self.assertEqual(len(history_files), 1)
+
+    def test_credit_limit_legacy_batch_period_migration(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+        workbook = load_workbook(batch.file_path)
+        try:
+            sheet = workbook[META_SHEET_NAME]
+            for row in sheet.iter_rows(min_row=2, max_col=2):
+                if row[0].value == "period":
+                    row[1].value = ""
+                if row[0].value == "branch_code":
+                    row[1].value = ""
+            workbook.save(batch.file_path)
+        finally:
+            workbook.close()
+        self.repository.credit_limit_store.invalidate_cache()
+
+        migrated = self.repository.list_credit_limit_batches()[0]
+
+        self.assertEqual(migrated.period, "2025-12")
+        self.assertEqual(migrated.branch_code, "5491")
+
+    def test_credit_limit_period_matches_credit_database_period(self) -> None:
+        path = self._write_ln01_file("5491_ln01_20251231.csv")
+
+        import_credit_limit_file(self.repository, path, warn_days=30, reference_date=date(2024, 1, 20))
+
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            row = connection.execute(
+                "SELECT period FROM credit_import_runs WHERE source_type = 'LN01'"
+            ).fetchone()
+        self.assertEqual(row["period"], "2025-12")
+
+    def test_report_total_balance_includes_card_and_card_is_short_term(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        report_repository = CreditReportRepository(self.database_path)
+        card_row = NormalizedLoanRow(
+            period="2026-04",
+            source_file="5491_FTPLN_20260430.csv",
+            source_row_number=2,
+            branch_code="5491",
+            trctcd="00",
+            transaction_office="Hoi so",
+            customer_sequence="0001",
+            customer_code="54910001",
+            customer_name="Khach 0001",
+            customer_type="CN",
+            ftp_code="DN15",
+            balance=25,
+            ftp=0,
+            interest_rate=0,
+            ftp_adjustment=0,
+            officer_code="CB01",
+            officer_name="Nguyen Van A",
+            debt_group_code="01",
+            debt_group_number=1,
+            debt_group_category="NORMAL",
+            has_valid_debt_group=True,
+        )
+        report_repository.save_credit_card_projection(
+            period="2026-04",
+            file_name="5491_FTPLN_20260430.csv",
+            source_sha256="card-sha",
+            source_file_size=100,
+            source_row_count=1,
+            rows=[card_row],
+        )
+
+        summary = report_repository.overall_summary(CreditReportFilters(period="2026-04"))
+        self.assertEqual(summary["ln01_total_balance"], 650)
+        self.assertEqual(summary["credit_card_balance"], 25)
+        self.assertEqual(summary["total_balance"], 675)
+        term_rows = report_repository.term_structure_rows(CreditReportFilters(period="2026-04"))
+        short = next(row for row in term_rows if row["Loại thời hạn"] == "Ngắn hạn")
+        self.assertEqual(short["Dư nợ thẻ"], 25)
+        self.assertEqual(short["Tổng dư nợ"], 175)
+
+    def test_report_customer_count_distinct_and_excludes_zero_balance(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        summary = CreditReportRepository(self.database_path).overall_summary(CreditReportFilters(period="2026-04"))
+        self.assertEqual(summary["customer_count"], 3)
+
+    def test_report_customer_type_rules_and_ratios(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        rows = repository.customer_type_rows(CreditReportFilters(period="2026-04"))
+        by_label = {row["Loại khách hàng"]: row for row in rows}
+        self.assertEqual(by_label["Cá nhân"]["Tổng dư nợ"], 450)
+        self.assertEqual(by_label["Pháp nhân"]["Tổng dư nợ"], 200)
+        repository.save_personal_type_rule("999")
+        rows = repository.customer_type_rows(CreditReportFilters(period="2026-04"))
+        by_label = {row["Loại khách hàng"]: row for row in rows}
+        self.assertEqual(by_label["Cá nhân"]["Tổng dư nợ"], 650)
+
+    def test_report_debt_group_decree55_and_industry_rules(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        debt_rows = {row["Nhóm nợ"]: row for row in repository.debt_group_rows(CreditReportFilters(period="2026-04"))}
+        self.assertEqual(debt_rows["Nợ nhóm 1"]["Tổng dư nợ"], 150)
+        self.assertEqual(debt_rows["Nợ nhóm 2 - Nợ cần chú ý"]["Tổng dư nợ"], 200)
+        self.assertEqual(debt_rows["Nợ nhóm 3-5 - Nợ xấu"]["Tổng dư nợ"], 300)
+        decree55 = repository.decree55_rows(CreditReportFilters(period="2026-04"))[0]
+        self.assertEqual(decree55["Tổng dư nợ"], 450)
+        industry = {row["Nhóm ngành"]: row for row in repository.industry_rows(CreditReportFilters(period="2026-04"))}
+        self.assertEqual(industry["Cho vay ứng dụng công nghệ cao"]["Tổng dư nợ"], 150)
+        self.assertEqual(industry["Cho vay bán buôn, bán lẻ"]["Tổng dư nợ"], 200)
+        self.assertEqual(industry["Cho vay bất động sản"]["Tổng dư nợ"], 300)
+
+    def test_report_classification_helpers(self) -> None:
+        self.assertEqual(classify_term_from_account("211001"), "SHORT")
+        self.assertEqual(classify_term_from_account("212001"), "MEDIUM")
+        self.assertEqual(classify_term_from_account("251001"), "MEDIUM")
+        self.assertEqual(classify_term_from_account("213001"), "LONG")
+        self.assertEqual(classify_term_from_account("252001"), "LONG")
+        self.assertEqual(classify_term_from_account("999001"), "UNKNOWN")
+        self.assertEqual(classify_industry("10104"), "HIGH_TECH")
+        self.assertEqual(classify_industry("100101"), "WHOLESALE_RETAIL")
+        self.assertEqual(classify_industry("101301"), "WHOLESALE_RETAIL")
+        self.assertEqual(classify_industry("1001"), "OTHER")
+        self.assertEqual(classify_industry("812345"), "REAL_ESTATE")
+        self.assertEqual(classify_industry("240117"), "REAL_ESTATE")
+
+    def test_report_compare_summary_between_selected_periods(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260331.csv", scale=0.5)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        import_credit_limit_file(
+            self.repository,
+            first_path,
+            period="2026-03",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        filters = CreditReportFilters(from_period="2026-03", to_period="2026-04")
+        from_snapshot = get_report_snapshot(repository, "2026-03", filters)
+        to_snapshot = get_report_snapshot(repository, "2026-04", filters)
+        result = compare_report_snapshots(from_snapshot, to_snapshot, GROUP_SUMMARY)
+        rows = {row.get("Chỉ tiêu"): row for row in result.rows}
+        self.assertEqual(rows["Tổng dư nợ"].get("Giá trị Từ kỳ"), 325)
+        self.assertEqual(rows["Tổng dư nợ"].get("Giá trị Đến kỳ"), 650)
+        self.assertEqual(rows["Tổng dư nợ"].get("Tăng/giảm tuyệt đối"), 325)
+        self.assertEqual(rows["Tổng dư nợ"].get("Tăng trưởng (%)"), 100)
+
+    def test_report_compare_same_period(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        filters = CreditReportFilters(from_period="2026-04", to_period="2026-04")
+        snapshot = get_report_snapshot(repository, "2026-04", filters)
+        result = compare_report_snapshots(snapshot, snapshot, GROUP_SUMMARY)
+        rows = {row.get("Chỉ tiêu"): row for row in result.rows}
+        self.assertEqual(rows["Tổng dư nợ"].get("Tăng/giảm tuyệt đối"), 0)
+        self.assertEqual(rows["Tổng dư nợ"].get("Tăng trưởng (%)"), 0)
+        self.assertIn("Từ kỳ và Đến kỳ đang giống nhau.", result.notes)
+
+    def test_report_export_current_mode_sheets(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        output = self.root / "report.xlsx"
+        CreditReportRepository(self.database_path).export_workbook(
+            output,
+            filters=CreditReportFilters(period="2026-04", from_period="2026-04", to_period="2026-04"),
+            view_mode=VIEW_CURRENT_PERIOD,
+        )
+        workbook = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(
+                workbook.sheetnames,
+                [
+                    "TongHop",
+                    "CoCauThoiHan",
+                    "LoaiHinhKhachHang",
+                    "ChatLuongTinDung",
+                    "NghiDinh55",
+                    "NganhKinhTe",
+                    "ThongTin",
+                ],
+            )
+        finally:
+            workbook.close()
+
+    def test_report_export_compare_mode_sheets(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260331.csv", scale=0.5)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        import_credit_limit_file(
+            self.repository,
+            first_path,
+            period="2026-03",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        output = self.root / "report_compare.xlsx"
+        CreditReportRepository(self.database_path).export_workbook(
+            output,
+            filters=CreditReportFilters(from_period="2026-03", to_period="2026-04"),
+            view_mode=VIEW_COMPARE_PERIODS,
+        )
+        workbook = load_workbook(output, data_only=True)
+        try:
+            self.assertEqual(
+                workbook.sheetnames,
+                [
+                    "SoSanhTongHop",
+                    "SoSanhCoCauThoiHan",
+                    "SoSanhLoaiHinhKH",
+                    "SoSanhChatLuongTinDung",
+                    "SoSanhNghiDinh55",
+                    "SoSanhNganhKinhTe",
+                    "ThongTin",
+                ],
+            )
+            self.assertNotIn("ChatLuongDuNo", workbook.sheetnames)
+        finally:
+            workbook.close()
+
+    def test_credit_delete_period_removes_period_rows_and_import_metadata(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        result = repository.delete_report_period("2026-04")
+        self.assertEqual(result["loan_rows"], 4)
+        self.assertEqual(result["runs"], 1)
+        self.assertEqual(result["files"], 1)
+        with closing(repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_card_period").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_files").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_customer_master").fetchone()[0], 0)
+
+    def test_credit_delete_period_keeps_other_periods_and_referenced_customers(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260331.csv", scale=0.5)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        import_credit_limit_file(self.repository, first_path, period="2026-03", warn_days=30, reference_date=date(2024, 1, 20))
+        import_credit_limit_file(self.repository, second_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        repository = CreditReportRepository(self.database_path)
+        repository.delete_report_period("2026-03")
+        with closing(repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-03'").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertGreater(connection.execute("SELECT COUNT(*) FROM credit_customer_master").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-03'").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04'").fetchone()[0], 1)
+
+    def test_credit_delete_period_transaction_rollback(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        with patch.object(repository, "_delete_orphan_customers", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                repository.delete_report_period("2026-04")
+        with closing(repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04'").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_files WHERE period = '2026-04'").fetchone()[0], 1)
+
+    def test_credit_delete_period_does_not_delete_hmhethan_or_nim_data(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        self._write_nim_dn_file("5491_FTPLN_20260430.csv", ["5491,2,10,1,CB1,00,1000,,CN"])
+        import_nim_dn(self.repository, self.root)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        CreditReportRepository(self.database_path).delete_report_period("2026-04")
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        self.assertEqual(self._count_nim_rows(SummaryDataType.NIM_DN, "2026-04"), 1)
+
+    def test_credit_diagnostics_reports_freelist_and_reclaimable_size(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        repository.delete_report_period("2026-04")
+        diagnostics = repository.diagnostics()
+        self.assertIn("freelist_count", diagnostics)
+        self.assertEqual(diagnostics["reclaimable_bytes"], diagnostics["freelist_count"] * diagnostics["page_size"])
+        self.assertEqual(diagnostics["tables"]["credit_loan_period"], 0)
+        self.assertEqual(diagnostics["tables"]["credit_customer_master"], 0)
+
+    def test_credit_compact_database_creates_backup_and_preserves_schema_rules(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        repository = CreditReportRepository(self.database_path)
+        repository.delete_report_period("2026-04")
+        result = repository.compact_database(backup_directory=self.root / "backup")
+        self.assertTrue(result["vacuum"])
+        self.assertTrue(Path(result["backup_path"]).is_file())
+        self.assertEqual(result["integrity_check"], "ok")
+        with closing(repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_schema_migrations").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_customer_type_rules").fetchone()[0], 2)
+
+    def test_credit_same_period_overwrite_no_duplicate_loans_or_customers(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430_v2.csv", scale=2.0)
+        import_credit_limit_file(
+            self.repository,
+            first_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_policy="new",
+            overwrite_report_period=True,
+        )
+        repository = CreditReportRepository(self.database_path)
+        with closing(repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_customer_master").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT SUM(outstanding_balance) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 1300)
+            row = connection.execute(
+                "SELECT source_row_count FROM credit_loan_period WHERE period = '2026-04' AND account_number = '211001'"
+            ).fetchone()
+            self.assertEqual(row[0], 2)
+
+    def test_ln01_no_hmhethan_no_credit_creates_both(self) -> None:
+        path = self._write_report_ln01_file()
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+        )
+
+        self.assertEqual(result.row_count, 0)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04'").fetchone()[0], 1)
+
+    def test_ln01_existing_hmhethan_missing_credit_allows_recreate(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        CreditReportRepository(self.database_path).delete_report_period("2026-04")
+
+        result = import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertIn("Đã tạo lại dữ liệu báo cáo kỳ 2026-04", result.message)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()[0], 1)
+
+    def test_ln01_existing_hmhethan_missing_credit_reuses_batch(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        original_batch = self.repository.list_credit_limit_batches()[0]
+        original_path = original_batch.file_path
+        original_hash = hashlib.sha256(original_path.read_bytes()).hexdigest()
+        CreditReportRepository(self.database_path).delete_report_period("2026-04")
+
+        result = import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        batch = self.repository.list_credit_limit_batches()[0]
+        self.assertEqual(batch.file_path, original_path)
+        self.assertEqual(batch.batch_id, original_batch.batch_id)
+        self.assertEqual(hashlib.sha256(batch.file_path.read_bytes()).hexdigest(), original_hash)
+        self.assertEqual(result.batch_id, original_batch.batch_id)
+
+    def test_ln01_existing_hmhethan_missing_credit_does_not_create_duplicate_excel(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        CreditReportRepository(self.database_path).delete_report_period("2026-04")
+
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        files = list((self.database_path.parent / "HMHETHAN").glob("*.xlsx"))
+        self.assertEqual(len(files), 1)
+
+    def test_ln01_existing_hmhethan_existing_credit_offers_overwrite(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        coordinator = Ln01ImportCoordinator(self.repository)
+
+        prepared = coordinator.prepare_import(path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertTrue(prepared.context.resolution.requires_confirmation)
+        self.assertEqual(prepared.context.resolution.default_decision, Ln01DuplicateDecision.OVERWRITE_CREDIT)
+        self.assertIn(Ln01DuplicateDecision.OVERWRITE_BOTH, prepared.context.resolution.allowed_decisions)
+
+    def test_ln01_overwrite_credit_keeps_hmhethan_file(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+        mtime = batch.file_path.stat().st_mtime_ns
+        digest = hashlib.sha256(batch.file_path.read_bytes()).hexdigest()
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.OVERWRITE_CREDIT,
+        )
+
+        self.assertIn("Batch Hạn mức hiện có không bị thay đổi", result.message)
+        self.assertEqual(batch.file_path.stat().st_mtime_ns, mtime)
+        self.assertEqual(hashlib.sha256(batch.file_path.read_bytes()).hexdigest(), digest)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()[0], 1)
+
+    def test_ln01_overwrite_both_replaces_hmhethan_atomically(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+        os.utime(batch.file_path, (1_700_000_000, 1_700_000_000))
+        old_mtime = batch.file_path.stat().st_mtime_ns
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.OVERWRITE_BOTH,
+        )
+
+        self.assertIn("Đã ghi đè dữ liệu báo cáo và batch Hạn mức kỳ 2026-04", result.message)
+        replacement = self.repository.list_credit_limit_batches()[0]
+        self.assertEqual(replacement.file_path, batch.file_path)
+        self.assertNotEqual(replacement.file_path.stat().st_mtime_ns, old_mtime)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            row = connection.execute("SELECT action FROM credit_action_log ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["action"], "OVERWRITE_BOTH")
+
+    def test_ln01_missing_hmhethan_existing_credit_can_create_batch_only(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+        self.repository.delete_credit_limit_batch(batch.batch_id)
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.CREATE_HMHE_THAN_ONLY,
+        )
+
+        self.assertIn("Dữ liệu Credit.db không thay đổi", result.message)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()[0], 1)
+            row = connection.execute("SELECT action FROM credit_action_log ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(row["action"], "CREATE_HMHEthan_ONLY")
+
+    def test_ln01_same_period_different_sha_requires_confirmation(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430_v2.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        with self.assertRaisesRegex(SummaryError, "file LN01 khác|Cần xác nhận"):
+            import_credit_limit_file(self.repository, second_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT SUM(outstanding_balance) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 650)
+
+    def test_ln01_cancel_changes_nothing(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        before_batches = len(self.repository.list_credit_limit_batches())
+
+        result = import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.CANCEL,
+        )
+
+        self.assertEqual(result.row_count, 0)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), before_batches)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+
+    def test_replace_ln01_period_preserves_credit_card_rows(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        card_rows = [
+            NormalizedLoanRow(
+                period="2026-04",
+                source_file="5491_FTPLN_20260430.csv",
+                source_row_number=2,
+                branch_code="5491",
+                trctcd="00",
+                transaction_office="Hoi so",
+                customer_sequence="0001",
+                customer_code="54910001",
+                customer_name="Khach 0001",
+                customer_type="CN",
+                ftp_code="DN15",
+                balance=25,
+                ftp=0,
+                interest_rate=0,
+                ftp_adjustment=0,
+                officer_code="CB01",
+                officer_name="Nguyen Van A",
+                debt_group_code="01",
+                debt_group_number=1,
+                debt_group_category="NORMAL",
+                has_valid_debt_group=True,
+            ),
+            NormalizedLoanRow(
+                period="2026-04",
+                source_file="5491_FTPLN_20260430.csv",
+                source_row_number=3,
+                branch_code="5491",
+                trctcd="00",
+                transaction_office="Hoi so",
+                customer_sequence="0099",
+                customer_code="54910099",
+                customer_name="Card Only",
+                customer_type="CN",
+                ftp_code="DN15",
+                balance=75,
+                ftp=0,
+                interest_rate=0,
+                ftp_adjustment=0,
+                officer_code="CB99",
+                officer_name="Card Officer",
+                debt_group_code="01",
+                debt_group_number=1,
+                debt_group_category="NORMAL",
+                has_valid_debt_group=True,
+            ),
+        ]
+        report_repository = CreditReportRepository(self.database_path)
+        report_repository.save_credit_card_projection(
+            period="2026-04",
+            file_name="5491_FTPLN_20260430.csv",
+            source_sha256="card-sha",
+            source_file_size=100,
+            source_row_count=2,
+            rows=card_rows,
+        )
+
+        import_credit_limit_file(
+            self.repository,
+            path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.OVERWRITE_CREDIT,
+        )
+
+        summary = report_repository.overall_summary(CreditReportFilters(period="2026-04"))
+        self.assertEqual(summary["ln01_total_balance"], 650)
+        self.assertEqual(summary["credit_card_balance"], 100)
+        self.assertEqual(summary["total_balance"], 750)
+        with closing(report_repository.connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_card_period WHERE period = '2026-04'").fetchone()[0], 2)
+            self.assertIsNotNone(
+                connection.execute(
+                    "SELECT 1 FROM credit_customer_master WHERE customer_code = '54910099'"
+                ).fetchone()
+            )
+
+    def test_replace_ln01_period_does_not_append_and_updates_metadata(self) -> None:
+        first_path = self._write_report_ln01_file("5491_ln01_20260430.csv", scale=1.0)
+        second_path = self._write_report_ln01_file("5491_ln01_20260430_v2.csv", scale=2.0)
+        import_credit_limit_file(self.repository, first_path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        import_credit_limit_file(
+            self.repository,
+            second_path,
+            period="2026-04",
+            warn_days=30,
+            reference_date=date(2024, 1, 20),
+            duplicate_decision=Ln01DuplicateDecision.CREATE_BOTH,
+        )
+
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 4)
+            self.assertEqual(connection.execute("SELECT SUM(outstanding_balance) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 1300)
+            row = connection.execute("SELECT source_file_name FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()
+        self.assertEqual(row["source_file_name"], second_path.name)
+
+    def test_overwrite_both_failure_restores_old_batch(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        batch = self.repository.list_credit_limit_batches()[0]
+        original_hash = hashlib.sha256(batch.file_path.read_bytes()).hexdigest()
+
+        with patch.object(CreditReportRepository, "log_ln01_import_action", side_effect=RuntimeError("boom")):
+            with self.assertRaises(SummaryError):
+                import_credit_limit_file(
+                    self.repository,
+                    path,
+                    period="2026-04",
+                    warn_days=30,
+                    reference_date=date(2024, 1, 20),
+                    duplicate_decision=Ln01DuplicateDecision.OVERWRITE_BOTH,
+                )
+
+        self.assertEqual(hashlib.sha256(batch.file_path.read_bytes()).hexdigest(), original_hash)
+        with closing(CreditReportRepository(self.database_path).connect()) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM credit_import_runs WHERE period = '2026-04' AND source_type = 'LN01'").fetchone()[0], 1)
+            self.assertEqual(connection.execute("SELECT SUM(outstanding_balance) FROM credit_loan_period WHERE period = '2026-04'").fetchone()[0], 650)
+
+    def test_duplicate_dialog_has_explicit_actions(self) -> None:
+        path = self._write_report_ln01_file()
+        import_credit_limit_file(self.repository, path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+        prepared = Ln01ImportCoordinator(self.repository).prepare_import(path, period="2026-04", warn_days=30, reference_date=date(2024, 1, 20))
+
+        actions = _dialog_actions(prepared.context)
+        labels = [item[0] for item in actions]
+        decisions = [item[1] for item in actions]
+
+        self.assertIn("Ghi đè dữ liệu kỳ báo cáo", labels)
+        self.assertIn("Ghi đè cả dữ liệu kỳ và batch Hạn mức", labels)
+        self.assertIn(Ln01DuplicateDecision.OVERWRITE_CREDIT, decisions)
+        self.assertIn(Ln01DuplicateDecision.OVERWRITE_BOTH, decisions)
+        self.assertIn(Ln01DuplicateDecision.CANCEL, decisions)
+
+    def test_import_from_credit_limit_uses_same_duplicate_logic(self) -> None:
+        names = self._code_names(CreditLimitTab.import_file)
+        self.assertIn("prepare_import", names)
+        self.assertIn("execute_prepared_import", names)
+
+    def test_import_from_report_summary_uses_same_duplicate_logic(self) -> None:
+        names = self._code_names(ReportSummaryWindow.import_ln01)
+        self.assertIn("prepare_import", names)
+        self.assertIn("execute_prepared_import", names)
+
+    def _code_names(self, function: object) -> set[str]:
+        code = function.__code__
+        names = set(code.co_names)
+        for item in code.co_consts:
+            if hasattr(item, "co_names"):
+                names.update(item.co_names)
+        return names
 
     def _sample_credit_limit_row(self) -> CreditLimitRow:
         return CreditLimitRow(
@@ -220,6 +2147,9 @@ class CreditSummaryTests(unittest.TestCase):
         self.assertGreaterEqual(button.minimumHeight(), required)
         self.assertGreaterEqual(max(button.sizeHint().height(), button.minimumHeight()), required)
         self.assertEqual(button.maximumHeight(), 16777215)
+
+    def _assert_button_width_fits(self, button: QPushButton) -> None:
+        self.assertGreaterEqual(max(button.minimumWidth(), button.sizeHint().width()), recommended_button_width(button))
 
     def _nim_combo_with_long_officer(self) -> QComboBox:
         tab = NimTab(self.repository, SummaryDataType.NIM_DN)
@@ -558,6 +2488,192 @@ class CreditSummaryTests(unittest.TestCase):
         finally:
             for tab in tabs:
                 tab.deleteLater()
+
+    def test_nim_dn_toolbar_has_no_customer_data_button(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        button_texts = [button.text() for button in tab.findChildren(QPushButton) if button.text()]
+        self.assertNotIn("Dữ liệu khách hàng", button_texts)
+
+    def test_nim_dn_toolbar_has_no_debt_group_analysis_button(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        button_texts = [button.text() for button in tab.findChildren(QPushButton) if button.text()]
+        self.assertNotIn("Phân tích nhóm nợ", button_texts)
+
+    def test_nim_dn_dashboard_button_still_exists(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        button_texts = [button.text() for button in tab.findChildren(QPushButton) if button.text()]
+        self.assertIn("Mở Dashboard", button_texts)
+
+    def test_nim_dn_remaining_buttons_have_visible_text(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        for button in [button for button in tab.findChildren(QPushButton) if button.text()]:
+            self.assertGreaterEqual(max(button.sizeHint().width(), button.minimumWidth()), button.fontMetrics().horizontalAdvance(button.text()) + 18)
+
+    def test_nim_nv_toolbar_unchanged(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_NV)
+        self.addCleanup(tab.deleteLater)
+        button_texts = {button.text() for button in tab.findChildren(QPushButton) if button.text()}
+        self.assertTrue(
+            {
+                "Import thư mục",
+                "Xuất",
+                "Làm mới",
+                "Sao lưu",
+                "Khôi phục",
+                "Bảo trì dữ liệu",
+                "Xóa kỳ dữ liệu",
+                "Mở Dashboard",
+            }.issubset(button_texts)
+        )
+        self.assertNotIn("Dữ liệu khách hàng", button_texts)
+        self.assertNotIn("Phân tích nhóm nợ", button_texts)
+
+    def test_nim_dashboard_apply_button_text_visible(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            self._assert_button_width_fits(window.apply_button)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_dashboard_clear_button_text_visible(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            self._assert_button_width_fits(window.clear_button)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_dashboard_export_button_text_visible(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            self._assert_button_width_fits(window.export_all_button)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_dashboard_close_button_text_visible(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            self._assert_button_width_fits(window.close_button)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_dashboard_toolbar_wraps(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            toolbar = window.findChild(QWidget, "NimDashboardToolbar")
+            self.assertIsNotNone(toolbar)
+            layout = toolbar.layout()
+            self.assertTrue(layout.hasHeightForWidth())
+            self.assertGreater(layout.heightForWidth(520), layout.heightForWidth(1600))
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_dashboard_has_no_horizontal_scroll(self) -> None:
+        window = NimDashboardWindow(self.repository, SummaryDataType.NIM_DN)
+        try:
+            toolbar = window.findChild(QWidget, "NimDashboardToolbar")
+            self.assertIsNotNone(toolbar)
+            self.assertEqual(toolbar.findChildren(QScrollArea), [])
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_nim_source_toolbar_buttons_visible(self) -> None:
+        for data_type in (SummaryDataType.NIM_DN, SummaryDataType.NIM_NV):
+            tab = NimTab(self.repository, data_type)
+            try:
+                for button in [button for button in tab.findChildren(QPushButton) if button.text()]:
+                    self._assert_button_width_fits(button)
+            finally:
+                tab.deleteLater()
+
+    def test_nim_source_toolbar_wraps(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_NV)
+        try:
+            action_area = tab.findChild(QWidget, "SummaryDataActionArea")
+            self.assertIsNotNone(action_area)
+            layout = action_area.layout()
+            self.assertTrue(layout.hasHeightForWidth())
+            self.assertGreater(layout.heightForWidth(360), layout.heightForWidth(1800))
+        finally:
+            tab.deleteLater()
+
+    def test_nim_dn_removed_duplicate_buttons_stay_removed(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        try:
+            button_texts = [button.text() for button in tab.findChildren(QPushButton) if button.text()]
+            self.assertNotIn("Dữ liệu khách hàng", button_texts)
+            self.assertNotIn("Phân tích nhóm nợ", button_texts)
+            self.assertIn("Mở Dashboard", button_texts)
+        finally:
+            tab.deleteLater()
+
+    def test_nim_nv_toolbar_business_actions_unchanged(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_NV)
+        try:
+            button_texts = {button.text() for button in tab.findChildren(QPushButton) if button.text()}
+            self.assertTrue(
+                {
+                    "Import thư mục",
+                    "Xuất",
+                    "Làm mới",
+                    "Sao lưu",
+                    "Khôi phục",
+                    "Bảo trì dữ liệu",
+                    "Xóa kỳ dữ liệu",
+                    "Mở Dashboard",
+                }.issubset(button_texts)
+            )
+            self.assertNotIn("Dữ liệu khách hàng", button_texts)
+            self.assertNotIn("Phân tích nhóm nợ", button_texts)
+        finally:
+            tab.deleteLater()
+
+    def test_action_button_size_uses_font_metrics(self) -> None:
+        buttons = [
+            primary_button("Áp dụng"),
+            secondary_button("Xóa lọc"),
+            secondary_button("Xuất toàn bộ"),
+            secondary_button("Khôi phục"),
+        ]
+        try:
+            for button in buttons:
+                self._assert_button_width_fits(button)
+        finally:
+            for button in buttons:
+                button.deleteLater()
+
+    def test_action_button_descenders_not_clipped(self) -> None:
+        buttons = [
+            primary_button("Áp dụng"),
+            secondary_button("Phòng giao dịch"),
+            secondary_button("Khôi phục"),
+            secondary_button("Đóng"),
+        ]
+        try:
+            for button in buttons:
+                self.assertGreaterEqual(button.minimumHeight(), recommended_control_height(button))
+                self.assertGreaterEqual(max(button.sizeHint().height(), button.minimumHeight()), recommended_control_height(button))
+        finally:
+            for button in buttons:
+                button.deleteLater()
+
+    def test_summary_data_action_toolbar_wraps_when_narrow(self) -> None:
+        tab = NimTab(self.repository, SummaryDataType.NIM_DN)
+        self.addCleanup(tab.deleteLater)
+        action_area = tab.findChild(QWidget, "SummaryDataActionArea")
+        self.assertIsNotNone(action_area)
+        flow = action_area.layout()
+        self.assertTrue(flow.hasHeightForWidth())
+        self.assertGreaterEqual(flow.heightForWidth(360), flow.heightForWidth(1800))
 
     def test_summary_comboboxes_use_shared_style(self) -> None:
         app = QApplication.instance() or QApplication([])
@@ -3452,7 +5568,7 @@ class CreditSummaryTests(unittest.TestCase):
         self.assertEqual(march_rows["HD02"]["status"], "Đã hết hạn")
         self.assertNotIn("HD03", march_rows)
 
-    def test_credit_limit_duplicate_detection_blocks_same_ln01_by_default(self) -> None:
+    def test_credit_limit_duplicate_detection_requires_confirmation_by_default(self) -> None:
         path = self._write_ln01_file()
         import_credit_limit_file(
             self.repository,
@@ -3476,7 +5592,7 @@ class CreditSummaryTests(unittest.TestCase):
             duplicate_policy="new",
         )
 
-        self.assertEqual(len(self.repository.list_credit_limit_batches()), 2)
+        self.assertEqual(len(self.repository.list_credit_limit_batches()), 1)
 
     def test_credit_limit_query_no_data_returns_empty_page(self) -> None:
         result = self.repository.query_credit_limits(page_size=20)

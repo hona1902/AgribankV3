@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 from agribank_v3.ui.icons import app_icon
 from agribank_v3.ui.main_window import MainWindow
 from agribank_v3.ui.styles import APP_STYLESHEET
+from agribank_v3.user_databases import ensure_user_databases
 
 
 def _set_windows_app_id() -> None:
@@ -39,6 +40,7 @@ def create_application() -> QApplication:
 
 def main() -> int:
     app = create_application()
+    ensure_user_databases(strict=False)
     window = MainWindow()
     window.show()
     return app.exec()

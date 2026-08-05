@@ -5,11 +5,14 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QGridLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QProgressBar,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QDialog,
@@ -33,15 +36,17 @@ class CustomerMaintenanceDialog(QDialog):
         self.last_result: dict[str, object] = {}
         self._worker_thread = None
         self._action_buttons: list[QWidget] = []
+        self._database_path_text = ""
         self.setWindowTitle("Bảo trì dữ liệu khách hàng - AgribankV3")
         self.setModal(False)
+        self.setSizeGripEnabled(True)
         fit_window_to_screen(
             self,
-            width_ratio=0.58,
+            width_ratio=0.62,
             height_ratio=0.70,
-            max_width=820,
+            max_width=900,
             max_height=720,
-            min_width=620,
+            min_width=700,
             min_height=520,
         )
         self._build_ui()
@@ -75,54 +80,73 @@ class CustomerMaintenanceDialog(QDialog):
             ("reclaimable_bytes", "Dung lượng có khả năng thu hồi"),
             ("last_optimized_at", "Thời điểm tối ưu gần nhất"),
         )
-        for row, (key, label_text) in enumerate(labels):
+        for index, (key, label_text) in enumerate(labels):
+            row = index // 2
+            column = 0 if index % 2 == 0 else 2
             label = QLabel(label_text)
             value = QLabel("")
-            value.setTextInteractionFlags(value.textInteractionFlags() | Qt.TextInteractionFlag.TextSelectableByMouse)
-            value.setWordWrap(True)
-            self.status_grid.addWidget(label, row, 0)
-            self.status_grid.addWidget(value, row, 1)
+            value.setTextInteractionFlags(
+                value.textInteractionFlags()
+                | Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
+            value.setWordWrap(False)
+            value.setMinimumWidth(90)
+            value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            self.status_grid.addWidget(label, row, column)
+            self.status_grid.addWidget(value, row, column + 1)
             self.status_labels[key] = value
+            if key == "database_path":
+                self.database_path_label = value
+                value.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                value.customContextMenuRequested.connect(self._show_database_path_menu)
         self.status_grid.setColumnStretch(1, 1)
+        self.status_grid.setColumnStretch(3, 1)
         layout.addLayout(self.status_grid)
 
         self.result_box = QTextEdit()
         self.result_box.setReadOnly(True)
-        self.result_box.setMaximumHeight(120)
+        self.result_box.setMinimumHeight(140)
+        self.result_box.setMaximumHeight(16777215)
+        self.result_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.result_box.setPlaceholderText("Kết quả kiểm tra/tối ưu sẽ hiển thị tại đây.")
-        layout.addWidget(self.result_box)
+        layout.addWidget(self.result_box, stretch=1)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
 
-        toolbar = CompactToolbar()
-        check_button = secondary_button("Kiểm tra cơ sở dữ liệu")
-        optimize_button = secondary_button("Tối ưu nhanh")
-        vacuum_button = secondary_button("Thu hồi dung lượng")
-        backup_button = secondary_button("Sao lưu")
-        restore_button = secondary_button("Khôi phục")
-        folder_button = secondary_button("Mở thư mục database")
-        close_button = primary_button("Đóng")
-        check_button.clicked.connect(self.quick_check)
-        optimize_button.clicked.connect(self.optimize_quick)
-        vacuum_button.clicked.connect(self.vacuum_database)
-        backup_button.clicked.connect(self.backup_database)
-        restore_button.clicked.connect(self.restore_database)
-        folder_button.clicked.connect(self.open_database_folder)
-        close_button.clicked.connect(self.accept)
-        for button in (
-            check_button,
-            optimize_button,
-            vacuum_button,
-            backup_button,
-            restore_button,
-            folder_button,
-            close_button,
-        ):
-            toolbar.addWidget(button)
-        self._action_buttons = [check_button, optimize_button, vacuum_button, backup_button, restore_button]
-        layout.addWidget(toolbar)
+        self.primary_toolbar = CompactToolbar()
+        self.primary_toolbar.setObjectName("CustomerMaintenancePrimaryToolbar")
+        self.file_toolbar = CompactToolbar()
+        self.file_toolbar.setObjectName("CustomerMaintenanceFileToolbar")
+        self.check_button = secondary_button("Kiểm tra cơ sở dữ liệu")
+        self.optimize_button = secondary_button("Tối ưu nhanh")
+        self.vacuum_button = secondary_button("Thu hồi dung lượng")
+        self.backup_button = secondary_button("Sao lưu")
+        self.restore_button = secondary_button("Khôi phục")
+        self.folder_button = secondary_button("Mở thư mục database")
+        self.close_button = primary_button("Đóng")
+        self.check_button.clicked.connect(self.quick_check)
+        self.optimize_button.clicked.connect(self.optimize_quick)
+        self.vacuum_button.clicked.connect(self.vacuum_database)
+        self.backup_button.clicked.connect(self.backup_database)
+        self.restore_button.clicked.connect(self.restore_database)
+        self.folder_button.clicked.connect(self.open_database_folder)
+        self.close_button.clicked.connect(self.accept)
+        for button in (self.check_button, self.optimize_button, self.vacuum_button):
+            self.primary_toolbar.addWidget(button)
+        for button in (self.backup_button, self.restore_button, self.folder_button, self.close_button):
+            self.file_toolbar.addWidget(button)
+        self._action_buttons = [
+            self.check_button,
+            self.optimize_button,
+            self.vacuum_button,
+            self.backup_button,
+            self.restore_button,
+        ]
+        layout.addWidget(self.primary_toolbar)
+        layout.addWidget(self.file_toolbar)
 
     def reload(self) -> None:
         status = self.repository.maintenance_status()
@@ -146,7 +170,42 @@ class CustomerMaintenanceDialog(QDialog):
             "last_optimized_at": status.last_optimized_at or "Chưa có log",
         }
         for key, value in values.items():
-            self.status_labels[key].setText(value)
+            self._set_status_label(key, value)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_database_path_label()
+
+    def _set_status_label(self, key: str, value: object) -> None:
+        text = str(value or "")
+        label = self.status_labels[key]
+        label.setToolTip(text)
+        if key == "database_path":
+            self._database_path_text = text
+            self._update_database_path_label()
+            return
+        label.setText(text)
+
+    def _update_database_path_label(self) -> None:
+        if not self._database_path_text or not hasattr(self, "database_path_label"):
+            return
+        width = self.database_path_label.width()
+        if width <= 0:
+            width = max(280, min(520, self.width() - 260))
+        self.database_path_label.setText(
+            self.database_path_label.fontMetrics().elidedText(
+                self._database_path_text,
+                Qt.TextElideMode.ElideMiddle,
+                max(180, int(width)),
+            )
+        )
+
+    def _show_database_path_menu(self, position) -> None:
+        menu = QMenu(self)
+        copy_action = menu.addAction("Sao chép đường dẫn đầy đủ")
+        selected = menu.exec(self.database_path_label.mapToGlobal(position))
+        if selected == copy_action:
+            QApplication.clipboard().setText(self._database_path_text)
 
     def quick_check(self) -> None:
         self._run_background(

@@ -190,6 +190,12 @@ class ResponsiveKpiGrid(QWidget):
         self.secondary_toolbar.setVisible(has_secondary)
         self.secondary_container.setVisible(has_secondary and expanded)
         self.toggle_secondary_button.setText("Thu gọn chỉ tiêu" if expanded else "Xem thêm chỉ tiêu")
+        self.toggle_secondary_button.setMinimumWidth(
+            max(
+                self.toggle_secondary_button.minimumWidth(),
+                self.toggle_secondary_button.fontMetrics().horizontalAdvance(self.toggle_secondary_button.text()) + 24,
+            )
+        )
 
     def _relayout_cards(self, *, force: bool = False) -> None:
         width = max(1, self.width())

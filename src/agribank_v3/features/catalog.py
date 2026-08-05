@@ -7,6 +7,7 @@ from agribank_v3.features.credit.summary.models import (
     LOAN_COMPARE_TITLE,
     NIM_DN_TITLE,
     NIM_NV_TITLE,
+    REPORT_DATA_TITLE,
 )
 from agribank_v3.features.credit.summary.customer.routes import (
     CUSTOMER_DATA_DESCRIPTION,
@@ -102,7 +103,7 @@ SECTIONS: dict[str, list[Feature]] = {
         ),
         Feature("Danh sách nợ đến hạn", "Tạo danh sách khoản vay đến hạn.", "m09b.png"),
         Feature("Quản lý CBTD", "Quản lý danh sách cán bộ tín dụng.", "cbtd.svg"),
-        Feature("Sao kê tín dụng", "Tạo sao kê và tổng hợp tín dụng.", "m15A.png"),
+        Feature(REPORT_DATA_TITLE, "Mở nhóm chức năng số liệu báo cáo tín dụng.", "m15A.png"),
     ],
     "Kế toán": [
         Feature("Báo cáo kế toán", "Tạo báo cáo và bảng kê nghiệp vụ.", "qtkt.png"),

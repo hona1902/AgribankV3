@@ -39,6 +39,7 @@ from agribank_v3.features.credit.summary.models import (
     NIM_DN_CONFIG,
     NIM_DN_TITLE,
     NIM_NV_TITLE,
+    REPORT_DATA_TITLE,
     SummaryDataType,
     SummaryError,
 )
@@ -127,6 +128,7 @@ from agribank_v3.features.settings.unit_directory.models import (
     OfficeDirectoryEntry,
     TRANSACTION_OFFICE,
 )
+from agribank_v3.ui.components.controls import recommended_button_width
 from agribank_v3.ui.main_window import MainWindow, ResponsiveFeatureGrid
 
 
@@ -1647,6 +1649,145 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertNotEqual(after, before)
         dialog.close()
 
+    def test_customer_maintenance_resizable(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            self.assertTrue(dialog.isSizeGripEnabled())
+            self.assertLess(dialog.minimumWidth(), dialog.maximumWidth())
+            self.assertLess(dialog.minimumHeight(), dialog.maximumHeight())
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_path_does_not_expand_window(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            path_label = dialog.status_labels["database_path"]
+            self.assertEqual(path_label.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Ignored)
+            self.assertLessEqual(path_label.minimumWidth(), 120)
+            self.assertLessEqual(dialog.minimumWidth(), 700)
+            self.assertIn("Customer.db", path_label.text())
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_path_tooltip(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            path_label = dialog.status_labels["database_path"]
+            self.assertEqual(path_label.toolTip(), str(self.repository.database_path))
+            self.assertIn("Customer.db", path_label.toolTip())
+            self.assertEqual(path_label.contextMenuPolicy(), Qt.ContextMenuPolicy.CustomContextMenu)
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_buttons_wrap(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            dialog.primary_toolbar.resize(420, 90)
+            dialog.file_toolbar.resize(420, 90)
+            app.processEvents()
+            self.assertGreaterEqual(dialog.primary_toolbar.row_count(), 2)
+            self.assertGreaterEqual(dialog.file_toolbar.row_count(), 2)
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_all_actions_visible(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            buttons = {button.text(): button for button in dialog.findChildren(QPushButton) if button.text()}
+            self.assertTrue(
+                {
+                    "Kiểm tra cơ sở dữ liệu",
+                    "Tối ưu nhanh",
+                    "Thu hồi dung lượng",
+                    "Sao lưu",
+                    "Khôi phục",
+                    "Mở thư mục database",
+                    "Đóng",
+                }.issubset(buttons)
+            )
+            for button in buttons.values():
+                self.assertGreaterEqual(max(button.minimumWidth(), button.sizeHint().width()), recommended_button_width(button))
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_close_button_visible(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            dialog.show()
+            app.processEvents()
+            self.assertTrue(dialog.close_button.isVisibleTo(dialog))
+            self.assertGreaterEqual(max(dialog.close_button.minimumWidth(), dialog.close_button.sizeHint().width()), recommended_button_width(dialog.close_button))
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_log_expands(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            self.assertGreaterEqual(dialog.result_box.minimumHeight(), 140)
+            self.assertEqual(dialog.result_box.maximumHeight(), 16777215)
+            self.assertEqual(dialog.result_box.sizePolicy().verticalPolicy(), QSizePolicy.Policy.Expanding)
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_no_horizontal_scroll(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            self.assertEqual(dialog.findChildren(QScrollArea), [])
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_layout_at_125_percent_dpi(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            font = dialog.font()
+            font.setPointSize(max(font.pointSize() + 2, 13))
+            dialog.setFont(font)
+            dialog.resize(760, 560)
+            dialog.show()
+            app.processEvents()
+            for button in dialog.findChildren(QPushButton):
+                if button.text():
+                    self.assertGreaterEqual(max(button.minimumWidth(), button.sizeHint().width()), recommended_button_width(button))
+        finally:
+            dialog.close()
+
+    def test_customer_maintenance_functions_unchanged(self) -> None:
+        app = QApplication.instance() or QApplication([])
+        _ = app
+        dialog = CustomerMaintenanceDialog(self.repository)
+        try:
+            for method_name in (
+                "quick_check",
+                "optimize_quick",
+                "vacuum_database",
+                "backup_database",
+                "restore_database",
+                "open_database_folder",
+                "accept",
+            ):
+                self.assertTrue(callable(getattr(dialog, method_name)))
+            self.assertEqual(
+                [button.text() for button in dialog._action_buttons],
+                ["Kiểm tra cơ sở dữ liệu", "Tối ưu nhanh", "Thu hồi dung lượng", "Sao lưu", "Khôi phục"],
+            )
+        finally:
+            dialog.close()
+
     def test_customer_management_window_is_non_modal(self) -> None:
         app = QApplication.instance() or QApplication([])
         window = CustomerManagementWindow(self.main_database_path)
@@ -1810,28 +1951,28 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertEqual(CUSTOMER_DATA_ROUTE, "credit.customer_data")
 
     def test_credit_menu_has_group_01(self) -> None:
-        self.assertIn("NHÓM 01 – NGHIỆP VỤ TÍN DỤNG", self._credit_group_titles())
+        self.assertIn("NGHIỆP VỤ TÍN DỤNG", self._credit_group_titles())
 
     def test_credit_menu_has_group_02(self) -> None:
-        self.assertIn("NHÓM 02 – PHÂN TÍCH SỐ LIỆU", self._credit_group_titles())
+        self.assertIn("PHÂN TÍCH SỐ LIỆU", self._credit_group_titles())
 
     def test_credit_menu_has_group_03(self) -> None:
-        self.assertIn("NHÓM 03 – QUẢN LÝ", self._credit_group_titles())
+        self.assertIn("QUẢN LÝ", self._credit_group_titles())
 
     def test_group_01_card_order(self) -> None:
         self.assertEqual(
-            self._credit_group("NHÓM 01 – NGHIỆP VỤ TÍN DỤNG"),
+            self._credit_group("NGHIỆP VỤ TÍN DỤNG"),
             [
                 AUTO_INTEREST_TITLE,
                 "Danh sách nợ đến hạn",
                 CREDIT_LIMIT_TITLE,
-                "Sao kê tín dụng",
+                REPORT_DATA_TITLE,
             ],
         )
 
     def test_group_02_card_order(self) -> None:
         self.assertEqual(
-            self._credit_group("NHÓM 02 – PHÂN TÍCH SỐ LIỆU"),
+            self._credit_group("PHÂN TÍCH SỐ LIỆU"),
             [
                 NIM_DN_TITLE,
                 NIM_NV_TITLE,
@@ -1841,7 +1982,7 @@ class CustomerPhaseCTests(unittest.TestCase):
         )
 
     def test_group_03_contains_officer_management(self) -> None:
-        self.assertEqual(self._credit_group("NHÓM 03 – QUẢN LÝ"), [OFFICER_CENTER_TITLE])
+        self.assertEqual(self._credit_group("QUẢN LÝ"), [OFFICER_CENTER_TITLE])
 
     def test_credit_menu_preserves_loan_group_card(self) -> None:
         loan_group = FEATURE_GROUPS["Tín dụng"][0]
@@ -5622,11 +5763,12 @@ class CustomerPhaseCTests(unittest.TestCase):
         self.assertAlmostEqual(nim_before, 5.0)
         self.assertAlmostEqual(nim_after, 4.0)
 
-    def test_nim_dn_tab_has_customer_data_button(self) -> None:
+    def test_nim_dn_tab_has_no_customer_data_or_debt_group_buttons(self) -> None:
         app = QApplication.instance() or QApplication([])
         tab = NimTab(self.summary_repository, SummaryDataType.NIM_DN)
         button_texts = [button.text() for button in tab.findChildren(QPushButton)]
-        self.assertIn("Dữ liệu khách hàng", button_texts)
+        self.assertNotIn("Dữ liệu khách hàng", button_texts)
+        self.assertNotIn("Phân tích nhóm nợ", button_texts)
         tab.close()
 
     def test_dashboard_chart_dataset_balance_trend(self) -> None:

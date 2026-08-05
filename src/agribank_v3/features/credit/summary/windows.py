@@ -6,12 +6,14 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import getpass
 from pathlib import Path
+import re
 from typing import Callable
 
 from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QComboBox,
     QDateEdit,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -62,7 +65,10 @@ from agribank_v3.features.credit.summary.officer_history.widgets import MultiLin
 from agribank_v3.features.credit.summary.reports import export_rows
 from agribank_v3.features.credit.summary.reports import export_credit_limit_view_report
 from agribank_v3.features.credit.summary.repository import NIM_OFFICER_DISPLAY_SQL, SummaryRepository
+from agribank_v3.features.credit.summary.ln01_import_dialog import ask_ln01_duplicate_decision
 from agribank_v3.features.credit.summary.services import (
+    Ln01DuplicateDecision,
+    Ln01ImportCoordinator,
     compare_loan_balances,
     import_credit_limit_file,
     import_nim_dn,
@@ -114,7 +120,7 @@ LOAN_COMPARE_FIELD_ALIASES = {
 }
 
 CREDIT_LIMIT_FIELD_ORDER = (
-    "batch_name",
+    "period",
     "customer_code",
     "customer_name",
     "contract_number",
@@ -128,7 +134,7 @@ CREDIT_LIMIT_FIELD_ORDER = (
     "note",
 )
 CREDIT_LIMIT_HEADERS = {
-    "batch_name": "Batch",
+    "period": "Kỳ",
     "customer_code": "Mã KH",
     "customer_name": "Tên KH",
     "contract_number": "Số HĐTD",
@@ -145,7 +151,7 @@ CREDIT_LIMIT_MONEY_FIELDS = {"approved_amount", "outstanding_balance"}
 CREDIT_LIMIT_DATE_FIELDS = {"approved_date", "expiry_date", "reference_date"}
 CREDIT_LIMIT_INTEGER_FIELDS = {"days_to_expiry", "source_row_count", "warn_days"}
 CREDIT_LIMIT_DEFAULT_WIDTHS = {
-    "batch_name": 145,
+    "period": 78,
     "customer_code": 82,
     "customer_name": 160,
     "contract_number": 100,
@@ -614,12 +620,15 @@ class SummaryDataTab(QWidget):
         self._add_filters(filter_row)
         layout.addLayout(filter_row)
 
-        action_row = QHBoxLayout()
+        action_area = QWidget()
+        action_area.setObjectName("SummaryDataActionArea")
+        action_row = FlowLayout(action_area, spacing=8)
         self._add_action_buttons(action_row)
         self.progress = QProgressBar()
         self.progress.setVisible(False)
-        action_row.addWidget(self.progress, stretch=1)
-        layout.addLayout(action_row)
+        self.progress.setMinimumWidth(220)
+        action_row.addWidget(self.progress)
+        layout.addWidget(action_area)
 
         self.table = QTableWidget()
         self.table.setObjectName("SummaryDataTable")
@@ -1315,13 +1324,6 @@ class NimTab(SummaryDataTab):
         dashboard_button = _secondary_button("Mở Dashboard")
         dashboard_button.clicked.connect(self.open_dashboard)
         row.addWidget(dashboard_button)
-        if self.data_type == SummaryDataType.NIM_DN:
-            customer_button = _secondary_button("Dữ liệu khách hàng")
-            customer_button.clicked.connect(self.open_customer_management)
-            row.addWidget(customer_button)
-            debt_group_button = _secondary_button("Phân tích nhóm nợ")
-            debt_group_button.clicked.connect(self.open_debt_group_analysis)
-            row.addWidget(debt_group_button)
 
     def eventFilter(self, watched, event) -> bool:
         if watched == self.table.viewport() and event.type() == QEvent.Type.Resize:
@@ -2126,9 +2128,7 @@ class CreditLimitTab(SummaryDataTab):
         if file_batches:
             batch_items = [
                 (
-                    f"{batch.imported_at:%d/%m/%Y %H:%M:%S} - {batch.source_file_name} ({batch.accepted_row_count:,} cảnh báo)"
-                    if batch.imported_at
-                    else f"{batch.batch_name} ({batch.accepted_row_count:,} cảnh báo)",
+                    _credit_limit_batch_combo_label(batch),
                     batch.batch_id,
                 )
                 for batch in file_batches
@@ -2138,7 +2138,14 @@ class CreditLimitTab(SummaryDataTab):
                 (f"{batch.id} - {batch.period} - {batch.file_name}", batch.id)
                 for batch in self.repository.list_batches(SummaryDataType.CREDIT_LIMIT)
             ]
-        _set_combo_items(self.batch_filter, batch_items, "Tất cả Batch", current_batch)
+        _set_combo_items(self.batch_filter, batch_items, "Tất cả kỳ", current_batch)
+        if file_batches:
+            for index, batch in enumerate(file_batches, start=1):
+                self.batch_filter.setItemData(
+                    index,
+                    _credit_limit_batch_tooltip(batch),
+                    Qt.ItemDataRole.ToolTipRole,
+                )
         self._pending_batch_id = ""
         batch_id = _batch_key(self.batch_filter)
         reference = self._reference_date()
@@ -2195,34 +2202,43 @@ class CreditLimitTab(SummaryDataTab):
             return
         qdate = self.reference_date_input.date()
         reference = date(qdate.year(), qdate.month(), qdate.day())
-        duplicate_policy = "error"
-        try:
-            duplicates = self.repository.credit_limit_duplicate_batches(Path(path))
-        except Exception as exc:
-            QMessageBox.warning(self, self.title, str(exc))
-            return
-        if duplicates:
-            choice = self._choose_duplicate_action(duplicates[0])
-            if choice == "open":
-                self._pending_batch_id = duplicates[0].batch_id
-                self.page = 1
-                self.reload()
-                return
-            if choice == "new":
-                duplicate_policy = "new"
-            else:
-                return
-        self.import_button.setEnabled(False)
-        self.run_background(
+        default_period = parse_period_from_filename(Path(path).name)
+        if not re.fullmatch(r"\d{4}-\d{2}", default_period):
+            default_period = ""
+        period, ok = QInputDialog.getText(
+            self,
             self.title,
-            lambda progress: import_credit_limit_file(
-                self.repository,
+            f"File nguồn: {Path(path).name}\nKỳ dữ liệu báo cáo (YYYY-MM):",
+            text=default_period,
+        )
+        if not ok:
+            return
+        period = str(period or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}", period):
+            QMessageBox.warning(self, self.title, "Kỳ dữ liệu phải có dạng YYYY-MM.")
+            return
+        try:
+            coordinator = Ln01ImportCoordinator(self.repository)
+            prepared = coordinator.prepare_import(
                 Path(path),
+                period=period,
                 min_limit=self.min_limit_input.value(),
                 warn_days=self.warn_days_input.value(),
                 reference_date=reference,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, self.title, str(exc))
+            return
+        decision = ask_ln01_duplicate_decision(self, prepared.context)
+        if decision == Ln01DuplicateDecision.CANCEL:
+            return
+        self.import_button.setEnabled(False)
+        self.run_background(
+            self.title,
+            lambda progress: coordinator.execute_prepared_import(
+                prepared,
                 export_path=_vba_output_path("DuLieu", "BaoCaoHanMucHetHan.xlsx"),
-                duplicate_policy=duplicate_policy,
+                duplicate_decision=decision,
                 progress=progress,
             ),
             self._import_finished,
@@ -2286,6 +2302,8 @@ class CreditLimitTab(SummaryDataTab):
             for column_index, field in enumerate(CREDIT_LIMIT_FIELD_ORDER):
                 item = QTableWidgetItem(self._display_value(field, _credit_limit_row_value(row, field)))
                 item.setTextAlignment(self._display_alignment(field))
+                if field == "period" and isinstance(row, Mapping):
+                    item.setToolTip(str(row.get("batch_file_name") or row.get("batch_name") or ""))
                 self.table.setItem(row_index, column_index, item)
         QTimer.singleShot(0, self._restore_column_widths)
 
@@ -2372,6 +2390,7 @@ class CreditLimitTab(SummaryDataTab):
         self.import_button.setEnabled(True)
         batch_id = getattr(result, "batch_id", "")
         self._pending_batch_id = str(batch_id or "")
+        _reload_open_report_summary_windows()
         QMessageBox.information(self, self.title, _result_message(result, "Import xong."))
 
     def _import_failed(self, exc: Exception) -> None:
@@ -2468,8 +2487,22 @@ class CreditLimitMaintenanceDialog(QDialog):
         layout.addWidget(self.status_label)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(("Batch", "File", "Ngày import", "Cảnh báo", "Dung lượng", "Nguồn", "Trạng thái"))
+        self.table.setColumnCount(11)
+        self.table.setHorizontalHeaderLabels(
+            (
+                "Kỳ",
+                "Chi nhánh",
+                "File nguồn",
+                "Ngày import",
+                "Số HĐTD",
+                "Tổng hạn mức",
+                "Tổng dư nợ",
+                "Trạng thái active/history",
+                "Đường dẫn file",
+                "Dung lượng",
+                "Trạng thái",
+            )
+        )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         header = self.table.horizontalHeader()
@@ -2484,15 +2517,35 @@ class CreditLimitMaintenanceDialog(QDialog):
         row = QHBoxLayout()
         refresh_button = _secondary_button("Làm mới")
         refresh_button.clicked.connect(self.reload)
+        assign_period_button = _secondary_button("Gán kỳ")
+        assign_period_button.clicked.connect(self.assign_selected_period)
+        activate_button = _secondary_button("Chọn làm chính thức")
+        activate_button.clicked.connect(self.activate_selected_batch)
+        history_button = _secondary_button("Xem lịch sử")
+        history_button.clicked.connect(self.view_selected_history)
         migrate_button = _secondary_button("Chuyển dữ liệu legacy")
         migrate_button.clicked.connect(self.migrate_legacy)
-        delete_button = _danger_button("Xóa batch đã chọn")
+        delete_button = _danger_button("Xóa kỳ đã chọn")
         delete_button.clicked.connect(self.delete_selected_batch)
+        backup_button = _secondary_button("Sao lưu")
+        backup_button.clicked.connect(self.backup_data)
+        restore_button = _secondary_button("Khôi phục")
+        restore_button.clicked.connect(self.restore_data)
         open_folder_button = _secondary_button("Mở thư mục HMHETHAN")
         open_folder_button.clicked.connect(self.open_storage_folder)
         close_button = _primary_button("Đóng")
         close_button.clicked.connect(self.accept)
-        for button in (refresh_button, migrate_button, delete_button, open_folder_button):
+        for button in (
+            refresh_button,
+            assign_period_button,
+            activate_button,
+            history_button,
+            migrate_button,
+            delete_button,
+            backup_button,
+            restore_button,
+            open_folder_button,
+        ):
             row.addWidget(button)
         row.addStretch()
         row.addWidget(close_button)
@@ -2512,23 +2565,35 @@ class CreditLimitMaintenanceDialog(QDialog):
         )
         self.table.setRowCount(len(status.batches))
         for row_index, batch in enumerate(status.batches):
+            total_limit = total_balance = 0.0
+            try:
+                batch_rows = self.repository.credit_limit_store._rows_from_file(batch.file_path)
+                total_limit = sum(float(row.approved_amount or 0) for row in batch_rows)
+                total_balance = sum(float(row.outstanding_balance or 0) for row in batch_rows)
+            except Exception:
+                pass
             values = (
-                batch.batch_name,
-                batch.file_name,
+                batch.period or ("Thiếu kỳ" if batch.period_missing else ""),
+                batch.branch_code,
+                batch.source_file_name,
                 batch.imported_at.strftime("%d/%m/%Y %H:%M:%S") if batch.imported_at else "",
                 _format_integer_vn(batch.accepted_row_count),
+                _format_money_vn(total_limit),
+                _format_money_vn(total_balance),
+                "Active" if batch.is_active else "History",
+                str(batch.file_path),
                 _format_size(batch.file_size),
-                batch.source_file_name,
                 batch.status,
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, batch.batch_id)
-                if column in {3, 4}:
+                    item.setToolTip(batch.file_name)
+                if column in {4, 5, 6, 9}:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row_index, column, item)
-        for index, width in enumerate((210, 220, 135, 85, 90, 150, 85)):
+        for index, width in enumerate((80, 70, 170, 135, 80, 110, 110, 130, 220, 90, 85)):
             self.table.setColumnWidth(index, width)
 
     def selected_batch_id(self) -> str:
@@ -2537,6 +2602,134 @@ class CreditLimitMaintenanceDialog(QDialog):
             return ""
         item = self.table.item(row, 0)
         return str(item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
+
+    def selected_batch_metadata(self):
+        batch_id = self.selected_batch_id()
+        if not batch_id:
+            return None
+        return self.repository.credit_limit_store.get_batch(batch_id)
+
+    def assign_selected_period(self) -> None:
+        batch = self.selected_batch_metadata()
+        if batch is None:
+            QMessageBox.information(self, self.windowTitle(), "Chưa chọn batch cần gán kỳ.")
+            return
+        period, ok = QInputDialog.getText(
+            self,
+            "Gán kỳ batch HMHETHAN",
+            "Kỳ dữ liệu (YYYY-MM):",
+            text=batch.period,
+        )
+        if not ok:
+            return
+        period = str(period or "").strip()
+        branch_code, ok = QInputDialog.getText(
+            self,
+            "Gán kỳ batch HMHETHAN",
+            "Mã chi nhánh:",
+            text=batch.branch_code,
+        )
+        if not ok:
+            return
+        try:
+            updated = self.repository.credit_limit_store.assign_batch_period(
+                batch.batch_id,
+                period=period,
+                branch_code=str(branch_code or "").strip(),
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
+            return
+        QMessageBox.information(self, self.windowTitle(), f"Đã gán kỳ {updated.period} cho {updated.file_name}.")
+        self.reload()
+
+    def activate_selected_batch(self) -> None:
+        batch = self.selected_batch_metadata()
+        if batch is None:
+            QMessageBox.information(self, self.windowTitle(), "Chưa chọn batch cần chọn làm chính thức.")
+            return
+        if QMessageBox.question(
+            self,
+            self.windowTitle(),
+            (
+                f"Chọn {batch.file_name} làm batch chính thức cho kỳ {batch.period}?\n\n"
+                "Các batch active khác cùng kỳ/chi nhánh sẽ được chuyển vào History."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result = self.repository.credit_limit_store.activate_batch(batch.batch_id)
+        except Exception as exc:
+            QMessageBox.warning(self, self.windowTitle(), str(exc))
+            return
+        QMessageBox.information(
+            self,
+            self.windowTitle(),
+            f"Đã chọn làm batch chính thức. Đã chuyển History: {len(result['archived'])}.",
+        )
+        self.reload()
+
+    def view_selected_history(self) -> None:
+        batch = self.selected_batch_metadata()
+        if batch is None:
+            QMessageBox.information(self, self.windowTitle(), "Chưa chọn kỳ cần xem lịch sử.")
+            return
+        history = self.repository.credit_limit_store.list_history_batches(
+            period=batch.period,
+            branch_code=batch.branch_code,
+            office_code=batch.office_code,
+        )
+        if not history:
+            QMessageBox.information(self, self.windowTitle(), "Kỳ này chưa có file lịch sử trong History.")
+            return
+        lines = [
+            f"{item.period} | {item.branch_code} | {item.imported_at:%d/%m/%Y %H:%M:%S} | {item.file_name}"
+            if item.imported_at
+            else f"{item.period} | {item.branch_code} | {item.file_name}"
+            for item in history
+        ]
+        QMessageBox.information(self, self.windowTitle(), "\n".join(lines[:30]))
+
+    def backup_data(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Sao lưu dữ liệu HMHETHAN",
+            "HMHETHAN-backup.zip",
+            "Backup (*.zip)",
+        )
+        if not path:
+            return
+        self._run_background(
+            lambda progress: self.repository.backup_credit_limit_storage(Path(path), progress=progress),
+            lambda output: QMessageBox.information(self, self.windowTitle(), f"Đã sao lưu: {output}"),
+        )
+
+    def restore_data(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Khôi phục dữ liệu HMHETHAN",
+            "",
+            "Backup (*.zip)",
+        )
+        if not path:
+            return
+        self._run_background(
+            lambda progress: self.repository.restore_credit_limit_storage(
+                Path(path),
+                conflict_policy="skip",
+                progress=progress,
+            ),
+            lambda result: QMessageBox.information(
+                self,
+                self.windowTitle(),
+                (
+                    "Đã khôi phục: {restored}; bỏ qua: {skipped}; ghi đè: {overwritten}; "
+                    "không hợp lệ: {invalid}."
+                ).format(**result),
+            ),
+        )
 
     def delete_selected_batch(self) -> None:
         batch_id = self.selected_batch_id()
@@ -2671,6 +2864,33 @@ def _batch_key(combo: QComboBox) -> str | int | None:
         return int(text.split(" - ", 1)[0])
     except ValueError:
         return text
+
+
+def _credit_limit_batch_combo_label(batch: object) -> str:
+    period = str(getattr(batch, "period", "") or getattr(batch, "batch_name", "") or "Không rõ kỳ")
+    branch_code = str(getattr(batch, "branch_code", "") or "").strip()
+    count = int(getattr(batch, "accepted_row_count", 0) or 0)
+    if branch_code:
+        return f"{period} — {branch_code} — {count:,} HĐTD"
+    return f"{period} — {count:,} HĐTD"
+
+
+def _credit_limit_batch_tooltip(batch: object) -> str:
+    imported_at = getattr(batch, "imported_at", None)
+    imported = imported_at.strftime("%d/%m/%Y %H:%M:%S") if imported_at else ""
+    source_sha = str(getattr(batch, "source_file_sha256", "") or "")
+    short_sha = f"{source_sha[:8]}..." if len(source_sha) > 8 else source_sha
+    return "\n".join(
+        (
+            f"Kỳ: {getattr(batch, 'period', '') or 'Không rõ'}",
+            f"Chi nhánh: {getattr(batch, 'branch_code', '') or ''}",
+            f"File nguồn: {getattr(batch, 'source_file_name', '') or ''}",
+            f"Import lúc: {imported}",
+            f"Số HĐTD: {int(getattr(batch, 'accepted_row_count', 0) or 0):,}",
+            f"SHA-256: {short_sha}",
+            f"Batch ID: {getattr(batch, 'batch_id', '') or ''}",
+        )
+    )
 
 
 def _credit_limit_row_value(row: Mapping[str, object] | CreditLimitRow, field: str) -> object:
@@ -2907,6 +3127,12 @@ def _credit_limit_chart_tooltip(payload: tuple[object, ...], segment: str = "") 
         f"Tổng hạn mức: {_format_money_vn(_chart_total_limit(payload))} đồng\n"
         f"Tổng dư nợ: {_format_money_vn(_chart_total_outstanding(payload))} đồng"
     )
+
+
+def _reload_open_report_summary_windows() -> None:
+    for widget in QApplication.topLevelWidgets():
+        if widget.__class__.__name__ == "ReportSummaryWindow" and hasattr(widget, "reload"):
+            widget.reload()
 
 
 def _integer_ticks(max_value: int) -> list[int]:

@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from agribank_v3.features.credit.summary.customer.database import customer_database_path
+from agribank_v3.features.credit.summary.credit_report import credit_database_path
 from agribank_v3.features.credit.summary.database import credit_summary_database_path
 from agribank_v3.settings import AppSettingsDatabase
 from agribank_v3.update.db_migrations import MigrationSpec
@@ -147,6 +148,40 @@ class UpdateManagerTests(unittest.TestCase):
             value = connection.execute("SELECT name FROM customer_data").fetchone()[0]
         self.assertEqual(value, "Du lieu khach hang")
 
+    def test_update_backup_includes_credit_database(self) -> None:
+        credit_path = credit_database_path(self.database_path)
+        with closing(sqlite3.connect(credit_path)) as connection:
+            connection.execute("CREATE TABLE credit_data(id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO credit_data(name) VALUES ('Du lieu bao cao')")
+            connection.commit()
+
+        backup_path = backup_user_databases(
+            self.database,
+            backup_root=self.root / "backups" / "update-credit-test",
+        )
+
+        self.assertTrue((backup_path / "Credit.db").is_file())
+        with closing(sqlite3.connect(backup_path / "Credit.db")) as connection:
+            value = connection.execute("SELECT name FROM credit_data").fetchone()[0]
+        self.assertEqual(value, "Du lieu bao cao")
+
+    def test_update_backup_includes_new_sqlite_database_files(self) -> None:
+        extra_path = self.database_path.parent / "ExtraFeature.db"
+        with closing(sqlite3.connect(extra_path)) as connection:
+            connection.execute("CREATE TABLE extra_data(id INTEGER PRIMARY KEY, name TEXT)")
+            connection.execute("INSERT INTO extra_data(name) VALUES ('Du lieu database moi')")
+            connection.commit()
+
+        backup_path = backup_user_databases(
+            self.database,
+            backup_root=self.root / "backups" / "update-extra-db-test",
+        )
+
+        self.assertTrue((backup_path / "ExtraFeature.db").is_file())
+        with closing(sqlite3.connect(backup_path / "ExtraFeature.db")) as connection:
+            value = connection.execute("SELECT name FROM extra_data").fetchone()[0]
+        self.assertEqual(value, "Du lieu database moi")
+
     def test_update_backup_includes_hmhethan_directory(self) -> None:
         store_file = self.database_path.parent / "HMHETHAN" / "HMHETHAN_20240101.xlsx"
         store_file.parent.mkdir(parents=True)
@@ -251,21 +286,25 @@ class UpdateManagerTests(unittest.TestCase):
         payload = self.root / "payload"
         package_db = payload / "data" / "DuLieuV3.db"
         package_customer_db = payload / "data" / "Customer.db"
+        package_credit_db = payload / "data" / "Credit.db"
         package_hmhethan = payload / "data" / "HMHETHAN" / "package.xlsx"
         package_db.parent.mkdir(parents=True)
         package_hmhethan.parent.mkdir(parents=True)
         (payload / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
         package_db.write_text("empty package database", encoding="utf-8")
         package_customer_db.write_text("empty package customer database", encoding="utf-8")
+        package_credit_db.write_text("empty package credit database", encoding="utf-8")
         package_hmhethan.write_text("empty package batch", encoding="utf-8")
         target = self.root / "target"
         user_db = target / "data" / "DuLieuV3.db"
         user_customer_db = target / "data" / "Customer.db"
+        user_credit_db = target / "data" / "Credit.db"
         user_hmhethan = target / "data" / "HMHETHAN" / "user.xlsx"
         user_db.parent.mkdir(parents=True)
         user_hmhethan.parent.mkdir(parents=True)
         user_db.write_text("real user database", encoding="utf-8")
         user_customer_db.write_text("real user customer database", encoding="utf-8")
+        user_credit_db.write_text("real user credit database", encoding="utf-8")
         user_hmhethan.write_text("real user batch", encoding="utf-8")
 
         copied, skipped = install_staged_files(payload, target)
@@ -274,10 +313,13 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertIn(Path("data") / "DuLieuV3.db", skipped)
         self.assertNotIn(Path("data") / "Customer.db", copied)
         self.assertIn(Path("data") / "Customer.db", skipped)
+        self.assertNotIn(Path("data") / "Credit.db", copied)
+        self.assertIn(Path("data") / "Credit.db", skipped)
         self.assertNotIn(Path("data") / "HMHETHAN" / "package.xlsx", copied)
         self.assertIn(Path("data") / "HMHETHAN" / "package.xlsx", skipped)
         self.assertEqual(user_db.read_text(encoding="utf-8"), "real user database")
         self.assertEqual(user_customer_db.read_text(encoding="utf-8"), "real user customer database")
+        self.assertEqual(user_credit_db.read_text(encoding="utf-8"), "real user credit database")
         self.assertEqual(user_hmhethan.read_text(encoding="utf-8"), "real user batch")
 
     def test_delta_update_requires_base_version(self) -> None:

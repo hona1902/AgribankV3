@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QFileDialog,
     QComboBox,
     QCheckBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QTabWidget,
@@ -31,12 +33,18 @@ from PySide6.QtWidgets import (
 )
 
 from agribank_v3.features.credit.tovayvon.models import (
+    ASSOCIATION_FARMERS_UNION,
+    ASSOCIATION_OTHER,
+    ASSOCIATION_TYPE_LABELS,
+    ASSOCIATION_WOMENS_UNION,
     CreditGroup,
     CreditGroupCommissionRate,
     CreditGroupCommissionRule,
     CreditCommissionRuleSettings,
     DATA_TVV_ATTR_TO_HEADER,
     DATA_TVV_FIELD_LABELS,
+    association_type_display,
+    normalize_association_type,
 )
 from agribank_v3.features.credit.tovayvon.excel_templates import (
     create_data_tvv_template,
@@ -143,7 +151,7 @@ class CreditGroupManagementPlaceholderDialog(QDialog):
         layout.addWidget(action_bar)
 
         self.tabs = QTabWidget()
-        self.groups_table = QTableWidget(0, 7)
+        self.groups_table = QTableWidget(0, 8)
         self.tabs.addTab(self._groups_tab(), "Danh sách tổ vay vốn")
         self.tabs.addTab(self._commission_tab(), "Tỷ lệ hoa hồng")
         layout.addWidget(self.tabs, stretch=1)
@@ -232,13 +240,20 @@ class CreditGroupManagementPlaceholderDialog(QDialog):
         clear_search_button.setObjectName("SecondaryButton")
         clear_search_button.clicked.connect(self._clear_group_filter)
         search_layout.addWidget(clear_search_button)
+        self.association_filter = QComboBox()
+        self.association_filter.addItem("Tất cả tổ chức Hội", "")
+        self.association_filter.addItem(ASSOCIATION_TYPE_LABELS[ASSOCIATION_FARMERS_UNION], ASSOCIATION_FARMERS_UNION)
+        self.association_filter.addItem(ASSOCIATION_TYPE_LABELS[ASSOCIATION_WOMENS_UNION], ASSOCIATION_WOMENS_UNION)
+        self.association_filter.addItem(ASSOCIATION_TYPE_LABELS[ASSOCIATION_OTHER], ASSOCIATION_OTHER)
+        self.association_filter.currentIndexChanged.connect(self._apply_group_filter)
+        search_layout.addWidget(self.association_filter)
         self.show_inactive_check = QCheckBox("Hiển thị tổ đã ngừng sử dụng")
         self.show_inactive_check.toggled.connect(self._load_groups)
         search_layout.addWidget(self.show_inactive_check)
         layout.addLayout(search_layout)
 
         self.groups_table.setHorizontalHeaderLabels(
-            ["STT", "MaTo", "Tên tổ", "Tổ trưởng", "Số điện thoại", "Xã", "Trạng thái"]
+            ["STT", "MaTo", "Tên tổ", "Tổ trưởng", "Số điện thoại", "Xã", "Loại tổ chức Hội", "Trạng thái"]
         )
         self.groups_table.horizontalHeaderItem(0).setTextAlignment(
             Qt.AlignmentFlag.AlignCenter
@@ -626,6 +641,7 @@ class CreditGroupManagementPlaceholderDialog(QDialog):
                 group.ten_to_truong,
                 group.so_dien_thoai,
                 group.xa,
+                association_type_display(group.association_type, group.association_other_name),
                 "Đang sử dụng" if group.active else "Ngừng sử dụng",
             )
             for column, value in enumerate(values):
@@ -788,14 +804,15 @@ class CreditGroupManagementPlaceholderDialog(QDialog):
 
     def _apply_group_filter(self) -> None:
         keyword = self.search_edit.text().strip().casefold()
-        if not keyword:
-            self.filtered_groups = list(self.groups)
-        else:
-            self.filtered_groups = [
-                group
-                for group in self.groups
-                if self._group_matches_keyword(group, keyword)
-            ]
+        association_type = ""
+        if hasattr(self, "association_filter"):
+            association_type = str(self.association_filter.currentData() or "")
+        self.filtered_groups = [
+            group
+            for group in self.groups
+            if (not keyword or self._group_matches_keyword(group, keyword))
+            and (not association_type or group.association_type == association_type)
+        ]
         self._populate_groups_table()
 
     def _clear_group_filter(self) -> None:
@@ -813,6 +830,7 @@ class CreditGroupManagementPlaceholderDialog(QDialog):
             group.dia_chi,
             group.to_hoi,
             group.to_chuc,
+            association_type_display(group.association_type, group.association_other_name),
         )
         return any(keyword in str(value).casefold() for value in fields)
 
@@ -1889,6 +1907,10 @@ class CreditGroupEditDialog(QDialog):
         self.commission_inputs: dict[str, QLineEdit] = {}
         self.rule_inputs: dict[str, QLineEdit] = {}
         self.use_custom_rule_check: QCheckBox | None = None
+        self.association_button_group = QButtonGroup(self)
+        self.association_button_group.setExclusive(True)
+        self.association_type_buttons: dict[str, QRadioButton] = {}
+        self.association_other_input = QLineEdit()
         self.saved_ma_to = ""
         title_text = (
             "Thêm mới tổ vay vốn" if mode == "add" else "Sửa thông tin tổ vay vốn"
@@ -1935,6 +1957,8 @@ class CreditGroupEditDialog(QDialog):
                 self.inputs[attr] = editor
                 grid.addWidget(label, row_index, 0)
                 grid.addWidget(editor, row_index, 1)
+            if group_title == "Tổ hội / tổ chức":
+                self._add_association_type_controls(grid, len(fields))
             body_layout.addWidget(box)
         body_layout.addStretch()
         info_scroll = QScrollArea()
@@ -1983,6 +2007,41 @@ class CreditGroupEditDialog(QDialog):
             )
         if mode == "edit":
             self.inputs["ma_to"].setReadOnly(True)
+
+    def _add_association_type_controls(self, grid: QGridLayout, start_row: int) -> None:
+        label = QLabel("Loại tổ chức Hội")
+        label.setMinimumWidth(200)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        radios = QWidget()
+        radio_layout = QHBoxLayout(radios)
+        radio_layout.setContentsMargins(0, 0, 0, 0)
+        radio_layout.setSpacing(14)
+        for type_code in (
+            ASSOCIATION_FARMERS_UNION,
+            ASSOCIATION_WOMENS_UNION,
+            ASSOCIATION_OTHER,
+        ):
+            button = QRadioButton(ASSOCIATION_TYPE_LABELS[type_code])
+            button.setProperty("association_type", type_code)
+            self.association_button_group.addButton(button)
+            self.association_type_buttons[type_code] = button
+            radio_layout.addWidget(button)
+        radio_layout.addStretch()
+        grid.addWidget(label, start_row, 0)
+        grid.addWidget(radios, start_row, 1)
+
+        other_label = QLabel("Tên tổ chức khác")
+        other_label.setMinimumWidth(200)
+        other_label.setWordWrap(True)
+        other_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.association_other_input.setObjectName("TextInput")
+        self.association_other_input.setMinimumWidth(500)
+        self.association_other_input.setPlaceholderText("Ví dụ: Hội Cựu chiến binh")
+        self.association_other_input.setEnabled(False)
+        self.association_type_buttons[ASSOCIATION_OTHER].toggled.connect(self._toggle_association_other_input)
+        grid.addWidget(other_label, start_row + 1, 0)
+        grid.addWidget(self.association_other_input, start_row + 1, 1)
 
     def _commission_tab(self) -> QWidget:
         page = QScrollArea()
@@ -2137,9 +2196,23 @@ class CreditGroupEditDialog(QDialog):
             edit.setToolTip(placeholder)
         return edit
 
+    def _toggle_association_other_input(self, checked: bool) -> None:
+        self.association_other_input.setEnabled(checked)
+        if not checked:
+            self.association_other_input.clear()
+
     def load_group_to_form(self, group: CreditGroup) -> None:
         for attr, editor in self.inputs.items():
             self._set_field_text(editor, getattr(group, attr))
+        try:
+            association_type = normalize_association_type(group.association_type)
+        except ValueError:
+            association_type = ASSOCIATION_OTHER
+        button = self.association_type_buttons.get(association_type)
+        if button is not None:
+            button.setChecked(True)
+        self.association_other_input.setText(group.association_other_name)
+        self._toggle_association_other_input(association_type == ASSOCIATION_OTHER)
 
     def load_commission_to_form(self, ma_to: str) -> None:
         self._set_commission_inputs(self.repository.get_or_create_commission_rate(ma_to))
@@ -2209,7 +2282,14 @@ class CreditGroupEditDialog(QDialog):
         }
         stt_text = values.pop("stt", "")
         stt = int(stt_text) if stt_text else 0
-        return CreditGroup(stt=stt, **values)
+        association_type = self._selected_association_type()
+        association_other_name = self.association_other_input.text().strip() if association_type == ASSOCIATION_OTHER else ""
+        return CreditGroup(
+            stt=stt,
+            association_type=association_type,
+            association_other_name=association_other_name,
+            **values,
+        )
 
     def validate_form_data(self, group: CreditGroup) -> list[str]:
         errors: list[str] = []
@@ -2228,6 +2308,10 @@ class CreditGroupEditDialog(QDialog):
                     errors.append("STT phải lớn hơn 0.")
         if self.mode == "add" and group.ma_to and self.repository.get_group(group.ma_to):
             errors.append("Mã tổ đã tồn tại.")
+        if not group.association_type:
+            errors.append("Vui lòng chọn Loại tổ chức Hội.")
+        elif group.association_type == ASSOCIATION_OTHER and not group.association_other_name.strip():
+            errors.append("Chọn Khác phải nhập Tên tổ chức khác.")
         try:
             rate = self.collect_commission_rate(group.ma_to)
             errors.extend(rate.validate())
@@ -2236,6 +2320,12 @@ class CreditGroupEditDialog(QDialog):
         except CreditGroupRepositoryError as exc:
             errors.append(str(exc))
         return errors
+
+    def _selected_association_type(self) -> str:
+        button = self.association_button_group.checkedButton()
+        if button is None:
+            return ""
+        return str(button.property("association_type") or "")
 
     def apply_default_info(self) -> None:
         defaults = load_default_credit_group_info(self.repository.database_path)

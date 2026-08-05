@@ -16,6 +16,7 @@ import zipfile
 
 from agribank_v3 import __version__
 from agribank_v3.features.credit.summary.customer.database import customer_database_path
+from agribank_v3.features.credit.summary.credit_report import credit_database_path
 from agribank_v3.features.credit.summary.database import credit_summary_database_path
 from agribank_v3.runtime_paths import application_root
 from agribank_v3.settings import AppSettingsDatabase, SettingsDatabaseError
@@ -40,6 +41,7 @@ UPDATE_PATH_PREFERENCE_KEY = "update_path"
 APP_VERSION_PREFERENCE_KEY = "last_successful_update_version"
 DATABASE_FILE_NAMES = {
     "dulieuv3.db",
+    "credit.db",
     "creditsummary.db",
     "customer.db",
     "quiz.db",
@@ -393,29 +395,10 @@ def backup_user_databases(
         else settings_database.database_path.parent / "backups" / "update" / _stamp()
     )
     destination.mkdir(parents=True, exist_ok=True)
-    _backup_sqlite_database(
-        settings_database.database_path,
-        destination / settings_database.database_path.name,
-        required=False,
-    )
-    summary_database_path = credit_summary_database_path(settings_database.database_path)
-    if summary_database_path.is_file():
+    for database_path in _user_sqlite_database_paths(settings_database):
         _backup_sqlite_database(
-            summary_database_path,
-            destination / summary_database_path.name,
-            required=False,
-        )
-    customer_path = customer_database_path(settings_database.database_path)
-    if customer_path.is_file():
-        _backup_sqlite_database(
-            customer_path,
-            destination / customer_path.name,
-            required=False,
-        )
-    if settings_database.quiz_database_path.is_file():
-        _backup_sqlite_database(
-            settings_database.quiz_database_path,
-            destination / settings_database.quiz_database_path.name,
+            database_path,
+            destination / database_path.name,
             required=False,
         )
     _backup_directory(
@@ -767,6 +750,39 @@ def _backup_sqlite_database(source: Path, destination: Path, *, required: bool) 
         raise UpdateError(f"Không thể sao lưu database {source.name}: {exc}") from exc
     finally:
         temporary_destination.unlink(missing_ok=True)
+
+
+def _user_sqlite_database_paths(
+    settings_database: AppSettingsDatabase,
+) -> tuple[Path, ...]:
+    data_root = settings_database.database_path.parent
+    known_paths = (
+        settings_database.database_path,
+        credit_summary_database_path(settings_database.database_path),
+        customer_database_path(settings_database.database_path),
+        credit_database_path(settings_database.database_path),
+        settings_database.quiz_database_path,
+    )
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for path in known_paths:
+        resolved = Path(path).resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        result.append(Path(path))
+    if data_root.is_dir():
+        for path in sorted(data_root.iterdir(), key=lambda item: item.name.casefold()):
+            if not path.is_file():
+                continue
+            if path.suffix.casefold() not in {".db", ".sqlite", ".sqlite3"}:
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            result.append(path)
+    return tuple(result)
 
 
 def _backup_directory(source: Path, destination: Path) -> None:

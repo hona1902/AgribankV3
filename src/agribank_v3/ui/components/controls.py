@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QCompleter,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionComboBox,
     QStyledItemDelegate,
     QWidget,
 )
@@ -44,6 +46,10 @@ QAbstractItemView::indicator {
 """
 
 BUTTON_SAMPLE_TEXT = "Áp dụng cập nhật Đồng ý Nhập dữ liệu g p q y ụ ạ ặ ậ ệ ị ọ ộ ợ ự"
+BUTTON_HORIZONTAL_PADDING = 42
+COMBO_TEXT_PADDING = 18
+COMBO_CLEAR_BUTTON_WIDTH = 24
+COMBO_POPUP_PADDING = 92
 
 
 def recommended_control_height(
@@ -62,8 +68,45 @@ def make_button_control(button: QPushButton) -> QPushButton:
     height = recommended_control_height(button)
     button.setMinimumHeight(height)
     button.setMaximumHeight(16777215)
+    if button.text():
+        button.setMinimumWidth(max(button.minimumWidth(), recommended_button_width(button)))
     button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     return button
+
+
+def recommended_button_width(
+    button: QPushButton,
+    *,
+    horizontal_padding: int = BUTTON_HORIZONTAL_PADDING,
+    icon_spacing: int = 6,
+) -> int:
+    metrics = QFontMetrics(button.font())
+    icon_width = 0
+    if not button.icon().isNull():
+        icon_width = button.iconSize().width() + int(icon_spacing)
+    return max(1, metrics.horizontalAdvance(button.text()) + icon_width + int(horizontal_padding))
+
+
+class AgribankActionButton(QPushButton):
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        self._metrics_enabled = False
+        super().__init__(text, parent)
+        self._metrics_enabled = True
+        make_button_control(self)
+
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        if getattr(self, "_metrics_enabled", False):
+            make_button_control(self)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.FontChange,
+            QEvent.Type.ApplicationFontChange,
+            QEvent.Type.StyleChange,
+        } and getattr(self, "_metrics_enabled", False):
+            make_button_control(self)
 
 
 def make_compact_control(widget: QWidget) -> QWidget:
@@ -74,19 +117,19 @@ def make_compact_control(widget: QWidget) -> QWidget:
 
 
 def primary_button(text: str) -> QPushButton:
-    button = QPushButton(text)
+    button = AgribankActionButton(text)
     button.setObjectName("PrimaryButton")
     return make_button_control(button)
 
 
 def secondary_button(text: str) -> QPushButton:
-    button = QPushButton(text)
+    button = AgribankActionButton(text)
     button.setObjectName("SecondaryButton")
     return make_button_control(button)
 
 
 def danger_button(text: str) -> QPushButton:
-    button = QPushButton(text)
+    button = AgribankActionButton(text)
     button.setObjectName("DangerButton")
     return make_button_control(button)
 
@@ -137,6 +180,7 @@ def combo_box(
     apply_agribank_combo_popup_style(combo)
     if maximum_width is None:
         combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    configure_filter_combo_width(combo, minimum_width=minimum_width, maximum_width=maximum_width)
     return combo
 
 
@@ -154,7 +198,12 @@ def populate_combo(combo: QComboBox, values: list[str] | tuple[tuple[str, str], 
     _apply_combo_item_tooltips(combo)
     index = combo.findData(current)
     combo.setCurrentIndex(index if index >= 0 else 0)
-    configure_combo_popup_width(combo, minimum_popup_width=max(220, combo.minimumWidth()))
+    configure_filter_combo_width(
+        combo,
+        minimum_width=int(combo.property("filter_minimum_width") or combo.minimumWidth()),
+        maximum_width=_combo_configured_maximum(combo),
+        popup_extra_padding=COMBO_POPUP_PADDING,
+    )
     combo.blockSignals(False)
 
 
@@ -177,7 +226,38 @@ def configure_searchable_combo(combo: QComboBox) -> None:
         completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
     if combo.lineEdit() is not None:
         combo.lineEdit().setClearButtonEnabled(True)
-    combo.currentIndexChanged.connect(lambda index, item=combo: _sync_combo_tooltip(item, index))
+    combo.currentIndexChanged.connect(lambda index, item=combo: (_sync_combo_tooltip(item, index), _show_combo_text_from_start(item)))
+
+
+def configure_filter_combo_width(
+    combo: QComboBox,
+    *,
+    minimum_width: int,
+    maximum_width: int | None = None,
+    popup_extra_padding: int = COMBO_POPUP_PADDING,
+    maximum_screen_ratio: float = 0.90,
+) -> int:
+    combo.setProperty("filter_minimum_width", int(minimum_width))
+    combo.setProperty("filter_maximum_width", "" if maximum_width is None else int(maximum_width))
+    content_width = _combo_content_width(combo)
+    target_width = max(int(minimum_width), content_width + _combo_chrome_width(combo))
+    if maximum_width is None:
+        combo.setMaximumWidth(16777215)
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    else:
+        target_width = min(target_width, max(int(minimum_width), int(maximum_width)))
+        combo.setMaximumWidth(max(int(minimum_width), int(maximum_width)))
+        combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    combo.setMinimumWidth(target_width)
+    combo.setMinimumContentsLength(max(combo.minimumContentsLength(), max(1, min(28, content_width // max(1, combo.fontMetrics().averageCharWidth())))))
+    popup_width = configure_combo_popup_width(
+        combo,
+        minimum_popup_width=max(target_width, content_width + int(popup_extra_padding)),
+        maximum_screen_ratio=maximum_screen_ratio,
+    )
+    _sync_combo_tooltip(combo, combo.currentIndex())
+    _show_combo_text_from_start(combo)
+    return popup_width
 
 
 def configure_combo_popup_width(
@@ -192,9 +272,13 @@ def configure_combo_popup_width(
     longest = 0
     for index in range(combo.count()):
         longest = max(longest, metrics.horizontalAdvance(combo.itemText(index)))
-    width = min(max(int(minimum_popup_width), combo.minimumWidth(), longest + 72), maximum_width)
+        tooltip = combo.itemData(index, Qt.ItemDataRole.ToolTipRole)
+        if tooltip:
+            longest = max(longest, metrics.horizontalAdvance(str(tooltip).splitlines()[0]))
+    width = min(max(int(minimum_popup_width), combo.minimumWidth(), longest + COMBO_POPUP_PADDING), maximum_width)
     combo.view().setMinimumWidth(width)
     combo.view().setTextElideMode(Qt.TextElideMode.ElideNone)
+    combo.view().setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     return width
 
 
@@ -229,7 +313,12 @@ def populate_officer_combo(
     _refresh_combo_completer(combo)
     index = combo.findData(current)
     combo.setCurrentIndex(index if index >= 0 else 0)
-    configure_combo_popup_width(combo, minimum_popup_width=minimum_popup_width)
+    configure_filter_combo_width(
+        combo,
+        minimum_width=int(combo.property("filter_minimum_width") or combo.minimumWidth()),
+        maximum_width=_combo_configured_maximum(combo),
+        popup_extra_padding=max(COMBO_POPUP_PADDING, minimum_popup_width - combo.minimumWidth()),
+    )
     _sync_combo_tooltip(combo, combo.currentIndex())
     combo.blockSignals(False)
 
@@ -261,6 +350,51 @@ def _refresh_combo_completer(combo: QComboBox) -> None:
     completer = combo.completer()
     if completer is not None:
         completer.setModel(combo.model())
+
+
+def _combo_configured_maximum(combo: QComboBox) -> int | None:
+    value = combo.property("filter_maximum_width")
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return combo.maximumWidth()
+
+
+def _combo_content_width(combo: QComboBox) -> int:
+    metrics = QFontMetrics(combo.font())
+    values = [combo.currentText()]
+    if combo.count():
+        values.append(combo.itemText(0))
+    if combo.lineEdit() is not None:
+        values.append(combo.lineEdit().placeholderText())
+    values.extend(combo.itemText(index) for index in range(combo.count()))
+    return max((metrics.horizontalAdvance(str(value or "")) for value in values), default=0)
+
+
+def _combo_chrome_width(combo: QComboBox) -> int:
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)
+    arrow_width = combo.style().subControlRect(
+        QStyle.ComplexControl.CC_ComboBox,
+        option,
+        QStyle.SubControl.SC_ComboBoxArrow,
+        combo,
+    ).width()
+    line_edit = combo.lineEdit() if combo.isEditable() else None
+    clear_enabled = bool(getattr(line_edit, "isClearButtonEnabled", lambda: True)()) if line_edit is not None else False
+    clear_width = COMBO_CLEAR_BUTTON_WIDTH if clear_enabled else 0
+    scrollbar_width = combo.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, combo)
+    return max(54, arrow_width + clear_width + scrollbar_width + COMBO_TEXT_PADDING)
+
+
+def _show_combo_text_from_start(combo: QComboBox) -> None:
+    line_edit = combo.lineEdit() if combo.isEditable() else None
+    if line_edit is None:
+        return
+    line_edit.setCursorPosition(0)
+    line_edit.deselect()
 
 
 def available_screen_geometry(window: QWidget) -> QRect:

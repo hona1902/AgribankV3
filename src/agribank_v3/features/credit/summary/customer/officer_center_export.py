@@ -136,7 +136,7 @@ def export_officer_center_workbook(
     _write_rows(workbook.create_sheet("BienDongCBTD"), _all_movement_rows(repository, filters), OFFICER_MOVEMENT_COLUMNS)
     _write_rows(workbook.create_sheet("SoSanhCBTD"), _all_compare_rows(repository, filters), OFFICER_COMPARE_COLUMNS)
     _write_rows(
-        workbook.create_sheet("ChatLuongDuNo"),
+        workbook.create_sheet("ChatLuongTinDung"),
         _all_officer_rows(repository, filters, sort_by="bad_debt_ratio"),
         OFFICER_LIST_COLUMNS,
     )

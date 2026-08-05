@@ -502,34 +502,107 @@ class CompactToolbar(QWidget):
         self.grid.setHorizontalSpacing(6)
         self.grid.setVerticalSpacing(4)
         self._items: list[QWidget] = []
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._row_count = 0
+        self._last_column_count = 0
+        policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
 
     def addWidget(self, widget: QWidget) -> None:
+        original_policy = widget.sizePolicy()
         make_compact_control(widget)
+        if original_policy.horizontalPolicy() in {
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.MinimumExpanding,
+        }:
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._items.append(widget)
         self._relayout()
+
+    def item_widgets(self) -> tuple[QWidget, ...]:
+        return tuple(self._items)
+
+    def row_count(self) -> int:
+        return self._row_count
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._relayout()
 
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        rows = self._rows_for_width(width)
+        control_height = max((self._control_size(widget).height() for widget in self._items), default=34)
+        return rows * control_height + max(0, rows - 1) * self.grid.verticalSpacing()
+
     def sizeHint(self) -> QSize:
-        rows = 2 if self.width() and self.width() < 760 and len(self._items) > 3 else 1
-        return QSize(600, rows * 34 + max(0, rows - 1) * 4)
+        width = self.width() or 760
+        rows = self._rows_for_width(width)
+        return QSize(760, self.heightForWidth(width))
 
     def _relayout(self) -> None:
         while self.grid.count():
             self.grid.takeAt(0)
+        for column in range(self._last_column_count + 1):
+            self.grid.setColumnStretch(column, 0)
         if not self._items:
+            self._row_count = 0
             return
-        wrap = self.width() and self.width() < 760 and len(self._items) > 3
-        split = 2 if wrap else len(self._items)
-        for index, widget in enumerate(self._items):
-            row = 0 if index < split else 1
-            column = index if index < split else index - split
+        available = self._effective_width()
+        row = 0
+        column = 0
+        used_width = 0
+        spacing = max(0, self.grid.horizontalSpacing())
+        max_column = 0
+        for widget in self._items:
+            widget_width = self._control_size(widget).width()
+            if column > 0 and used_width + spacing + widget_width > available:
+                row += 1
+                column = 0
+                used_width = 0
             self.grid.addWidget(widget, row, column)
-        self.grid.setColumnStretch(len(self._items), 1)
+            if widget.sizePolicy().horizontalPolicy() in {
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.MinimumExpanding,
+            }:
+                self.grid.setColumnStretch(column, 1)
+            used_width += widget_width if column == 0 else spacing + widget_width
+            max_column = max(max_column, column)
+            column += 1
+        self._row_count = row + 1
+        self._last_column_count = max_column + 1
+        self.grid.setColumnStretch(self._last_column_count, 1)
+        self.setMinimumHeight(self.heightForWidth(available))
+        self.setMaximumHeight(16777215)
         self.updateGeometry()
+
+    def _effective_width(self) -> int:
+        width = self.width()
+        if width <= 0 and self.parentWidget() is not None:
+            width = self.parentWidget().width()
+        left, _top, right, _bottom = self.grid.getContentsMargins()
+        return max(1, int((width or 760) - left - right))
+
+    def _rows_for_width(self, width: int) -> int:
+        if not self._items:
+            return 0
+        available = max(1, int(width or 760))
+        row_count = 1
+        used_width = 0
+        spacing = max(0, self.grid.horizontalSpacing())
+        for widget in self._items:
+            widget_width = self._control_size(widget).width()
+            if used_width > 0 and used_width + spacing + widget_width > available:
+                row_count += 1
+                used_width = widget_width
+            else:
+                used_width += widget_width if used_width == 0 else spacing + widget_width
+        return row_count
+
+    def _control_size(self, widget: QWidget) -> QSize:
+        return widget.sizeHint().expandedTo(widget.minimumSizeHint()).expandedTo(widget.minimumSize())
 
 
 class CompactKpiCard(QFrame):
@@ -701,6 +774,12 @@ class ResponsiveKpiGrid(QWidget):
         self.secondary_toolbar.setVisible(has_secondary)
         self.secondary_container.setVisible(has_secondary and expanded)
         self.toggle_secondary_button.setText("Thu gọn chỉ tiêu" if expanded else "Xem thêm chỉ tiêu")
+        self.toggle_secondary_button.setMinimumWidth(
+            max(
+                self.toggle_secondary_button.minimumWidth(),
+                self.toggle_secondary_button.fontMetrics().horizontalAdvance(self.toggle_secondary_button.text()) + 24,
+            )
+        )
 
     def _relayout_cards(self, *, force: bool = False) -> None:
         width = max(1, self.width())
